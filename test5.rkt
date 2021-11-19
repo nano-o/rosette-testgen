@@ -25,6 +25,7 @@
 (struct payment-op (source destination amount))
 
 ; semantics
+; todo: use struct methods
 (define (exec-op op l)
   (destruct op
     [(create-account a b)
@@ -37,7 +38,7 @@
         (cond
           [(equal? acc a) b]
           [else ((ledger-balances l) acc)])))]
-    [(payment-op s d am)
+    [(payment-op s d am) ; todo: check that accounts exist!
      (ledger
       (lambda (acc) ((ledger-accounts l) acc))
       (lambda (acc)
