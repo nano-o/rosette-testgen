@@ -16,7 +16,7 @@
 
 (define-syntax (path-explorer stx)
   (syntax-parse stx
-    [(_ (if-id:id c then-branch else-branch))
+    [(_ (literal c then-branch else-branch)) ; TODO: how to match only the "real" if?
      #`(if (equal? (g) 0)
         (begin
          (assume c)
