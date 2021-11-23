@@ -1,7 +1,7 @@
 #lang rosette
 
 (require racket/generator)
-(require (for-syntax syntax/parse)
+(require (for-syntax syntax/parse racket/string racket/syntax)
          syntax/parse/define)
 
 ; we'll use a generator to produce numbers that encode which branch to take
@@ -24,8 +24,12 @@
 (define-syntax (define-path-explorer stx)
   (syntax-parse stx
     [(_ (name arg0 ...) body)
-     #'(define (name arg0 ...)
-         (path-explorer body))]))
+     (with-syntax ([explorer (format-id #'name "~a-path-explorer" #'name)])
+       #'(begin
+           (define (explorer arg0 ...)
+             (path-explorer body))
+           (define (name arg0 ...)
+             body)))]))
 
 (define (print-branch branch c)
   (println (format "branch ~a; assuming: ~a" branch c)))
@@ -37,7 +41,7 @@
      #'(let ([branch (g 2)])
          (if (equal? branch 0)
              (begin
-               (print-branch branch (syntax->datum #'c)) ; TODO how to make this a macro?
+               (print-branch branch (syntax->datum #'c))
                (assume c)
                (path-explorer then-branch))
              (begin
@@ -56,18 +60,19 @@
 
 (define-symbolic i integer?)
 
-;(define-path-explorer (test-1 i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
+(define-path-explorer (test-1 i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
 
 (define-path-explorer (test-2 i)
   (cond ([(< 0 i) 'strict-pos]
          [(equal? 0 i) 'zero]
          [(< i 0) 'neg])))
 
-;(test-1 0)
+;(test-1 -1)
+;(test-1-path-explorer -1)
 ;(test-2 0)
 
 
 ; this gives us an input that satisfies the path condition given by the generator.
-;(solve (test-1 i))
-(solve (test-2 i))
+;(solve (test-1-path-explorer i))
+;(solve (test-2-path-explorer i))
 
