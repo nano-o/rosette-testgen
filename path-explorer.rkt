@@ -53,9 +53,9 @@
                (print-branch branch (syntax->datum #'(! c)))
                (assume (! c))
                (path-explorer else-branch))))]
-    [(_ (cond ([c0 body0] ... [else ~! (~do (println "matched cond with else")) (~fail "else is not supported") body-else])))
+    [(_ (cond [c0 body0] ... [else ~! (~do (println "matched cond with else")) (~fail "else is not supported") body-else]))
      null]
-    [(_ (cond ([c0 body0] ...)) (~do (println "matched cond")))
+    [(_ (cond [c0 body0] ... (~do (println "matched cond"))))
      (with-syntax ([how-many (length (syntax->list #'(c0 ...)))])
      #'(let ([branch (g how-many)])
          (begin
@@ -73,7 +73,7 @@
 ; TODO the following is messy
     [(_ (lambda (arg0 ...) body) (~do (println "matched lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
     [(_ (λ (arg0 ...) body (~do (println "matched λ")))) #'(lambda (arg0 ...) (path-explorer body))] ; TODO does not seem to work...
-    #;[(_ (x:keyword arg0 ...) (~do (println "matched a keyword"))) #'(x arg0 ...)]
+    [(_ (x:keyword arg0 ...) (~do (println "matched a keyword"))) #'(x arg0 ...)]
     [(_ (quote arg0 ...) (~do (println "matched quote"))) #'(quote arg0 ...)]
     [(_ (x arg0 ...) (~do (println "matched application"))) #'((path-explorer x) (path-explorer arg0) ...)] ; TODO why does this match (cond ...)?
     [(_ x (~do (println "matched lone identifier or constant"))) #'x]))
@@ -82,11 +82,11 @@
 
 ;(define-path-explorer (test-if i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
 
-(define-path-explorer (test-cond i)
-  (cond ([(< 0 i) 'strict-pos]
-         [(equal? 0 i) 'zero]
-         [(> 0 i) 'neg]
-         #;[else 'neg])))
+#;(define-path-explorer (test-cond i)
+  (cond [(< 0 i) 'strict-pos]
+        [(equal? 0 i) 'zero]
+        [(> 0 i) 'neg]
+        #;[else 'neg]))
 
 #;(begin
   (struct s1 (x))
@@ -102,7 +102,7 @@
 ;(test-cond 0)
 
 ; this gives us an input that satisfies the path condition given by the generator.
-(begin
+#;(begin
   (define-symbolic i integer?)
   (solve (test-cond-path-explorer random-gen i)))
 #;(begin
