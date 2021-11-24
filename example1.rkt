@@ -1,7 +1,6 @@
 #lang rosette/safe
 
 (require rosette/lib/destruct)
-(require rackunit)
 
 (define int64? (bitvector 64))
 (define (int64 i)
@@ -25,7 +24,6 @@
 (struct payment-op (source destination amount))
 
 ; semantics
-; todo: use struct methods
 (define (exec-op op l)
   (destruct op
     [(create-account a b)
