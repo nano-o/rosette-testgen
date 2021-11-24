@@ -5,7 +5,8 @@
 
 (provide constant-gen random-gen define-path-explorer)
 
-; we'll use a generator to produce numbers that encode which branch to take
+; we'll use a generator to produce numbers that encode which branch to take.
+; for example, if we encounter a conditional with 3 branches we'll ask the generator for a number between 0 and 2 included.
 (define (constant-gen i)
   (generator (n)
              (let loop ()
@@ -22,7 +23,7 @@
 
 (define-syntax-parameter g (lambda (stx) (raise-syntax-error (syntax-e stx) "can only be used inside define-path-explorer")))
 
-; now let's write a macro that takes a program and creates a Rosette program that follows the path given by the generator
+; now let's write a macro that takes a racket definition and creates a Rosette program that follows the path given by a generator
 (define-syntax (define-path-explorer stx)
   (syntax-parse stx
     [(_ (name arg0 ...) body)
@@ -72,43 +73,8 @@
              (destruct d [pat0 (if (equal? branch i0) (begin (print-branch branch "") (path-explorer body0)) (assume #f))] ...))]))]
 ; TODO the following is messy
     [(_ (lambda (arg0 ...) body) (~do (println "matched lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
-    [(_ (λ (arg0 ...) body (~do (println "matched λ")))) #'(lambda (arg0 ...) (path-explorer body))] ; TODO does not seem to work...
+    [(_ (λ (arg0 ...) body (~do (println "matched λ")))) #'(lambda (arg0 ...) (path-explorer body))]
     [(_ (x:keyword arg0 ...) (~do (println "matched a keyword"))) #'(x arg0 ...)]
     [(_ (quote arg0 ...) (~do (println "matched quote"))) #'(quote arg0 ...)]
-    [(_ (x arg0 ...) (~do (println "matched application"))) #'((path-explorer x) (path-explorer arg0) ...)] ; TODO why does this match (cond ...)?
+    [(_ (x arg0 ...) (~do (println "matched application"))) #'((path-explorer x) (path-explorer arg0) ...)]
     [(_ x (~do (println "matched lone identifier or constant"))) #'x]))
-
-; TODO tests
-
-;(define-path-explorer (test-if i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
-
-#;(define-path-explorer (test-cond i)
-  (cond [(< 0 i) 'strict-pos]
-        [(equal? 0 i) 'zero]
-        [(> 0 i) 'neg]
-        #;[else 'neg]))
-
-#;(begin
-  (struct s1 (x))
-  (struct s2 (y))
-  (define-path-explorer (test-destruct s)
-    (destruct s
-              [(s1 a) "foo"]
-              [(s2 b) "bar"]
-              #;[_ (assert #f)])))
-
-;(test-if -1)
-;(test-if-path-explorer random-gen -1)
-;(test-cond 0)
-
-; this gives us an input that satisfies the path condition given by the generator.
-#;(begin
-  (define-symbolic i integer?)
-  (solve (test-cond-path-explorer random-gen i)))
-#;(begin
-  (define-symbolic i integer?)
-  (solve (test-if-path-explorer (constant-gen 1) i)))
-#;(begin
-  (define-symbolic x boolean?)
-  (define in (if x (s1 0) (s2 0)))
-  (solve (test-destruct-path-explorer random-gen in)))
