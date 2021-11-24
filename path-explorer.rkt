@@ -41,8 +41,8 @@
   (define (from-to i n)
     (if (<= i n) (cons i (from-to (+ i 1) n)) null))
   (syntax-parse stx
-    #:literals (if cond destruct)
-    [(_ (if c then-branch else-branch))
+    #:literals (if cond destruct lambda λ else quote)
+    [(_ (if c then-branch else-branch (~do (println "matched if"))))
      #'(let ([branch (g 2)])
          (if (equal? branch 0)
              (begin
@@ -53,14 +53,16 @@
                (print-branch branch (syntax->datum #'(! c)))
                (assume (! c))
                (path-explorer else-branch))))]
-    [(_ (cond ([c0 body0] ...)))
+    [(_ (cond ([c0 body0] ... [else ~! (~do (println "matched cond with else")) (~fail "else is not supported") body-else])))
+     null]
+    [(_ (cond ([c0 body0] ...)) (~do (println "matched cond")))
      (with-syntax ([how-many (length (syntax->list #'(c0 ...)))])
      #'(let ([branch (g how-many)])
          (begin
            (print-branch branch "")
            (assume (list-ref (list c0 ...) branch))
-           (list-ref (list body0 ...) (path-explorer branch)))))]
-    [(_ (destruct d [pat0 body0] ...))
+           (list-ref (list (path-explorer body0) ...) branch))))]
+    [(_ (destruct d [pat0 body0] ...) (~do (println "matched destruct")))
      (with-syntax*
          ([how-many (length (syntax->list #'(pat0 ...)))]
           [indices (datum->syntax stx (from-to 0 (- (syntax->datum #'how-many) 1)))])
@@ -68,32 +70,41 @@
          [(i0 ...) 
          #'(let ([branch (g how-many)])
              (destruct d [pat0 (if (equal? branch i0) (begin (print-branch branch "") (path-explorer body0)) (assume #f))] ...))]))]
-; TODO is there a "default" mechanism for the following?
-    [(_ (x ...)) #'(x ...)]
-    [(_ x) #'x]))
+; TODO the following is messy
+    [(_ (lambda (arg0 ...) body) (~do (println "matched lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
+    [(_ (λ (arg0 ...) body (~do (println "matched λ")))) #'(lambda (arg0 ...) (path-explorer body))] ; TODO does not seem to work...
+    #;[(_ (x:keyword arg0 ...) (~do (println "matched a keyword"))) #'(x arg0 ...)]
+    [(_ (quote arg0 ...) (~do (println "matched quote"))) #'(quote arg0 ...)]
+    [(_ (x arg0 ...) (~do (println "matched application"))) #'((path-explorer x) (path-explorer arg0) ...)] ; TODO why does this match (cond ...)?
+    [(_ x (~do (println "matched lone identifier or constant"))) #'x]))
 
 ; TODO tests
 
-(define-path-explorer (test-if i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
+;(define-path-explorer (test-if i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
 
 (define-path-explorer (test-cond i)
   (cond ([(< 0 i) 'strict-pos]
          [(equal? 0 i) 'zero]
-         [(< i 0) 'neg])))
+         [(> 0 i) 'neg]
+         #;[else 'neg])))
 
-(struct s1 (x))
-(struct s2 (y))
-(define-path-explorer (test-destruct s)
-  (destruct s
-    [(s1 a) "foo"]
-    [(s2 b) "bar"]
-    #;[_ (assert #f)]))
+#;(begin
+  (struct s1 (x))
+  (struct s2 (y))
+  (define-path-explorer (test-destruct s)
+    (destruct s
+              [(s1 a) "foo"]
+              [(s2 b) "bar"]
+              #;[_ (assert #f)])))
 
 ;(test-if -1)
 ;(test-if-path-explorer random-gen -1)
 ;(test-cond 0)
 
 ; this gives us an input that satisfies the path condition given by the generator.
+(begin
+  (define-symbolic i integer?)
+  (solve (test-cond-path-explorer random-gen i)))
 #;(begin
   (define-symbolic i integer?)
   (solve (test-if-path-explorer (constant-gen 1) i)))
