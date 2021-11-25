@@ -3,7 +3,7 @@
 (require (for-syntax syntax/parse racket/string racket/syntax)
          racket/generator syntax/parse/define rosette/lib/destruct racket/stxparam)
 
-(provide constant-gen random-gen define-path-explorer)
+(provide constant-gen random-gen define-with-path-explorer)
 
 ; we'll use a generator to produce numbers that encode which branch to take.
 ; for example, if we encounter a conditional with 3 branches we'll ask the generator for a number between 0 and 2 included.
@@ -24,7 +24,7 @@
 (define-syntax-parameter g (lambda (stx) (raise-syntax-error (syntax-e stx) "can only be used inside define-path-explorer")))
 
 ; now let's write a macro that takes a racket definition and creates a Rosette program that follows the path given by a generator
-(define-syntax (define-path-explorer stx)
+(define-syntax (define-with-path-explorer stx)
   (syntax-parse stx
     [(_ (name arg0 ...) body)
      (with-syntax ([explorer (format-id #'name "~a-path-explorer" #'name)])

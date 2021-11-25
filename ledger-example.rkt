@@ -24,7 +24,7 @@
 (struct payment-op (source destination amount))
 
 ; semantics
-(define-path-explorer (exec-op op l)
+(define-with-path-explorer (exec-op op l)
   (destruct op
     [(create-account a b)
      (ledger

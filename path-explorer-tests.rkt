@@ -2,14 +2,14 @@
 
 (require rackunit "./path-explorer.rkt" rosette/lib/destruct syntax/macro-testing)
 
-(define-path-explorer (test-if i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
+(define-with-path-explorer (test-if i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
 (define-symbolic i integer?)
 (let ([model (solve (test-if-path-explorer (constant-gen 1) i))])
   (check-equal? (evaluate i model) -1))
 
 (clear-terms!)
 
-(define-path-explorer (test-cond i)
+(define-with-path-explorer (test-cond i)
   (cond [(< 0 i) 'strict-pos]
         [(equal? 0 i) 'zero]
         [(> 0 i) 'neg]))
@@ -18,7 +18,7 @@
 
 (clear-terms!)
 
-(define-path-explorer (test-cond-else i)
+(define-with-path-explorer (test-cond-else i)
   (cond [(< 0 i) 'strict-pos]
         [(equal? 0 i) 'zero]
         [else 'neg]))
@@ -32,7 +32,7 @@
 
 (struct s1 (x))
 (struct s2 (y))
-(define-path-explorer (test-destruct s)
+(define-with-path-explorer (test-destruct s)
   (destruct s
             [(s1 a) "foo"]
             [(s2 b) "bar"]
