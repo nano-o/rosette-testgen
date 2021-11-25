@@ -31,11 +31,11 @@
       (λ (acc)
         (cond
           [(equal? acc a) #t]
-          [(! (equal? acc a)) ((ledger-accounts l) acc)]))
+          [else ((ledger-accounts l) acc)]))
       (λ (acc)
         (cond
           [(equal? acc a) b]
-          [(! (equal? acc a)) ((ledger-balances l) acc)])))]
+          [else ((ledger-balances l) acc)])))]
     [(payment-op s d am) ; TODO check that accounts exist!
      (ledger
       (ledger-accounts l)
@@ -43,7 +43,7 @@
         (cond
           [(equal? acc s) (bvsub ((ledger-balances l) acc) am)]
           [(equal? acc d) (bvadd ((ledger-balances l) acc) am)]
-          [(! (or (equal? acc s) (equal? acc d))) ((ledger-balances l) acc)])))])) ; else is not supported by path explorer
+          [else ((ledger-balances l) acc)])))]))
 
 
 #;(define (check-no-negative-balance src dst amnt acc)

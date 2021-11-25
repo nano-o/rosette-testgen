@@ -54,15 +54,21 @@
                (print-branch branch (syntax->datum #'(! c)))
                (assume (! c))
                (path-explorer else-branch))))]
-    [(_ (cond [c0 body0] ... [else ~! (~do (println "matched cond with else")) (~fail "else is not supported") body-else]))
-     null]
+    [(_ (cond [c0 body0] ... [else ~! (~do (println "matched cond with else")) else-body]))
+     (with-syntax ([how-many (length (syntax->list #'(c0 ... 'else)))]
+                   [else-cond #`(! #,(datum->syntax #'else (cons #'or (syntax->list #'(c0 ...)))))])
+       #'(let ([branch (g how-many)])
+           (begin
+             (print-branch branch "")
+             (assume (list-ref (list c0 ... else-cond) branch))
+             (list-ref (list (path-explorer body0) ... (path-explorer else-body)) branch))))]
     [(_ (cond [c0 body0] ... (~do (println "matched cond"))))
      (with-syntax ([how-many (length (syntax->list #'(c0 ...)))])
-     #'(let ([branch (g how-many)])
-         (begin
-           (print-branch branch "")
-           (assume (list-ref (list c0 ...) branch))
-           (list-ref (list (path-explorer body0) ...) branch))))]
+       #'(let ([branch (g how-many)])
+           (begin
+             (print-branch branch "")
+             (assume (list-ref (list c0 ...) branch))
+             (list-ref (list (path-explorer body0) ...) branch))))]
     [(_ (destruct d [pat0 body0] ...) (~do (println "matched destruct")))
      (with-syntax*
          ([how-many (length (syntax->list #'(pat0 ...)))]

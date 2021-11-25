@@ -12,19 +12,21 @@
 (define-path-explorer (test-cond i)
   (cond [(< 0 i) 'strict-pos]
         [(equal? 0 i) 'zero]
-        [(> 0 i) 'neg]
-        #;[else 'neg]))
+        [(> 0 i) 'neg]))
 (let ([model (solve (test-cond-path-explorer (constant-gen 1) i))])
   (check-equal? (evaluate i model) 0))
 
 (clear-terms!)
 
-; TODO how does phase1-eval work?
-#;(phase1-eval
- (define-path-explorer (test-cond-else i)
-   (cond [(< 0 i) 'strict-pos]
-         [(equal? 0 i) 'zero]
-         [else 'neg])))
+(define-path-explorer (test-cond-else i)
+  (cond [(< 0 i) 'strict-pos]
+        [(equal? 0 i) 'zero]
+        [else 'neg]))
+
+(let ([model (solve (test-cond-else-path-explorer (constant-gen 1) i))])
+  (check-equal? (evaluate i model) 0))
+(let ([model (solve (test-cond-else-path-explorer (constant-gen 2) i))])
+  (check-equal? (< (evaluate i model) 0) #t))
 
 (clear-terms!)
 
