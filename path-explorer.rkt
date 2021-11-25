@@ -14,7 +14,7 @@
                  (yield (modulo i n))
                  (loop)))))
 
-(define random-gen
+(define random-gen ; TODO random is not in rosette/safe; is it okay to use it anyway?
   (generator (n)
              (let loop ()
                (begin
