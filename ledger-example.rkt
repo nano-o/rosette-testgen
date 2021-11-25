@@ -21,29 +21,47 @@
 
 ; operations
 (struct create-account (account starting-balance))
+(define create-account-result-bits 3)
+(define create-account-success (bv 0 (bitvector create-account-result-bits)))
+(define create-account-already-exists (bv -4 (bitvector create-account-result-bits)))
+(define create-account-low-reserve (bv -3 (bitvector create-account-result-bits)))
+(define reserve (int64 1)) ; TODO what is the reserve?
+
 (struct payment-op (source destination amount))
+(define payment-op-result-bits 5)  ; there is a -9 code
+(define payment-success (bv 0 (bitvector payment-op-result-bits)))
 
 ; semantics
+; exec-op return a pair consisting of the new ledger and the result code
 (define-with-path-explorer (exec-op op l)
   (destruct op
     [(create-account a b)
-     (ledger
-      (λ (acc)
-        (cond
-          [(equal? acc a) #t]
-          [else ((ledger-accounts l) acc)]))
-      (λ (acc)
-        (cond
-          [(equal? acc a) b]
-          [else ((ledger-balances l) acc)])))]
+     (cond
+       [((ledger-accounts l) a) ; already exists
+        (cons create-account-already-exists l)]
+       [(bvslt b reserve) ; initial balance below reserve
+        (cons create-account-low-reserve l)]
+       [else
+        (cons
+         create-account-success
+         (ledger
+          (λ (acc)
+            (cond
+              [(equal? acc a) #t]
+              [else ((ledger-accounts l) acc)]))
+          (λ (acc)
+            (cond
+              [(equal? acc a) b]
+              [else ((ledger-balances l) acc)]))))])]
     [(payment-op s d am) ; TODO check that accounts exist!
-     (ledger
-      (ledger-accounts l)
-      (λ (acc)
-        (cond
-          [(equal? acc s) (bvsub ((ledger-balances l) acc) am)]
-          [(equal? acc d) (bvadd ((ledger-balances l) acc) am)]
-          [else ((ledger-balances l) acc)])))]))
+     (cons payment-success
+           (ledger
+            (ledger-accounts l)
+            (λ (acc)
+              (cond
+                [(equal? acc s) (bvsub ((ledger-balances l) acc) am)]
+                [(equal? acc d) (bvadd ((ledger-balances l) acc) am)]
+                [else ((ledger-balances l) acc)]))))]))
 
 
 #;(define (check-no-negative-balance src dst amnt acc)
@@ -65,7 +83,7 @@
   (if b (payment-op s d a) (create-account s a)))
 
 (define (test op accnt)
-  (let ([l (exec-op-path-explorer random-gen op empty-ledger)])
+  (let ([l (cdr (exec-op-path-explorer (list-gen (list 0 2 1)) op empty-ledger))])
     ((ledger-balances l) accnt)))
 
 ;(test (payment-op (accountID 0) (accountID 1) (int64 1)) (accountID 0))

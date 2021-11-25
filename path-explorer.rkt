@@ -3,7 +3,7 @@
 (require (for-syntax syntax/parse racket/string racket/syntax)
          racket/generator syntax/parse/define rosette/lib/destruct racket/stxparam)
 
-(provide constant-gen random-gen define-with-path-explorer)
+(provide constant-gen random-gen bitvector-gen list-gen define-with-path-explorer)
 
 ; we'll use a generator to produce numbers that encode which branch to take.
 ; for example, if we encounter a conditional with 3 branches we'll ask the generator for a number between 0 and 2 included.
@@ -20,6 +20,20 @@
                (begin
                  (yield (random n))
                  (loop)))))
+
+(define (bitvector-gen bv-outputs)
+  (generator (n)
+             (let loop ([bv bv-outputs])
+               (begin
+                 (yield (bitvector->natural (extract (- n 1) 0 bv)))
+                 (loop (rotate-right n bv))))))
+
+(define (list-gen outputs-list)
+  (generator (n)
+             (let loop ([l outputs-list])
+               (begin
+                 (yield (car l))
+                 (loop (append (cdr l) (list (car l))))))))
 
 (define-syntax-parameter g (lambda (stx) (raise-syntax-error (syntax-e stx) "can only be used inside define-path-explorer")))
 

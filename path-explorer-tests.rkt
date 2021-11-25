@@ -1,4 +1,4 @@
-#lang rosette
+#lang rosette/safe
 
 (require rackunit "./path-explorer.rkt" rosette/lib/destruct syntax/macro-testing)
 
