@@ -56,7 +56,8 @@
   (define (from-to i n)
     (if (<= i n) (cons i (from-to (+ i 1) n)) null))
   (syntax-parse stx
-    [(_ ((~literal if) c then-branch else-branch (~do (println "matched if"))))
+    #:track-literals ; per advice here:  https://school.racket-lang.org/2019/plan/tue-aft-lecture.html
+    [(_ ((~literal if) c then-branch else-branch (~do (println "matched if")))) ; TODO should we use ~literal or ~datum?
      #'(let ([branch (g 2)])
          (if (equal? branch 0)
              (begin
