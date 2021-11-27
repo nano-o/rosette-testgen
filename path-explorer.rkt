@@ -35,7 +35,9 @@
                  (yield (car l))
                  (loop (append (cdr l) (list (car l))))))))
 
-(define-syntax-parameter g (lambda (stx) (raise-syntax-error (syntax-e stx) "can only be used inside define-path-explorer"))) ; TODO should this go inside the define-with-path-explorer macro?
+(define-syntax-parameter g (lambda (stx) (raise-syntax-error (syntax-e stx) "can only be used inside path-explorer")))
+; TODO it seem bad to define this globally when we're only going to use it internally in path-explorer
+; it seems that we're only poluting this file though since we don't export g
 
 ; now let's write a macro that takes a racket definition and creates a Rosette program that follows the path given by a generator
 (define-syntax (define-with-path-explorer stx)
@@ -45,7 +47,7 @@
        #'(begin
            (define (explorer gen arg0 ...)
              (syntax-parameterize ([g (make-rename-transformer #'gen)])
-               (path-explorer body))) ; TODO should we just pass the generator to path-explorer?
+               (path-explorer body))) ; TODO should we just pass the generator to path-explorer? but then all recursive expansions of path-explorer have to get the gen
            (define (name arg0 ...)
              body)))]))
 
@@ -55,6 +57,8 @@
 (define-syntax (path-explorer stx) ; TODO detect symbols that have a path-explorer already and call that
   (define (from-to i n)
     (if (<= i n) (cons i (from-to (+ i 1) n)) null))
+  (define (syntax->string-list stx)
+    (cons #'list (map (λ (x) (~a (syntax->datum x))) (syntax->list stx))))
   (syntax-parse stx
     #:track-literals ; per advice here:  https://school.racket-lang.org/2019/plan/tue-aft-lecture.html
     [(_ ((~literal if) c then-branch else-branch (~do (println "matched if")))) ; TODO should we use ~literal or ~datum?
@@ -71,16 +75,16 @@
     [(_ ((~literal cond) [c0 body0] ... [(~literal else) ~! (~do (println "matched cond with else")) else-body]))
      (with-syntax ([how-many (length (syntax->list #'(c0 ... 'else)))]
                    [else-cond #`(! #,(datum->syntax #'else (cons #'or (syntax->list #'(c0 ...)))))])
-       #'(let ([branch (g how-many)])
+       #`(let ([branch (g how-many)])
            (begin
-             (print-branch branch "")
+             (print-branch branch (list-ref #,(syntax->string-list #'(c0 ... else-cond)) branch))
              (assume (list-ref (list c0 ... else-cond) branch))
              (list-ref (list (path-explorer body0) ... (path-explorer else-body)) branch))))]
     [(_ ((~literal cond) [c0 body0] ... (~do (println "matched cond"))))
      (with-syntax ([how-many (length (syntax->list #'(c0 ...)))])
-       #'(let ([branch (g how-many)])
+       #`(let ([branch (g how-many)])
            (begin
-             (print-branch branch "")
+             (print-branch branch (list-ref #,(syntax->string-list #'(c0 ...)) branch))
              (assume (list-ref (list c0 ...) branch))
              (list-ref (list (path-explorer body0) ...) branch))))]
     [(_ ((~literal destruct) d [pat0 body0] ...) (~do (println "matched destruct")))
@@ -89,8 +93,15 @@
           [indices (datum->syntax stx (from-to 0 (- (syntax->datum #'how-many) 1)))])
        (syntax-parse #'indices ; TODO this seems a bit contrived but it works
          [(i0 ...) 
-         #'(let ([branch (g how-many)])
-             (destruct d [pat0 (if (equal? branch i0) (begin (print-branch branch "") (path-explorer body0)) (assume #f))] ...))]))]
+         #`(let ([branch (g how-many)])
+             (destruct d
+               [pat0
+                (if (equal? branch i0)
+                    (begin
+                      (print-branch branch (list-ref #,(syntax->string-list #'(pat0 ...)) branch))
+                      (path-explorer body0))
+                    (assume #f))]
+               ...))]))]
 ; TODO the following is messy
     [(_ ((~literal lambda) (arg0 ...) body) (~do (println "matched lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
     [(_ ((~literal λ) (arg0 ...) body (~do (println "matched λ")))) #'(lambda (arg0 ...) (path-explorer body))]
