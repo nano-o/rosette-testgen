@@ -116,5 +116,3 @@
     [(_ (quote arg0 ...) (~do (println "matched quote"))) #'(quote arg0 ...)]
     [(_ (x arg0 ...) (~do (println "matched application"))) #'((path-explorer x) (path-explorer arg0) ...)]
     [(_ x (~do (println "matched lone identifier or constant"))) #'x]))
-
-;(define-with-path-explorer (test-if i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
