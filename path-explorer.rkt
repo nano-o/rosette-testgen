@@ -63,12 +63,13 @@
     (cons #'list (map (λ (x) (~a (syntax->datum x))) (syntax->list stx))))
   (define (print-branch-condition b c)
     (if (syntax-local-value #'debug?)
-        #`(print-branch #,b #,(cons #'quote (list (syntax->list c))))
+        #`(print-branch #,b #,c)
         #'(values))) ; TODO is there a better way to do nothing?
   (define (print-debug-info i)
     (if (syntax-local-value #'debug?)
         (println i)
         (values)))
+  
   (syntax-parse stx
     #:track-literals ; per advice here:  https://school.racket-lang.org/2019/plan/tue-aft-lecture.html
     [(_ ((~literal if) c then-branch else-branch)) ; TODO should we use ~literal or ~datum?
@@ -76,11 +77,11 @@
      #`(let ([branch (g 2)])
          (if (equal? branch 0)
              (begin
-               #,(print-branch-condition 'branch #'c)
+               #,(print-branch-condition #'branch #'c)
                (assume c)
                (path-explorer then-branch))
              (begin
-               #,(print-branch-condition 'branch #'c)
+               #,(print-branch-condition #'branch #'(! c))
                (assume (! c))
                (path-explorer else-branch))))]
     [(_ ((~literal cond) [c0 body0] ... [(~literal else) ~! else-body]))
@@ -89,7 +90,7 @@
                    [else-cond #`(! #,(datum->syntax #'else (cons #'or (syntax->list #'(c0 ...)))))])
        #`(let ([branch (g how-many)])
            (begin
-             (print-branch branch (list-ref #,(syntax->string-list #'(c0 ... else-cond)) branch))
+             #,(print-branch-condition #'branch #`(list-ref #,(syntax->string-list #'(c0 ... else-cond)) branch))
              (assume (list-ref (list c0 ... else-cond) branch))
              (list-ref (list (path-explorer body0) ... (path-explorer else-body)) branch))))]
     [(_ ((~literal cond) [c0 body0] ...))
@@ -97,7 +98,7 @@
      (with-syntax ([how-many (length (syntax->list #'(c0 ...)))])
        #`(let ([branch (g how-many)])
            (begin
-             (print-branch branch (list-ref #,(syntax->string-list #'(c0 ...)) branch))
+             #,(print-branch-condition #'branch #`(list-ref #,(syntax->string-list #'(c0 ...)) branch))
              (assume (list-ref (list c0 ...) branch))
              (list-ref (list (path-explorer body0) ...) branch))))]
     [(_ ((~literal destruct) d [pat0 body0] ...))
@@ -112,14 +113,14 @@
                [pat0
                 (if (equal? branch i0)
                     (begin
-                      (print-branch branch (list-ref #,(syntax->string-list #'(pat0 ...)) branch))
+                      #,(print-branch-condition #'branch #`(list-ref #,(syntax->string-list #'(pat0 ...)) branch))
                       (path-explorer body0))
                     (assume #f))]
                ...))]))]
 ; TODO the following is messy
-    [(_ ((~literal lambda) (arg0 ...) body) (~do (println "matched lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
-    [(_ ((~literal λ) (arg0 ...) body (~do (println "matched λ")))) #'(lambda (arg0 ...) (path-explorer body))]
-    [(_ (x:keyword arg0 ...) (~do (println "matched a keyword"))) #'(x arg0 ...)]
-    [(_ (quote arg0 ...) (~do (println "matched quote"))) #'(quote arg0 ...)]
-    [(_ (x arg0 ...) (~do (println "matched application"))) #'((path-explorer x) (path-explorer arg0) ...)]
-    [(_ x (~do (println "matched lone identifier or constant"))) #'x]))
+    [(_ ((~literal lambda) (arg0 ...) body) (~do (print-debug-info "lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
+    [(_ ((~literal λ) (arg0 ...) body (~do (print-debug-info "λ")))) #'(lambda (arg0 ...) (path-explorer body))]
+    [(_ (x:keyword arg0 ...) (~do (print-debug-info "keyword"))) #'(x arg0 ...)]
+    [(_ (quote arg0 ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
+    [(_ (x arg0 ...) (~do (print-debug-info "application"))) #'((path-explorer x) (path-explorer arg0) ...)]
+    [(_ x (~do (print-debug-info "lone identifier or constant"))) #'x]))
