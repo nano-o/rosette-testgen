@@ -65,10 +65,14 @@
     (if (syntax-local-value #'debug?)
         #`(print-branch #,b #,(cons #'quote (list (syntax->list c))))
         #'(values))) ; TODO is there a better way to do nothing?
-  #'ha
+  (define (print-debug-info i)
+    (if (syntax-local-value #'debug?)
+        (println i)
+        (values)))
   (syntax-parse stx
     #:track-literals ; per advice here:  https://school.racket-lang.org/2019/plan/tue-aft-lecture.html
-    [(_ ((~literal if) c then-branch else-branch (~do (println "matched if")))) ; TODO should we use ~literal or ~datum?
+    [(_ ((~literal if) c then-branch else-branch)) ; TODO should we use ~literal or ~datum?
+     (print-debug-info "if")
      #`(let ([branch (g 2)])
          (if (equal? branch 0)
              (begin
@@ -79,7 +83,8 @@
                #,(print-branch-condition 'branch #'c)
                (assume (! c))
                (path-explorer else-branch))))]
-    [(_ ((~literal cond) [c0 body0] ... [(~literal else) ~! (~do (println "matched cond with else")) else-body]))
+    [(_ ((~literal cond) [c0 body0] ... [(~literal else) ~! else-body]))
+     (print-debug-info "cond with else")
      (with-syntax ([how-many (length (syntax->list #'(c0 ... 'else)))]
                    [else-cond #`(! #,(datum->syntax #'else (cons #'or (syntax->list #'(c0 ...)))))])
        #`(let ([branch (g how-many)])
@@ -87,14 +92,16 @@
              (print-branch branch (list-ref #,(syntax->string-list #'(c0 ... else-cond)) branch))
              (assume (list-ref (list c0 ... else-cond) branch))
              (list-ref (list (path-explorer body0) ... (path-explorer else-body)) branch))))]
-    [(_ ((~literal cond) [c0 body0] ... (~do (println "matched cond"))))
+    [(_ ((~literal cond) [c0 body0] ...))
+     (print-debug-info "cond")
      (with-syntax ([how-many (length (syntax->list #'(c0 ...)))])
        #`(let ([branch (g how-many)])
            (begin
              (print-branch branch (list-ref #,(syntax->string-list #'(c0 ...)) branch))
              (assume (list-ref (list c0 ...) branch))
              (list-ref (list (path-explorer body0) ...) branch))))]
-    [(_ ((~literal destruct) d [pat0 body0] ...) (~do (println "matched destruct")))
+    [(_ ((~literal destruct) d [pat0 body0] ...))
+     (print-debug-info "destruct")
      (with-syntax*
          ([how-many (length (syntax->list #'(pat0 ...)))]
           [indices (datum->syntax stx (from-to 0 (- (syntax->datum #'how-many) 1)))])
