@@ -54,22 +54,29 @@
 (define (print-branch branch c)
   (println (format "branch ~a; assuming: ~a" branch c)))
 
+(define-syntax debug? #f)
+
 (define-syntax (path-explorer stx) ; TODO detect symbols that have a path-explorer already and call that
   (define (from-to i n)
     (if (<= i n) (cons i (from-to (+ i 1) n)) null))
   (define (syntax->string-list stx)
     (cons #'list (map (λ (x) (~a (syntax->datum x))) (syntax->list stx))))
+  (define (print-branch-condition b c)
+    (if (syntax-local-value #'debug?)
+        #`(print-branch #,b #,(cons #'quote (list (syntax->list c))))
+        #'(values))) ; TODO is there a better way to do nothing?
+  #'ha
   (syntax-parse stx
     #:track-literals ; per advice here:  https://school.racket-lang.org/2019/plan/tue-aft-lecture.html
     [(_ ((~literal if) c then-branch else-branch (~do (println "matched if")))) ; TODO should we use ~literal or ~datum?
-     #'(let ([branch (g 2)])
+     #`(let ([branch (g 2)])
          (if (equal? branch 0)
              (begin
-               (print-branch branch (syntax->datum #'c))
+               #,(print-branch-condition 'branch #'c)
                (assume c)
                (path-explorer then-branch))
              (begin
-               (print-branch branch (syntax->datum #'(! c)))
+               #,(print-branch-condition 'branch #'c)
                (assume (! c))
                (path-explorer else-branch))))]
     [(_ ((~literal cond) [c0 body0] ... [(~literal else) ~! (~do (println "matched cond with else")) else-body]))
@@ -109,3 +116,5 @@
     [(_ (quote arg0 ...) (~do (println "matched quote"))) #'(quote arg0 ...)]
     [(_ (x arg0 ...) (~do (println "matched application"))) #'((path-explorer x) (path-explorer arg0) ...)]
     [(_ x (~do (println "matched lone identifier or constant"))) #'x]))
+
+;(define-with-path-explorer (test-if i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
