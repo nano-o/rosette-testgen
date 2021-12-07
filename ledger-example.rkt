@@ -1,6 +1,6 @@
 #lang rosette/safe
 
-(require rosette/lib/destruct "./path-explorer.rkt" "./generators.rkt")
+(require rosette/lib/destruct "./path-explorer.rkt" "./generators.rkt" (only-in racket for/list in-naturals with-handlers for) racket/stream)
 
 (define int64? (bitvector 64))
 (define (int64 i)
@@ -104,29 +104,20 @@
 ;(test empty-ledger (create-account (accountID 0) (int64 2)) (accountID 1))
 
 (define model
-  (solve (test sym-ledger op x (list-gen (list 0 2 1))) ))
+  (solve (test sym-ledger op x (list-gen (list 0 2 1)))))
 
 model
 ((evaluate accnts model) (accountID 0))
 
-(println "ha")
-
 ; exhaustive enumeration
-(define gen (exhaustive-gen))
-(solve (test sym-ledger op x gen))
-(gen 0)
-(solve (test sym-ledger op x gen))
-(gen 0)
-(solve (test sym-ledger op x gen))
-(gen 0)
-(solve (test sym-ledger op x gen))
-(gen 0)
-(solve (test sym-ledger op x gen))
-(gen 0)
-(solve (test sym-ledger op x gen))
-(gen 0)
-(solve (test sym-ledger op x gen))
-(gen 0)
-(solve (test sym-ledger op x gen))
-(gen 0)
-      
+(define (all-paths)
+  (define gen (exhaustive-gen))
+  (define (go)
+    (let ([model (solve (test sym-ledger op x gen))]
+          [continue
+           (with-handlers ([(λ (x) (equal? x 0)) (λ (x) #f)]) (gen 0))]) ; TODO just have (gen 0) return its status
+      (if continue (stream-cons model (go)) (stream-cons model empty-stream))))
+  (go))
+
+(for ([m (stream->list (all-paths))])
+  (println m))
