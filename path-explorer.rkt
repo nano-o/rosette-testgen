@@ -54,7 +54,7 @@
 (define (print-branch branch c)
   (println (format "branch ~a; assuming: ~a" branch c)))
 
-(define-syntax debug? #f)
+(define-syntax debug? #t) ; TODO: should this be a syntax parameter?
 
 (define-syntax (path-explorer stx) ; TODO detect symbols that have a path-explorer already and call that
   (define (from-to i n)
@@ -121,6 +121,6 @@
     [(_ ((~literal lambda) (arg0 ...) body) (~do (print-debug-info "lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
     [(_ ((~literal λ) (arg0 ...) body (~do (print-debug-info "λ")))) #'(lambda (arg0 ...) (path-explorer body))]
     [(_ (x:keyword arg0 ...) (~do (print-debug-info "keyword"))) #'(x arg0 ...)]
-    [(_ (quote arg0 ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
+    [(_ ((~literal quote) arg0 ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
     [(_ (x arg0 ...) (~do (print-debug-info "application"))) #'((path-explorer x) (path-explorer arg0) ...)]
     [(_ x (~do (print-debug-info "lone identifier or constant"))) #'x]))
