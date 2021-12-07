@@ -108,3 +108,25 @@
 
 model
 ((evaluate accnts model) (accountID 0))
+
+(println "ha")
+
+; exhaustive enumeration
+(define gen (exhaustive-gen))
+(solve (test sym-ledger op x gen))
+(gen 0)
+(solve (test sym-ledger op x gen))
+(gen 0)
+(solve (test sym-ledger op x gen))
+(gen 0)
+(solve (test sym-ledger op x gen))
+(gen 0)
+(solve (test sym-ledger op x gen))
+(gen 0)
+(solve (test sym-ledger op x gen))
+(gen 0)
+(solve (test sym-ledger op x gen))
+(gen 0)
+(solve (test sym-ledger op x gen))
+(gen 0)
+      
