@@ -32,7 +32,7 @@
 (define payment-success (bv 0 (bitvector payment-op-result-bits)))
 
 ; semantics
-; exec-op return a pair consisting of the new ledger and the result code
+; exec-op returns a pair consisting of the new ledger and the result code
 (define-with-path-explorer (exec-op op l)
   (destruct op
     [(create-account a b)
@@ -82,9 +82,29 @@
 (define op
   (if b (payment-op s d a) (create-account s a)))
 
-(define (test op accnt)
-  (let ([l (cdr (exec-op-path-explorer (list-gen (list 0 2 1)) op empty-ledger))])
-    ((ledger-balances l) accnt)))
+; here we define a test that that executes an operation on the empty ledger and then queries the balance of an account.
+; we want it to take branch 0, then 2, then 1
+; this means the the operation is a create-account operation (branch 0), that it does not fail (branch 2), and then that we query the balance of an account different from the one being created.
+(define (test l op accnt gen)
+  (let ([new-l (cdr (exec-op-path-explorer gen op l))])
+    ((ledger-balances new-l) accnt)))
 
-;(test (payment-op (accountID 0) (accountID 1) (int64 1)) (accountID 0))
-(solve (test op x))
+; no assert should fail here:
+(test empty-ledger (create-account (accountID 0) (int64 2)) (accountID 1) (list-gen (list 0 2 1)))
+; what we should see next is that b is false, the amount is at least 1, and x is not equal to s:
+(solve (test empty-ledger op x (list-gen (list 0 2 1))))
+
+(clear-vc!) ; TODO are vcs cleared after solve?
+
+; because the ledger is just two functions and Rosette supports symbolic, uninterpreted functions, we can make the ledger state part of the symbolic inputs.
+(define-symbolic  bals (~> accountID? int64?))
+(define-symbolic accnts (~> accountID? boolean?))
+(define sym-ledger (ledger accnts bals))
+
+;(test empty-ledger (create-account (accountID 0) (int64 2)) (accountID 1))
+
+(define model
+  (solve (test sym-ledger op x (list-gen (list 0 2 1))) ))
+
+model
+((evaluate accnts model) (accountID 0))
