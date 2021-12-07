@@ -1,6 +1,6 @@
 #lang rosette/safe
 
-(require rosette/lib/destruct "./path-explorer.rkt" "./generators.rkt" (only-in racket for/list in-naturals with-handlers for) racket/stream)
+(require rosette/lib/destruct "./path-explorer.rkt" "./generators.rkt" (only-in racket for/list with-handlers for) racket/stream)
 
 (define int64? (bitvector 64))
 (define (int64 i)
@@ -113,11 +113,13 @@ model
 (define (all-paths)
   (define gen (exhaustive-gen))
   (define (go)
-    (let ([model (solve (test sym-ledger op x gen))]
-          [continue
-           (with-handlers ([(λ (x) (equal? x 0)) (λ (x) #f)]) (gen 0))]) ; TODO just have (gen 0) return its status
-      (if continue (stream-cons model (go)) (stream-cons model empty-stream))))
+    (let ([model (solve (test sym-ledger op x gen))])
+      (if (equal? (gen 0) 0) (stream-cons model (go)) (stream-cons model empty-stream))))
   (go))
 
-(for ([m (stream->list (all-paths))])
+(define model-list (stream->list (all-paths)))
+(for ([m model-list])
   (println m))
+(println (format "we made ~a queries" (length model-list)))
+(define num-unsat (count unsat? model-list))
+(println (format "~a queries were unsat" num-unsat))

@@ -45,7 +45,7 @@
                       [else ; current branch is complete
                        (let ([new-path (pop-complete path)])
                          (if (empty? new-path)
-                             (raise 0)
+                             (begin (yield -1) (error "this exhaustive generator has already finished"))
                              (let ([new-m (yield 0)])  ; dummy 0, does not matter
                                (loop new-m new-path 1))))]))] ; pop completed nodes, increase previous by one, and set pos back to 1
                  [(< (length path) pos) ; never explored
@@ -65,7 +65,7 @@
 (check-equal? (test-exhaustive-gen 3) 1)
 (check-equal? (test-exhaustive-gen 0) 0)
 (check-equal? (test-exhaustive-gen 3) 2)
-(check-exn (λ (x) (equal? x 0)) (thunk (test-exhaustive-gen 0))) ; raises an exception when we're finished
+(check-equal? (test-exhaustive-gen 0) -1) ; -1 indicates we're done
 
 (define test-exhaustive-gen-2 (exhaustive-gen))
 (check-equal? (test-exhaustive-gen-2 2) 0)
@@ -78,7 +78,7 @@
 (check-equal? (test-exhaustive-gen-2 3) 2)
 (check-equal? (test-exhaustive-gen-2 0) 0)
 (check-equal? (test-exhaustive-gen-2 2) 1)
-(check-exn (λ (x) (equal? x 0)) (thunk (test-exhaustive-gen 0))) ; raises an exception when we're finished
+(check-equal? (test-exhaustive-gen-2 0) -1) ; -1 indicates we're done
 
 (define random-gen ; TODO random is not in rosette/safe; is it okay to use it anyway?
   (generator (n)
