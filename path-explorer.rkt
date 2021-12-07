@@ -1,39 +1,9 @@
 #lang rosette
 
 (require (for-syntax syntax/parse racket/string racket/syntax)
-         racket/generator syntax/parse/define rosette/lib/destruct racket/stxparam)
+         racket/generator syntax/parse/define rosette/lib/destruct racket/stxparam rackunit "./generators.rkt")
 
-(provide constant-gen random-gen bitvector-gen list-gen define-with-path-explorer)
-
-; we'll use a generator to produce numbers that encode which branch to take.
-; for example, if we encounter a conditional with 3 branches we'll ask the generator for a number between 0 and 2 included.
-(define (constant-gen i)
-  (generator (n)
-             (let loop ()
-               (begin
-                 (yield (modulo i n))
-                 (loop)))))
-
-(define random-gen ; TODO random is not in rosette/safe; is it okay to use it anyway?
-  (generator (n)
-             (let loop ()
-               (begin
-                 (yield (random n))
-                 (loop)))))
-
-(define (bitvector-gen bv-outputs)
-  (generator (n)
-             (let loop ([bv bv-outputs])
-               (begin
-                 (yield (bitvector->natural (extract (- n 1) 0 bv)))
-                 (loop (rotate-right n bv))))))
-
-(define (list-gen outputs-list)
-  (generator (n)
-             (let loop ([l outputs-list])
-               (begin
-                 (yield (car l))
-                 (loop (append (cdr l) (list (car l))))))))
+(provide define-with-path-explorer)
 
 (define-syntax-parameter g (lambda (stx) (raise-syntax-error (syntax-e stx) "can only be used inside path-explorer")))
 ; TODO it seem bad to define this globally when we're only going to use it internally in path-explorer
@@ -54,7 +24,7 @@
 (define (print-branch branch c)
   (println (format "branch ~a; assuming: ~a" branch c)))
 
-(define-syntax debug? #t) ; TODO: should this be a syntax parameter?
+(define-syntax debug? #f) ; TODO: should this be a syntax parameter?
 
 (define-syntax (path-explorer stx) ; TODO detect symbols that have a path-explorer already and call that
   (define (from-to i n)
@@ -124,3 +94,43 @@
     [(_ ((~literal quote) arg0 ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
     [(_ (x arg0 ...) (~do (print-debug-info "application"))) #'((path-explorer x) (path-explorer arg0) ...)]
     [(_ x (~do (print-debug-info "lone identifier or constant"))) #'x]))
+
+; tests
+
+(define-with-path-explorer (test-if i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
+(define-symbolic i integer?)
+(let ([model (solve (test-if-path-explorer (constant-gen 0) i))])
+  (check-equal? (< 0 (evaluate i model)) #t))
+
+(define-with-path-explorer (test-cond i)
+  (cond [(< 0 i) 'strict-pos]
+        [(equal? 0 i) 'zero]
+        [(> 0 i) 'neg]))
+(let ([model (solve (test-cond-path-explorer (constant-gen 1) i))])
+  (check-equal? (evaluate i model) 0))
+
+(define-with-path-explorer (test-cond-else i)
+  (cond [(< 0 i) 'strict-pos]
+        [(equal? 0 i) 'zero]
+        [else 'neg]))
+
+(let ([model (solve (test-cond-else-path-explorer (constant-gen 1) i))])
+  (check-equal? (evaluate i model) 0))
+(let ([model (solve (test-cond-else-path-explorer (constant-gen 2) i))])
+  (check-equal? (< (evaluate i model) 0) #t))
+
+(struct s1 (x))
+(struct s2 (y))
+(define-with-path-explorer (test-destruct s)
+  (destruct s
+            [(s1 a) "foo"]
+            [(s2 b) "bar"]
+            #;[_ (assert #f)]))
+
+(define-symbolic x boolean?)
+(define in (if x (s1 0) (s2 0)))
+
+(let ([model (solve (test-destruct-path-explorer (constant-gen 1) in))])
+  (check-equal? (evaluate x model) #f))
+
+; TODO test lambda etc. and test with definition with nested conditionals

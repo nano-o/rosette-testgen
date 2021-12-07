@@ -1,6 +1,6 @@
 #lang rosette/safe
 
-(require rosette/lib/destruct "./path-explorer.rkt")
+(require rosette/lib/destruct "./path-explorer.rkt" "./generators.rkt")
 
 (define int64? (bitvector 64))
 (define (int64 i)
