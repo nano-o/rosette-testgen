@@ -19,17 +19,21 @@
    (lambda (a) #f)
    (lambda (a) (int64 0))))
 
+(define reserve (int64 1)) ; TODO what is the reserve?
+
 ; operations
 (struct create-account (account starting-balance))
 (define create-account-result-bits 3)
 (define create-account-success (bv 0 (bitvector create-account-result-bits)))
 (define create-account-already-exists (bv -4 (bitvector create-account-result-bits)))
 (define create-account-low-reserve (bv -3 (bitvector create-account-result-bits)))
-(define reserve (int64 1)) ; TODO what is the reserve?
 
 (struct payment-op (source destination amount))
 (define payment-op-result-bits 5)  ; there is a -9 code
 (define payment-success (bv 0 (bitvector payment-op-result-bits)))
+(define payment-underfunded (bv -2 (bitvector payment-op-result-bits)))
+(define payment-malformed (bv -1 (bitvector payment-op-result-bits)))
+(define payment-no-destination (bv -5 (bitvector payment-op-result-bits)))
 
 ; semantics
 ; exec-op returns a pair consisting of the new ledger and the result code
@@ -53,15 +57,23 @@
             (cond
               [(equal? acc a) b]
               [else ((ledger-balances l) acc)]))))])]
-    [(payment-op s d am) ; TODO check that accounts exist!
-     (cons payment-success
-           (ledger
-            (ledger-accounts l)
-            (λ (acc)
-              (cond
-                [(equal? acc s) (bvsub ((ledger-balances l) acc) am)]
-                [(equal? acc d) (bvadd ((ledger-balances l) acc) am)]
-                [else ((ledger-balances l) acc)]))))]))
+    [(payment-op s d am)
+     (cond
+       [(and ((ledger-accounts l) s) ((ledger-accounts l) d) (bvsgt am (int64 0))) ; accounts exist and amount is stricly positive
+        (cons payment-success
+              (ledger
+               (ledger-accounts l)
+               (λ (acc)
+                 (cond
+                   [(equal? acc s) (bvsub ((ledger-balances l) acc) am)]
+                   [(equal? acc d) (bvadd ((ledger-balances l) acc) am)]
+                   [else ((ledger-balances l) acc)]))))]
+       [(not ((ledger-accounts l) d)) ; destination account does not exist
+        (cons payment-no-destination l)]
+       [(bvsgt am (bvsub ((ledger-balances l) d) reserve)) ; not enough funds
+        (cons payment-underfunded l)]
+       [else (cons payment-malformed l)])]))
+              
 
 
 #;(define (check-no-negative-balance src dst amnt acc)
