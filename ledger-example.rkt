@@ -135,3 +135,10 @@ model
 (println (format "we made ~a queries" (length model-list)))
 (define num-unsat (count unsat? model-list))
 (println (format "~a queries were unsat" num-unsat))
+
+; TODO how do we get a representation of models of uninterpreted functions? seems like we can apply them to symbolic values, like so:
+(define model-1 (car model-list))
+(define accnts-1 (evaluate accnts model-1))
+(accnts-1 s)
+
+; TODO it's great to synthesize ledgers, but how about synthesizing a sequence of operations that create the ledger in question?
