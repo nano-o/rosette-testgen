@@ -1,6 +1,14 @@
 #lang rosette/safe
 
+; Goal: develop a basic model of transaction processing in Stellar.
+; The model should be sufficient to generate tests for the create-account and payment operations.
+; Also, develop a test harness that can take test inputs generated here and run them against the C++ implementation.
+
+; TODO maybe we should stick to operations and exclude transactions
+
 (require rosette/lib/destruct "./path-explorer.rkt" "./generators.rkt" (only-in racket for/list with-handlers for) racket/stream)
+
+; model of the ledger
 
 (define int64? (bitvector 64))
 (define (int64 i)
@@ -18,6 +26,12 @@
   (ledger
    (lambda (a) #f)
    (lambda (a) (int64 0))))
+
+; transactions
+
+(define max-ops-per-tx 100)
+(struct transaction (source-account fee seq-num time-bounds memo operations)) ; TODO: can we use contracts on structs?
+(struct decorated-signature (hint signature))
 
 (define reserve (int64 1)) ; TODO what is the reserve?
 
