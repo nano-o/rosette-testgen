@@ -29,7 +29,8 @@
 (define (print-branch branch c)
   (println (format "branch ~a; assuming: ~a" branch c)))
 
-(define-syntax debug? #f) ; TODO: should this be a syntax parameter?
+(define-for-syntax debug? #t) ; TODO: should this be a syntax parameter? can we set! it?
+;(define-syntax debug? #t) ; NOTE this works! seems that there's no clash because that's not the same level.
 
 (define-syntax (path-explorer stx) ; TODO detect symbols that have a path-explorer already and call that
   (define (from-to i n)
@@ -37,11 +38,11 @@
   (define (syntax->string-list stx)
     (cons #'list (map (λ (x) (~a (syntax->datum x))) (syntax->list stx))))
   (define (print-branch-condition b c)
-    (if (syntax-local-value #'debug?)
+    (if debug?
         #`(print-branch #,b #,c)
         #'(values))) ; TODO is there a better way to do nothing?
   (define (print-debug-info i)
-    (if (syntax-local-value #'debug?)
+    (if debug?
         (println i)
         (values)))
   
