@@ -48,7 +48,7 @@
   
   (syntax-parse stx
     #:track-literals ; per advice here:  https://school.racket-lang.org/2019/plan/tue-aft-lecture.html
-    [(_ ((~literal if) c then-branch else-branch)) ; TODO should we use ~literal or ~datum?
+    [(_ ((~datum if) c then-branch else-branch)) ; TODO what about recursing in the condition?
      (print-debug-info "if")
      #`(let ([branch (g 2)])
          (if (equal? branch 0)
@@ -60,7 +60,7 @@
                #,(print-branch-condition #'branch #'(! c))
                (assume (! c))
                (path-explorer else-branch))))]
-    [(_ ((~literal cond) [c0 body0] ... [(~literal else) ~! else-body]))
+    [(_ ((~datum cond) [c0 body0] ... [(~datum else) ~! else-body]))
      (print-debug-info "cond with else")
      (with-syntax ([how-many (length (syntax->list #'(c0 ... 'else)))]
                    [else-cond #`(! #,(datum->syntax #'else (cons #'or (syntax->list #'(c0 ...)))))])
@@ -69,7 +69,7 @@
              #,(print-branch-condition #'branch #`(list-ref #,(syntax->string-list #'(c0 ... else-cond)) branch))
              (assume (list-ref (list c0 ... else-cond) branch))
              (list-ref (list (path-explorer body0) ... (path-explorer else-body)) branch))))]
-    [(_ ((~literal cond) [c0 body0] ...))
+    [(_ ((~datum cond) [c0 body0] ...))
      (print-debug-info "cond")
      (with-syntax ([how-many (length (syntax->list #'(c0 ...)))])
        #`(let ([branch (g how-many)])
@@ -77,7 +77,7 @@
              #,(print-branch-condition #'branch #`(list-ref #,(syntax->string-list #'(c0 ...)) branch))
              (assume (list-ref (list c0 ...) branch))
              (list-ref (list (path-explorer body0) ...) branch))))]
-    [(_ ((~literal destruct) d [pat0 body0] ...))
+    [(_ ((~datum destruct) d [pat0 body0] ...))
      (print-debug-info "destruct")
      (with-syntax*
          ([how-many (length (syntax->list #'(pat0 ...)))]
@@ -94,12 +94,15 @@
                     (assume #f))]
                ...))]))]
 ; TODO the following is messy
-    [(_ ((~literal lambda) (arg0 ...) body) (~do (print-debug-info "lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
-    [(_ ((~literal λ) (arg0 ...) body (~do (print-debug-info "λ")))) #'(lambda (arg0 ...) (path-explorer body))]
+    [(_ ((~datum lambda) (arg0 ...) body) (~do (print-debug-info "lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
+    [(_ ((~datum λ) (arg0 ...) body (~do (print-debug-info "λ")))) #'(lambda (arg0 ...) (path-explorer body))]
     [(_ (x:keyword arg0 ...) (~do (print-debug-info "keyword"))) #'(x arg0 ...)]
-    [(_ ((~literal quote) arg0 ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
-    [(_ (x arg0 ...) (~do (print-debug-info "application"))) #'((path-explorer x) (path-explorer arg0) ...)]
-    [(_ x (~do (print-debug-info "lone identifier or constant"))) #'x]))
+    [(_ ((~datum quote) arg0 ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
+    [(_ (fn arg0 ...) (~do (print-debug-info "application"))) #'((path-explorer fn) (path-explorer arg0) ...)]
+    [(_ x:integer (~do (print-debug-info "integer"))) #'x]
+    [(_ x:boolean (~do (print-debug-info "integer"))) #'x]
+    [(_ x:id (~do (print-debug-info "id"))) #'x]
+    [(_ x (~do (print-debug-info "catch all case"))) #'x])) ; catch-all?
 
 ; tests
 
