@@ -2,6 +2,11 @@
 
 (require (for-syntax syntax/parse racket/string racket/syntax)
          racket/generator syntax/parse/define rosette/lib/destruct racket/stxparam rackunit "./generators.rkt")
+; TODO detect symbols that have a path-explorer already and call that
+; TODO support struct methods implementing generic interfaces (i.e. find out all possible targets and branch on that)
+; TODO is it worth trying to prune infeasible paths?
+; TODO what about definitions comming from libraries?
+
 
 (provide define-with-path-explorer)
 
