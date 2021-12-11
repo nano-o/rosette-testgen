@@ -6,7 +6,7 @@
 ; TODO what about definitions comming from libraries?
 
 (require (for-syntax syntax/parse racket/syntax)
-         racket/generator rosette/lib/destruct racket/stxparam rackunit "./generators.rkt" syntax/parse)
+         rosette/lib/destruct racket/stxparam rackunit "./generators.rkt" syntax/parse)
 
 (provide define-with-path-explorer)
 
@@ -32,7 +32,7 @@
 (define (print-branch branch c)
   (println (format "branch ~a; assuming: ~a" branch c)))
 
-(define-for-syntax debug? #t) ; TODO: should this be a syntax parameter? can we set! it?
+(define-for-syntax debug? #f) ; TODO: should this be a syntax parameter? can we set! it?
 ;(define-syntax debug? #t) ; NOTE this works! seems that there's no clash because that's not the same level.
 
 (define-syntax (path-explorer stx)
@@ -103,7 +103,7 @@
     [(_ ((~datum λ) (arg0 ...) body (~do (print-debug-info "λ")))) #'(lambda (arg0 ...) (path-explorer body))]
     [(_ (x:keyword arg0 ...) (~do (print-debug-info "keyword"))) #'(x arg0 ...)]
     [(_ ((~datum quote) arg0 ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
-    [(_ (fn:has-path-explorer arg0 ...) (~do (print-debug-info "path-explorer application"))) #`(#,(explorer-id #'fn) (path-explorer arg0) ...)]
+    [(_ (fn:has-path-explorer arg0 ...) (~do (print-debug-info "path-explorer application"))) #`(#,(explorer-id #'fn) g (path-explorer arg0) ...)]
     [(_ (fn arg0 ...) (~do (print-debug-info "application"))) #'((path-explorer fn) (path-explorer arg0) ...)]
     [(_ x:integer (~do (print-debug-info "integer"))) #'x]
     [(_ x:boolean (~do (print-debug-info "integer"))) #'x]
@@ -113,9 +113,10 @@
 ; tests
 
 (define-with-path-explorer (test-if i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
-(define-with-path-explorer (test1 i) (if (equal? (test-if i) 'neg) 'neg 'pos))(define-symbolic i integer?)
-(test1-path-explorer (constant-gen 0) 2)
-#;(let ([model (solve (test1-path-explorer (constant-gen 0) i))])
+(define-with-path-explorer (test1 i) (if (equal? (test-if i) 'strict-pos) 'neg 'pos))
+(define-symbolic i integer?)
+;(test1-path-explorer (constant-gen 0) 2)
+(let ([model (solve (test1-path-explorer (list-gen (list 0 0 0)) i))]) ; NOTE: Note that some paths are infeasible.
   (check-equal? (< 0 (evaluate i model)) #t))
 #|
 (define-symbolic i integer?)
