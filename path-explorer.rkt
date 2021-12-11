@@ -41,9 +41,10 @@
   (define (syntax->string-list stx)
     (cons #'list (map (λ (x) (~a (syntax->datum x))) (syntax->list stx))))
   (define (print-branch-condition b c)
+    (with-syntax ([c-string #`(quote #,(syntax->datum c))])
     (if debug?
-        #`(print-branch #,b #,c)
-        #'(values))) ; TODO is there a better way to do nothing?
+        #`(print-branch #,b c-string)
+        #'(values)))) ; TODO is there a better way to do nothing?
   (define (print-debug-info i)
     (if debug?
         (println i)
