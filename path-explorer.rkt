@@ -113,14 +113,12 @@
 ; tests
 
 (define-with-path-explorer (test-if i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
-(define-with-path-explorer (test1 i) (if (equal? (test-if i) 'strict-pos) 'neg 'pos))
-(define-symbolic i integer?)
-;(test1-path-explorer (constant-gen 0) 2)
-(let ([model (solve (test1-path-explorer (list-gen (list 0 0 0)) i))]) ; NOTE: Note that some paths are infeasible.
-  (check-equal? (< 0 (evaluate i model)) #t))
-#|
+
 (define-symbolic i integer?)
 (let ([model (solve (test-if-path-explorer (constant-gen 0) i))])
+  (check-equal? (< 0 (evaluate i model)) #t))
+(define-with-path-explorer (test1 i) (if (equal? (test-if i) 'strict-pos) 'neg 'pos))
+(let ([model (solve (test1-path-explorer (list-gen (list 0 0 0)) i))]) ; NOTE: Note that some paths are infeasible.
   (check-equal? (< 0 (evaluate i model)) #t))
 
 (define-with-path-explorer (test-cond i)
@@ -153,6 +151,5 @@
 
 (let ([model (solve (test-destruct-path-explorer (constant-gen 1) in))])
   (check-equal? (evaluate x model) #f))
-|#
 
 ; TODO test lambda etc. and test with definition with nested conditionals
