@@ -9,7 +9,7 @@
 ; TODO generate data model from XDR?
 
 ;(require rosette/lib/destruct "./path-explorer.rkt" "./generators.rkt" (only-in racket for/list with-handlers for) racket/stream)
-(require (for-syntax syntax/parse racket/syntax) syntax/parse macro-debugger/stepper)
+(require (for-syntax syntax/parse racket/syntax) syntax/parse macro-debugger/stepper (only-in racket log exact-ceiling))
 ; model of the ledger
 
 ; a macro to make bitvector types
@@ -27,12 +27,20 @@
 (make-bv-type sequence-number 256)
 (make-bv-type signer-key 256)
 
-; TODO a macro to define enums like that
-(define account-flags-bv (bitvector 4)) ; up to 0x8
-(define account-flags-auth-required (bv #x1 account-flags-bv))
-(define account-flags-auth-revocable (bv #x2 account-flags-bv))
-(define account-flags-immutable (bv #x4 account-flags-bv))
-(define account-flags-clawback-enabled (bv #x8 account-flags-bv))
+(define-syntax (make-enum stx)
+  (syntax-parse stx
+    [(_ name:id ([field0:id value0:number] ...)) ; NOTE must accomodate negative values
+     #;(define max-value (argmax identity (syntax->datum #'(value0 ...))))
+     (with-syntax
+         (#;[nbits (datum->syntax stx (exact-ceiling (log max-value 2)))] ; NOTE decided to just use 32 bits
+          [nbits 32]
+          [type-pred (format-id stx "~a-bv?" #'name)]
+          [(member0 ...) (map (λ (f) (format-id stx "~a-~a" #'name f)) (syntax->list #'(field0 ...)))])
+       #'(begin
+           (define type-pred (bitvector nbits))
+           (define member0 (bv value0 type-pred)) ...))]))
+
+(make-enum account-flags ([auth-required #x1] [auth-revocable #x2] [immutable #x4] [clawback-enabled #x8]))
 
 ; the content of a ledger
 ; TODO: are we taking the functional-relational approach? If so, should we take inspiration from Ocelot?
@@ -62,10 +70,7 @@
 
 ; operations
 (struct create-account (account starting-balance))
-(define create-account-result-bits 3)
-(define create-account-success (bv 0 (bitvector create-account-result-bits)))
-(define create-account-already-exists (bv -4 (bitvector create-account-result-bits)))
-(define create-account-low-reserve (bv -3 (bitvector create-account-result-bits)))
+(make-enum create-account-result ([success 0] [already-exists -4] [low-reserve -3]))
 
 (struct payment-op (source destination amount))
 (define payment-op-result-bits 5)  ; there is a -9 code
