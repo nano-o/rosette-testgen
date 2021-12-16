@@ -1,4 +1,4 @@
-#lang rosette/safe
+#lang rosette
 
 ; Goal: develop a basic model of transaction processing in Stellar.
 ; The model should be sufficient to generate tests for the create-account and payment operations.
@@ -9,7 +9,8 @@
 ; TODO generate data model from XDR?
 
 ;(require rosette/lib/destruct "./path-explorer.rkt" "./generators.rkt" (only-in racket for/list with-handlers for) racket/stream)
-(require (for-syntax syntax/parse racket/syntax) syntax/parse macro-debugger/stepper (only-in racket log exact-ceiling))
+(require rosette/lib/destruct "./path-explorer.rkt" "./generators.rkt")
+(require (for-syntax syntax/parse racket/syntax) syntax/parse macro-debugger/stepper (only-in racket for/fold))
 ; model of the ledger
 
 ; a macro to make bitvector types
@@ -74,7 +75,7 @@
 ; another approach is to use functions as much as possible
 (struct ledger
   (account ; (~> account-ID? boolean?)
-   account-balance
+   account-balance ; in stroops
    account-seq-num
    account-num-sub-sentries
    account-flags
@@ -94,29 +95,62 @@
 
 ; transactions
 
-(struct transaction (source-account fee seq-num operations))
+(struct transaction
+  (source-account
+   fee
+   seq-num
+   operations)) ; list of operations
 
-(define reserve (int64 1))
-(define subentry-reserve (int64 1))
+(define reserve (int64 10000000)) ; one lumen
+(define subentry-reserve (int64 5000000)) ; .5 lumen
 
-(define apply-create-account (l src dest sbal)
+(define-with-path-explorer (apply-create-account l src dest sbal)
   (cond
-    [((ledger-account l) a) ; already exists
+    [((ledger-account l) dest) ; already exists
      (cons create-account-result-code-already-exists l)]
-    [(bvslt b reserve) ; initial balance below reserve TODO are amounts signed numbers?
+    [(bvslt sbal reserve) ; initial balance below reserve TODO are amounts signed numbers?
      (cons create-account-result-code-low-reserve l)]
     [(bvslt (ledger-account-balance src) sbal) ; src does not have enough funds
-     (cons create-account-result-code-underfunded l)
+     (cons create-account-result-code-underfunded l)]
     [else
      (cons
       create-account-result-code-success
       (ledger
        (λ (acc)
          (cond
-           [(equal? acc a) #t]
-           [else ((ledger-accounts l) acc)])) ; TODO syntax for updates
+           [(equal? acc dest) #t] ; dest is now created
+           [else ((ledger-account l) acc)])) ; TODO syntax for updates
        (λ (acc)
          (cond
-           [(equal? acc a) b]
-           [else ((ledger-balances l) acc)]))
-       (ledger-trustlines l)))])]
+           [(equal? acc dest) sbal] ; dest has sbal starting balance
+           [else ((ledger-account-balance l) acc)]))
+       (ledger-trustline l)))]))
+
+(define-with-path-explorer (apply-operation src op l)
+  (destruct op
+    [(create-account a b)
+    (apply-create-account l src a b)]))
+
+(define-with-path-explorer (apply-transaction tx l)
+   (for/fold ([res-ledger (cons 0 l)]) ; TODO for/fold not supported by path exploredr, or is it?
+             ([op ops])
+     (apply-operation src op (cadr temp-l))))
+
+#;(expand/step
+ #'(define-with-path-explorer (apply-transaction tx l)
+   (for/fold ([res-ledger (cons 0 l)]) ; TODO for/fold not supported by path exploredr, or is it?
+             ([op ops])
+     (apply-operation src op (cadr temp-l))))) ; TODO terminate on first failure
+
+; now let's create inputs
+
+;(define (test gen symbolic-ledger tx)
+  
+#|
+(define model-list (stream->list (all-paths (λ (gen) (test sym-ledger op x gen)))))
+(for ([m model-list])
+  (println m))
+(println (format "we made ~a queries" (length model-list)))
+(define num-unsat (count unsat? model-list))
+(println (format "~a queries were unsat" num-unsat))
+|#

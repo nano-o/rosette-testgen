@@ -19,9 +19,14 @@
 (define-for-syntax (explorer-id x)
   (format-id x "~a-path-explorer" x))
 
+(define-for-syntax debug? #f) ; TODO: should this be a syntax parameter? can we set! it?
+#;(define-for-syntax (set-debug b)
+  (set! debug? b))
+
 (define-syntax (define-with-path-explorer stx)
   (syntax-parse stx
     [(_ (name:id arg0:id ...) body)
+     (if debug? (println (format "defining ~a" (syntax->datum #'name))) (values))
      #`(begin
          (define (#,(explorer-id #'name) gen arg0 ...)
            (syntax-parameterize ([g (make-rename-transformer #'gen)])
@@ -31,9 +36,6 @@
 
 (define (print-branch branch c)
   (println (format "branch ~a; assuming: ~a" branch c)))
-
-(define-for-syntax debug? #f) ; TODO: should this be a syntax parameter? can we set! it?
-;(define-syntax debug? #t) ; NOTE this works! seems that there's no clash because that's not the same level.
 
 (define-syntax (path-explorer stx)
   (define (from-to i n)
@@ -45,9 +47,9 @@
     (if debug?
         #`(print-branch #,b c-string)
         #'(values)))) ; using (values) to do nothing
-  (define (print-debug-info i)
+  (define (print-debug-info i [str ""])
     (if debug?
-        (println i)
+        (println (format "~a ; ~a" i str))
         (values)))
   (define-syntax-class (has-path-explorer)
     (pattern x:id #:when (identifier-binding (explorer-id #'x))))
@@ -55,7 +57,7 @@
   (syntax-parse stx
     #:track-literals ; per advice here:  https://school.racket-lang.org/2019/plan/tue-aft-lecture.html
     [(_ ((~datum if) c then-branch else-branch)) ; TODO what about recursing in the condition?
-     (print-debug-info "if")
+     (print-debug-info "if" (syntax->datum stx))
      #`(let ([branch (g 2)] [cond (path-explorer c)])
          (if (equal? branch 0)
              (begin
@@ -67,7 +69,7 @@
                (assume (! cond))
                (path-explorer else-branch))))]
     [(_ ((~datum cond) [c0 body0] ... [(~datum else) ~! else-body]))
-     (print-debug-info "cond with else")
+     (print-debug-info "cond with else" (syntax->datum stx))
      (with-syntax ([how-many (length (syntax->list #'(c0 ... 'else)))]
                    [else-cond #`(! #,(datum->syntax #'else (cons #'or (syntax->list #'(c0 ...)))))])
        #`(let ([branch (g how-many)])
@@ -104,11 +106,13 @@
     [(_ (x:keyword arg0 ...) (~do (print-debug-info "keyword"))) #'(x arg0 ...)]
     [(_ ((~datum quote) arg0 ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
     [(_ (fn:has-path-explorer arg0 ...) (~do (print-debug-info "path-explorer application"))) #`(#,(explorer-id #'fn) g (path-explorer arg0) ...)]
-    [(_ (fn arg0 ...) (~do (print-debug-info "application"))) #'((path-explorer fn) (path-explorer arg0) ...)]
+    [(_ (fn arg0 ...) (~do (print-debug-info "application"))) #'(fn (path-explorer arg0) ...)]
+    [(_ (fn:has-path-explorer) (~do (print-debug-info "path-explorer application"))) #`(#,(explorer-id #'fn) g)]
+    [(_ (fn arg0 ...) (~do (print-debug-info "application"))) #'(path-explorer fn)]
     [(_ x:integer (~do (print-debug-info "integer"))) #'x]
     [(_ x:boolean (~do (print-debug-info "integer"))) #'x]
     [(_ x:id (~do (print-debug-info "id"))) #'x]
-    [(_ x (~do (print-debug-info "catch all case"))) #'x])) ; catch-all?
+    [(_ x (~do (print-debug-info "pattern (_ x)"))) #'x]))
 
 ; all-paths return a stream of solutions
 (define (all-paths prog) ; prog must take a generator as argument
