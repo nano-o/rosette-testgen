@@ -20,12 +20,16 @@
 
 ; a ledger has two components: a unary relation accounts that contains all existing accounts,
 ; and a function balances that assigns balances to existing accounts (non-existing accounts are by default assigned a 0 balance).
-(struct ledger (accounts balances))
+(struct ledger (accounts balances trustlines))
+
+(define xlm (bv 0 (bitvector 1)))
+(define usd (bv 1 (bitvector 1)))
 
 (define empty-ledger
   (ledger
-   (lambda (a) #f)
-   (lambda (a) (int64 0))))
+   (lambda (a) #f) ; no accounts
+   (lambda (a) (int64 10))
+   (lambda (account asset) (or (and (equal? account (accountID 0)) (equal? asset usd))))))
 
 ; transactions
 
@@ -49,6 +53,8 @@
 (define payment-malformed (bv -1 (bitvector payment-op-result-bits)))
 (define payment-no-destination (bv -5 (bitvector payment-op-result-bits)))
 
+(define-symbolic flags (bitvector 1))
+
 ; semantics
 ; exec-op returns a pair consisting of the new ledger and the result code
 (define-with-path-explorer (exec-op op l)
@@ -70,10 +76,11 @@
           (λ (acc)
             (cond
               [(equal? acc a) b]
-              [else ((ledger-balances l) acc)]))))])]
+              [else ((ledger-balances l) acc)]))
+          (ledger-trustlines l)))])]
     [(payment-op s d am)
      (cond
-       [(and ((ledger-accounts l) s) ((ledger-accounts l) d) (bvsgt am (int64 0))) ; accounts exist and amount is stricly positive
+       [(and ((ledger-accounts l) s) ((ledger-accounts l) d) (bvsgt am (int64 0)) (begin (define-symbolic f (bitvector 1)) (exists (list f) ((ledger-trustlines l) d xlm f)))) ; accounts exist and amount is stricly positive and trustline exists
         (cons payment-success
               (ledger
                (ledger-accounts l)
@@ -81,7 +88,8 @@
                  (cond
                    [(equal? acc s) (bvsub ((ledger-balances l) acc) am)]
                    [(equal? acc d) (bvadd ((ledger-balances l) acc) am)]
-                   [else ((ledger-balances l) acc)]))))]
+                   [else ((ledger-balances l) acc)]))
+               (ledger-trustlines l)))]
        [(not ((ledger-accounts l) d)) ; destination account does not exist
         (cons payment-no-destination l)]
        [(bvsgt am (bvsub ((ledger-balances l) d) reserve)) ; not enough funds
@@ -125,7 +133,8 @@
 ; because the ledger is just two functions and Rosette supports symbolic, uninterpreted functions, we can make the ledger state part of the symbolic inputs.
 (define-symbolic  bals (~> accountID? int64?))
 (define-symbolic accnts (~> accountID? boolean?))
-(define sym-ledger (ledger accnts bals))
+(define-symbolic tls (~> accountID? (bitvector 1) (bitvector 1) boolean?))
+(define sym-ledger (ledger accnts bals tls))
 
 ;(test empty-ledger (create-account (accountID 0) (int64 2)) (accountID 1))
 
@@ -147,4 +156,6 @@ model
 (define accnts-1 (evaluate accnts model-1))
 (accnts-1 s)
 
-; TODO it's great to synthesize ledgers, but how about synthesizing a sequence of operations that create the ledger in question?
+; TODO it's great to synthesize ledgers, but how about synthesizing a sequence of operations that creates the ledger in question?
+
+; TODO what about tracking what result should each test have? easy, just execute the model.
