@@ -6,9 +6,9 @@
 ; TODO what about definitions comming from libraries?
 
 (require (for-syntax syntax/parse racket/syntax)
-         rosette/lib/destruct racket/stxparam rackunit "./generators.rkt" syntax/parse)
+         rosette/lib/destruct racket/stxparam rackunit "./generators.rkt" syntax/parse macro-debugger/stepper)
 
-(provide define-with-path-explorer)
+(provide define-with-path-explorer all-paths)
 
 (define-syntax-parameter g (lambda (stx) (raise-syntax-error (syntax-e stx) "can only be used inside path-explorer")))
 ; TODO it seem bad to define this globally when we're only going to use it internally in path-explorer
@@ -44,7 +44,7 @@
     (with-syntax ([c-string #`(quote #,(syntax->datum c))])
     (if debug?
         #`(print-branch #,b c-string)
-        #'(values)))) ; TODO is there a better way to do nothing?
+        #'(values)))) ; using (values) to do nothing
   (define (print-debug-info i)
     (if debug?
         (println i)
@@ -109,6 +109,14 @@
     [(_ x:boolean (~do (print-debug-info "integer"))) #'x]
     [(_ x:id (~do (print-debug-info "id"))) #'x]
     [(_ x (~do (print-debug-info "catch all case"))) #'x])) ; catch-all?
+
+; all-paths return a stream of solutions
+(define (all-paths prog) ; prog must take a generator as argument
+  (define gen (exhaustive-gen))
+  (define (go)
+    (let ([solution (solve (prog gen))])
+      (if (equal? (gen 0) 0) (stream-cons solution (go)) (stream-cons solution empty-stream))))
+  (go))
 
 ; tests
 

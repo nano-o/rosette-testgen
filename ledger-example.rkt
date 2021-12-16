@@ -135,15 +135,7 @@
 model
 ((evaluate accnts model) (accountID 0))
 
-; exhaustive enumeration
-(define (all-paths)
-  (define gen (exhaustive-gen))
-  (define (go)
-    (let ([model (solve (test sym-ledger op x gen))])
-      (if (equal? (gen 0) 0) (stream-cons model (go)) (stream-cons model empty-stream))))
-  (go))
-
-(define model-list (stream->list (all-paths)))
+(define model-list (stream->list (all-paths (λ (gen) (test sym-ledger op x gen)))))
 (for ([m model-list])
   (println m))
 (println (format "we made ~a queries" (length model-list)))
