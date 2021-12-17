@@ -77,11 +77,12 @@
   (account ; (~> account-ID? boolean?)
    account-balance ; in stroops
    account-seq-num
-   account-num-sub-sentries
-   account-flags
-   trustline ; (~> account-id asset? boolean?) ; TODO can an account have multiple trustlines for the same asset? We could state conjectures like that and generate tests to check
-   trustline-balance
-   trustline-limit))
+   ;account-num-sub-sentries
+   ;account-flags
+   ;trustline ; (~> account-id asset? boolean?) ; TODO can an account have multiple trustlines for the same asset? We could state conjectures like that and generate tests to check
+   ;trustline-balance
+   ;trustline-limit
+   ))
    
 ; operations
 (struct create-account (destination starting-balance))
@@ -99,9 +100,10 @@
   (source-account
    fee
    seq-num
-   operations)) ; list of operations
+   operation)) ; only one operation for now
 
-(define reserve (int64 10000000)) ; one lumen
+(define (lumen x) (bvmul x (int64 10000000)))
+(define reserve (lumen (int64 1)))
 (define subentry-reserve (int64 5000000)) ; .5 lumen
 
 (define-with-path-explorer (apply-create-account l src dest sbal)
@@ -110,7 +112,7 @@
      (cons create-account-result-code-already-exists l)]
     [(bvslt sbal reserve) ; initial balance below reserve TODO are amounts signed numbers?
      (cons create-account-result-code-low-reserve l)]
-    [(bvslt (ledger-account-balance src) sbal) ; src does not have enough funds
+    [(bvslt ((ledger-account-balance l) src) sbal) ; src does not have enough funds
      (cons create-account-result-code-underfunded l)]
     [else
      (cons
@@ -124,7 +126,7 @@
          (cond
            [(equal? acc dest) sbal] ; dest has sbal starting balance
            [else ((ledger-account-balance l) acc)]))
-       (ledger-trustline l)))]))
+       (ledger-account-seq-num l)))]))
 
 (define-with-path-explorer (apply-operation src op l)
   (destruct op
@@ -132,25 +134,39 @@
     (apply-create-account l src a b)]))
 
 (define-with-path-explorer (apply-transaction tx l)
-   (for/fold ([res-ledger (cons 0 l)]) ; TODO for/fold not supported by path exploredr, or is it?
-             ([op ops])
-     (apply-operation src op (cadr temp-l))))
+  (apply-operation (transaction-source-account tx) (transaction-operation tx) l))
 
-#;(expand/step
- #'(define-with-path-explorer (apply-transaction tx l)
-   (for/fold ([res-ledger (cons 0 l)]) ; TODO for/fold not supported by path exploredr, or is it?
-             ([op ops])
-     (apply-operation src op (cadr temp-l))))) ; TODO terminate on first failure
+#;(expand/step #'(define-with-path-explorer (apply-transaction tx l)
+  (apply-operation (transaction-source-account tx) (transaction-operation tx) l)))
 
-; now let's create inputs
+; concrete inputs
 
-;(define (test gen symbolic-ledger tx)
-  
-#|
-(define model-list (stream->list (all-paths (λ (gen) (test sym-ledger op x gen)))))
+(define concrete-ledger
+  (ledger
+   (λ (acc) (bveq acc (account-ID 0)))
+   (λ (acc) (if (bveq acc (account-ID 0)) (int64 100000000) (int64 0)))
+   (λ (acc) (sequence-number 0))))
+(define concrete-tx (transaction (account-ID 0) (int64 100000000) (sequence-number 0) (create-account (account-ID 1) (int64 10000000))))
+(apply-transaction concrete-tx concrete-ledger)
+
+;(solve (apply-transaction-path-explorer (constant-gen 3) concrete-tx concrete-ledger))
+
+; symbolic inputs
+
+(define-symbolic src-acc dst-acc account-ID?)
+(define-symbolic fee sbal int64?)
+(define-symbolic seq-num sequence-number?)
+(define-symbolic sym-ledger-account (~> account-ID? boolean?))
+(define-symbolic sym-ledger-account-balance (~> account-ID? int64?))
+(define-symbolic sym-ledger-account-seq-num (~> account-ID? sequence-number?))
+
+(define tx (transaction src-acc fee seq-num (create-account dst-acc sbal)))
+(define l (ledger sym-ledger-account sym-ledger-account-balance sym-ledger-account-seq-num))
+
+
+(define model-list (stream->list (all-paths (λ (gen) (apply-transaction-path-explorer gen tx l)))))
 (for ([m model-list])
   (println m))
 (println (format "we made ~a queries" (length model-list)))
 (define num-unsat (count unsat? model-list))
 (println (format "~a queries were unsat" num-unsat))
-|#
