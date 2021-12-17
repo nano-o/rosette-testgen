@@ -23,9 +23,10 @@
 #;(define-for-syntax (set-debug b)
   (set! debug? b))
 
+; (define-with-path-explorer d) defines d and d-path-explorer
 (define-syntax (define-with-path-explorer stx)
   (syntax-parse stx
-    [(_ (name:id arg0:id ...) body)
+    [(_ (name:id arg0:id ...) body:expr)
      (if debug? (println (format "defining ~a" (syntax->datum #'name))) (values))
      #`(begin
          (define (#,(explorer-id #'name) gen arg0 ...)
@@ -101,18 +102,11 @@
                       (path-explorer body0))
                     (assume #f))]
                ...))]))]
-    [(_ ((~datum lambda) (arg0 ...) body) (~do (print-debug-info "lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
-    [(_ ((~datum λ) (arg0 ...) body (~do (print-debug-info "λ")))) #'(lambda (arg0 ...) (path-explorer body))]
-    [(_ (x:keyword arg0 ...) (~do (print-debug-info "keyword"))) #'(x arg0 ...)]
-    [(_ ((~datum quote) arg0 ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
-    [(_ (fn:has-path-explorer arg0 ...) (~do (print-debug-info "path-explorer application"))) #`(#,(explorer-id #'fn) g (path-explorer arg0) ...)]
-    [(_ (fn arg0 ...) (~do (print-debug-info "application"))) #'(fn (path-explorer arg0) ...)]
-    [(_ (fn:has-path-explorer) (~do (print-debug-info "path-explorer application"))) #`(#,(explorer-id #'fn) g)]
-    [(_ (fn arg0 ...) (~do (print-debug-info "application"))) #'(path-explorer fn)]
-    [(_ x:integer (~do (print-debug-info "integer"))) #'x]
-    [(_ x:boolean (~do (print-debug-info "integer"))) #'x]
-    [(_ x:id (~do (print-debug-info "id"))) #'x]
-    [(_ x (~do (print-debug-info "pattern (_ x)"))) #'x]))
+    [(_ ((~or (~datum lambda) (~datum λ)) (arg0:id ...) body:expr) (~do (print-debug-info "lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
+    [(_ ((~datum quote) arg0:expr ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
+    [(_ (fn:has-path-explorer arg0:expr ...) (~do (print-debug-info "path-explorer application"))) #`(#,(explorer-id #'fn) g (path-explorer arg0) ...)]
+    [(_ (fn:id arg0:expr ...) (~do (print-debug-info "application"))) #'(fn (path-explorer arg0) ...)]
+    [(_ x (~do (print-debug-info "catch all case"))) #'x]))
 
 ; all-paths return a stream of solutions
 (define (all-paths prog) ; prog must take a generator as argument
