@@ -8,6 +8,8 @@
 
 ; TODO generate data model from XDR?
 
+; TODO take integer overflows into account.
+
 ;(require rosette/lib/destruct "./path-explorer.rkt" "./generators.rkt" (only-in racket for/list with-handlers for) racket/stream)
 (require rosette/lib/destruct "./path-explorer.rkt" "./generators.rkt")
 (require (for-syntax syntax/parse racket/syntax) syntax/parse macro-debugger/stepper (only-in racket for/fold))
@@ -102,7 +104,7 @@
    seq-num
    operation)) ; only one operation for now
 
-(define (lumen x) (bvmul x (int64 10000000)))
+(define (lumen x) (bvmul x (int64 10000000))) ; one lumen is 10 million stroops
 (define reserve (lumen (int64 1)))
 (define subentry-reserve (int64 5000000)) ; .5 lumen
 
@@ -110,7 +112,7 @@
   (cond
     [((ledger-account l) dest) ; already exists
      (cons create-account-result-code-already-exists l)]
-    [(bvslt sbal reserve) ; initial balance below reserve TODO are amounts signed numbers?
+    [(bvslt sbal reserve) ; initial balance below reserve
      (cons create-account-result-code-low-reserve l)]
     [(bvslt ((ledger-account-balance l) src) sbal) ; src does not have enough funds
      (cons create-account-result-code-underfunded l)]

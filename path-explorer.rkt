@@ -54,10 +54,10 @@
         (values)))
   (define-syntax-class (has-path-explorer)
     (pattern x:id #:when (identifier-binding (explorer-id #'x))))
-  
+  ; TODO use a syntax class instead of a recursive macro?
   (syntax-parse stx
     #:track-literals ; per advice here:  https://school.racket-lang.org/2019/plan/tue-aft-lecture.html
-    [(_ ((~datum if) c then-branch else-branch)) ; TODO what about recursing in the condition?
+    [(_ ((~literal if) c then-branch else-branch)) ; TODO what about recursing in the condition?
      (print-debug-info "if" (syntax->datum stx))
      #`(let ([branch (g 2)] [cond (path-explorer c)])
          (if (equal? branch 0)
@@ -69,7 +69,7 @@
                #,(print-branch-condition #'branch #'(! c))
                (assume (! cond))
                (path-explorer else-branch))))]
-    [(_ ((~datum cond) [c0 body0] ... [(~datum else) ~! else-body]))
+    [(_ ((~literal cond) [c0 body0] ... [(~literal else) ~! else-body]))
      (print-debug-info "cond with else" (syntax->datum stx))
      (with-syntax ([how-many (length (syntax->list #'(c0 ... 'else)))]
                    [else-cond #`(! #,(datum->syntax #'else (cons #'or (syntax->list #'(c0 ...)))))])
@@ -78,7 +78,7 @@
              #,(print-branch-condition #'branch #`(list-ref #,(syntax->string-list #'(c0 ... else-cond)) branch))
              (assume (list-ref (list c0 ... else-cond) branch))
              (list-ref (list (path-explorer body0) ... (path-explorer else-body)) branch))))]
-    [(_ ((~datum cond) [c0 body0] ...))
+    [(_ ((~literal cond) [c0 body0] ...))
      (print-debug-info "cond")
      (with-syntax ([how-many (length (syntax->list #'(c0 ...)))])
        #`(let ([branch (g how-many)])
@@ -86,7 +86,7 @@
              #,(print-branch-condition #'branch #`(list-ref #,(syntax->string-list #'(c0 ...)) branch))
              (assume (list-ref (list c0 ...) branch))
              (list-ref (list (path-explorer body0) ...) branch))))]
-    [(_ ((~datum destruct) d [pat0 body0] ...))
+    [(_ ((~literal destruct) d [pat0 body0] ...))
      (print-debug-info "destruct")
      (with-syntax*
          ([how-many (length (syntax->list #'(pat0 ...)))]
@@ -102,8 +102,8 @@
                       (path-explorer body0))
                     (assume #f))]
                ...))]))]
-    [(_ ((~or (~datum lambda) (~datum λ)) (arg0:id ...) body:expr) (~do (print-debug-info "lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
-    [(_ ((~datum quote) arg0:expr ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
+    [(_ ((~or (~literal lambda) (~literal λ)) (arg0:id ...) body:expr) (~do (print-debug-info "lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
+    [(_ ((~literal quote) arg0:expr ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
     [(_ (fn:has-path-explorer arg0:expr ...) (~do (print-debug-info "path-explorer application"))) #`(#,(explorer-id #'fn) g (path-explorer arg0) ...)]
     [(_ (fn:id arg0:expr ...) (~do (print-debug-info "application"))) #'(fn (path-explorer arg0) ...)]
     [(_ x (~do (print-debug-info "catch all case"))) #'x]))
@@ -118,7 +118,12 @@
 
 ; tests
 
+;(expand/step #'(define-with-path-explorer (test) (λ () (if #t #t #t))))
+
+;(define-with-path-explorer (test) (let ([x 1]) x))
+
 (define-with-path-explorer (test-if i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
+
 
 (define-symbolic i integer?)
 (let ([model (solve (test-if-path-explorer (constant-gen 0) i))])
