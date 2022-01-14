@@ -24,7 +24,20 @@
     ; int
     [(_ typename:string "int")
      (with-syntax ([type-id (format-id stx "~a" (syntax-e #'typename))])
-       #'(make-bv-type type-id 32))]))
+       #'(make-bv-type type-id 32))]
+    ; unsigned int
+    ; TODO: would be nice to remember it's unsigned and not allow signed operations
+    [(_ typename:string "unsigned int")
+     (with-syntax ([type-id (format-id stx "~a" (syntax-e #'typename))])
+       #'(make-bv-type type-id 32))]
+    ; hyper
+    [(_ typename:string "hyper")
+     (with-syntax ([type-id (format-id stx "~a" (syntax-e #'typename))])
+       #'(make-bv-type type-id 64))]
+    ; unsigned hyper
+    [(_ typename:string "unsigned hyper")
+     (with-syntax ([type-id (format-id stx "~a" (syntax-e #'typename))])
+       #'(make-bv-type type-id 64))]))
 
 #;(include (file "./Stellar.xdr.scm"))
 
