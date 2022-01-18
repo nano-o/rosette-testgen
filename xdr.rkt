@@ -1,34 +1,29 @@
 #lang rosette
 
 (require racket/include)
-(require (for-syntax syntax/parse racket/syntax) macro-debugger/stepper)
+(require (for-syntax syntax/parse racket/syntax) syntax/parse racket/syntax syntax/parse/define macro-debugger/stepper)
 
-; We start with a set of macro that give meaning to a parse tree produced by guile-rpc
+; We start with a set of macros that give meaning to a parse tree produced by guile-rpc
 
 ; a bitvector type needs a type predicate and a constructor
-(define-syntax (make-bv-type stx)
-  (syntax-parse stx
-    [(_ name:string nbits:number)
-     (with-syntax
-         ([type-name (format-id #'name #:source #'name "~a" (syntax-e #'name))]
-          [type-pred (format-id #'name #:source #'name "~a?" (syntax-e #'name))])
-     #`(begin
-         (define type-pred (bitvector nbits))
-         (define (type-name val) (bv val type-pred))))]))
+(define-syntax-parse-rule (make-bv-type name:string nbits:number)
+  #:with type-name (format-id #'name #:source #'name "~a" (syntax-e #'name))
+  #:with type-pred (format-id #'name #:source #'name "~a?" (syntax-e #'name))
+  (begin
+    (define type-pred (bitvector nbits))
+    (define (type-name val) (bv val type-pred))))
 
 ; enums are just 32-bit bitvectors
-(define-syntax (make-enum stx)
-  (syntax-parse stx
-    [(_ name:string ([field0:string value0:number] ...)) ; NOTE must allow negative values
-     (with-syntax
-         ([nbits 32]
-          [type-pred (format-id #'name #:source #'name "~a?" (syntax-e #'name))]
-          [(member0 ...) (map (λ (f) (format-id #'name #:source f "~a-~a" (syntax-e #'name) (syntax-e f))) (syntax->list #'(field0 ...)))])
-       ; NOTE: we need to prefix union-member names by the type name because it's a local scope according to the RFC
-       #'(begin
-           (define type-pred (bitvector nbits))
-           (define member0 (bv value0 type-pred)) ...))]))
+(define-syntax-parse-rule (make-enum name:string ([field0:string value0:number] ...)) ; NOTE must allow negative values
+  #:with type-pred (format-id #'name #:source #'name "~a?" (syntax-e #'name))
+  #:with (member0 ...) (map (λ (f) (format-id #'name #:source f "~a-~a" (syntax-e #'name) (syntax-e f))) (syntax->list #'(field0 ...)))
+  ; NOTE: we need to prefix union-member names by the type name because it's a local scope according to the RFC
+  (begin
+    (define type-pred (bitvector 32))
+    (define member0 (bv value0 type-pred)) ...))
 
+; the define-type macro:
+; TODO: is that what define-syntax-parser is for?
 (define-syntax (define-type stx)
   (syntax-parse stx
     ; opaque fixe-length arrays
@@ -49,7 +44,10 @@
      #'(make-bv-type typename 64)]
     ; enum
     [(_ typename:string ((~literal enum) [name0:string val0:number] ...))
-     #'(make-enum typename ([name0 val0] ...))]))
+     #'(make-enum typename ([name0 val0] ...))]
+    ; union
+    #;[(_ typename:string ((~literal union) ((~literal case) (discriminant:string discriminant-type:string) ([name0:string val0:number] ...))))]
+    ))
 
 #;(include (file "./Stellar.xdr.scm"))
 
