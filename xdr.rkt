@@ -1,7 +1,7 @@
 #lang rosette
 
 (require racket/include)
-(require (for-syntax syntax/parse racket/syntax) syntax/parse racket/syntax syntax/parse/define macro-debugger/stepper)
+(require (for-syntax racket/syntax) syntax/parse/define macro-debugger/stepper)
 
 ; We start with a set of macros that give meaning to a parse tree produced by guile-rpc
 
@@ -22,13 +22,20 @@
     (define type-pred (bitvector 32))
     (define member0 (bv value0 type-pred)) ...))
 
+(begin-for-syntax
+  (define-syntax-class opaque-fixed-length-array
+    [pattern (typename:string ((~literal fixed-length-array) "opaque" nbits:nat))])
+  (define-syntax-class union
+    [pattern (typename:string
+              ((~literal union)
+               ((~literal case)
+                (tag-name:string tag-type:string)
+                ([(tag-value0:string) (variant-name0:string variant-type0:string)] ...))))]))
+
 ; the define-type macro:
 ; TODO: is that what define-syntax-parser is for?
 (define-syntax (define-type stx)
   (syntax-parse stx
-    ; opaque fixe-length arrays
-    [(_ typename:string ((~literal fixed-length-array) "opaque" nbits:nat))
-     #'(make-bv-type typename nbits)]
     ; int
     [(_ typename:string "int")
      #'(make-bv-type typename 32)]
@@ -45,8 +52,12 @@
     ; enum
     [(_ typename:string ((~literal enum) [name0:string val0:number] ...))
      #'(make-enum typename ([name0 val0] ...))]
+    ; opaque fixe-length arrays
+    [(_ . ofla:opaque-fixed-length-array)
+     #'(make-bv-type ofla.typename ofla.nbits)]
     ; union
-    #;[(_ typename:string ((~literal union) ((~literal case) (discriminant:string discriminant-type:string) ([name0:string val0:number] ...))))]
+    [(_ . u:union)
+     #'(u.typename)]
     ))
 
 #;(include (file "./Stellar.xdr.scm"))
