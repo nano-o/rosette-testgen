@@ -48,8 +48,7 @@
 
 ; the define-type macro:
 ; TODO: is that what define-syntax-parser is for?
-(define-syntax (define-type stx)
-  (syntax-parse stx
+(define-syntax-parser define-type
     ; int
     [(_ typename:string "int")
      #'(make-bv-type typename 32)]
@@ -71,8 +70,7 @@
      #'(make-bv-type ofla.typename ofla.nbits)]
     ; union
     [(_ . u:union-class)
-     #'(display u.typename)]
-    ))
+     #'(display 'u.variants)])
 
 #;(include (file "./Stellar.xdr.scm"))
 
