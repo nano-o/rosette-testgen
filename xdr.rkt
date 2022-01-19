@@ -13,7 +13,7 @@
     (define type-pred (bitvector nbits))
     (define (type-name val) (bv val type-pred))))
 
-; enums are just 32-bit bitvectors
+; enums are just 32-bit bitvectors; we define a type-predicate shorthand and symbols for each member, but no constructor
 (define-syntax-parse-rule (make-enum name:string ([field0:string value0:number] ...)) ; NOTE must allow negative values
   #:with type-pred (format-id #'name #:source #'name "~a?" (syntax-e #'name))
   #:with (member0 ...) (map (λ (f) (format-id #'name #:source f "~a-~a" (syntax-e #'name) (syntax-e f))) (syntax->list #'(field0 ...)))
@@ -22,15 +22,29 @@
     (define type-pred (bitvector 32))
     (define member0 (bv value0 type-pred)) ...))
 
+; TODO: unions
+; A union is a list starting with a tag
+; We probably need a case construct
+; What about a type predicate?
+
 (begin-for-syntax
   (define-syntax-class opaque-fixed-length-array
     [pattern (typename:string ((~literal fixed-length-array) "opaque" nbits:nat))])
-  (define-syntax-class union
+  #;(define-syntax-class union-class
     [pattern (typename:string
               ((~literal union)
                ((~literal case)
                 (tag-name:string tag-type:string)
-                ([(tag-value0:string) (variant-name0:string variant-type0:string)] ...))))]))
+                (((tag-value0:string) (variant-name0:string variant-type0:string)) ...))))
+             #:attr variants #'((tag-value0 variant-name0 variant-type0) ...)])
+  (define-syntax-class variant-spec
+    [pattern ((tag-value:string) (variant-name:string variant-type:string))])
+  (define-syntax-class union-class
+    [pattern (typename:string
+              ((~literal union)
+               ((~literal case)
+                (tag-name:string tag-type:string) v0:variant-spec ...)))
+             #:attr variants #'((v0.tag-value v0.variant-name v0.variant-type) ...)]))
 
 ; the define-type macro:
 ; TODO: is that what define-syntax-parser is for?
@@ -56,8 +70,8 @@
     [(_ . ofla:opaque-fixed-length-array)
      #'(make-bv-type ofla.typename ofla.nbits)]
     ; union
-    [(_ . u:union)
-     #'(u.typename)]
+    [(_ . u:union-class)
+     #'(display u.typename)]
     ))
 
 #;(include (file "./Stellar.xdr.scm"))
@@ -76,6 +90,11 @@
             ("KEY_TYPE_PRE_AUTH_TX" 1)
             ("KEY_TYPE_HASH_X" 2)
             ("KEY_TYPE_MUXED_ED25519" 256)))
+  (define-type
+    "PublicKey"
+    (union (case ("type" "PublicKeyType")
+             (("PUBLIC_KEY_TYPE_ED25519")
+              ("ed25519" "uint256")))))
 
   (Hash 1)
   (int32 0)
