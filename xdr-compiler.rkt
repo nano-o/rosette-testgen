@@ -14,86 +14,103 @@
   (for-syntax racket/syntax))
 
 (begin-for-syntax
-  (define base-types (list "int" "unsigned int" "hyper" "unsigned hyper" "bool" "double" "quadruple" "float"))
+  ; matches a string t, creates the identifier 't
+  (define-syntax-class identifier
+    [pattern t:string
+             #:attr repr (format-id #'t "~a" (syntax-e #'t))])
+  (define base-types
+    (list "int" "unsigned int" "hyper" "unsigned hyper" "bool" "double" "quadruple" "float"))
   (define (base-type? t)
     (member t base-types))
+  ; a base type:
   (define-syntax-class base-type
-    [pattern t:string/symbol
+    [pattern t:identifier
              #:fail-when (not (base-type? (syntax-e #'t))) (format "not a base type: ~a" (syntax-e #'t))
-             #:attr symbol #'t.symbol])
-  (define-syntax-class string/symbol
-    [pattern t:string
-             #:attr symbol (format-id #'t "~a" (syntax-e #'t))])
-  (define-syntax-class (string/scoped-symbol scope)
-    [pattern t:string
-             #:attr symbol (if scope (format-id #'t "~a:~a" scope (syntax-e #'t)) (format-id #'t "~a" (syntax-e #'t)))])
+             #:attr repr #'t.repr])
   (define-syntax-class opaque-fixed-length-array
-    [pattern ((~literal fixed-length-array) "opaque" nbits:nat)])
+    [pattern ((~literal fixed-length-array) "opaque" nbytes:nat)
+             #:attr repr #'(opaque-array nbytes)])
   (define-syntax-class opaque-variable-length-array
-    [pattern ((~literal variable-length-array) "opaque" nbits:nat)])
+    [pattern ((~literal variable-length-array) "opaque" nbytes:nat)
+             #:attr repr #'(opaque-variable-length-array nbytes)])
+  (define-syntax-class xdr-string
+    [pattern ((~literal string) nbytes:nat)
+             #:attr repr #'(string nbytes)])
+  ; either a base type, a type identifier, or an array
+  (define-syntax-class simple-type
+    [pattern (~or* t:base-type t:opaque-fixed-length-array t:opaque-variable-length-array t:identifier t:xdr-string)
+             #:attr repr #'t.repr])
+  ; matches a string t, creates the identifier 'scope:t:
+  (define-syntax-class (string/scoped-repr scope)
+    [pattern t:string
+             #:attr repr (if scope (format-id #'t "~a:~a" scope (syntax-e #'t)) (format-id #'t "~a" (syntax-e #'t)))])
+  ; matches either a literal constant or an string t, in which case it creates the identifier 'scope:t if scope is not #f and otherwise 't:
   (define-syntax-class (constant scope)
     [pattern n:number
-             #:attr value #'n]
-    [pattern (~var s (string/scoped-symbol scope))
-             #:fail-when (not (identifier-binding #'s.symbol)) (format "~a is not defined" (syntax-e #'s.symbol))
-             #:attr value #'s.symbol])
+             #:attr repr #'n]
+    [pattern (~var s (string/scoped-repr scope)) ; TODO: can we check it's a constant?
+             #:fail-when (not (identifier-binding #'s.repr)) (format "~a is not defined" (syntax-e #'s.repr))
+             #:attr repr #'s.repr])
+  ; one variant of a union:
   (define-syntax-class (union-variant-spec scope)
-    [pattern (((~var c (constant scope))) (accessor:string t:string/symbol))
-             #:attr descr #'(c.value (accessor t.symbol))]
-    [pattern (((~var c (constant scope))) ("void"))
-            #:attr descr #'(c.value 'void)])
+    [pattern (((~var c (constant scope))) (accessor:string t:identifier))
+             #:attr repr #'(c.repr (accessor t.repr))]
+    [pattern (((~var c (constant scope))) "void")
+            #:attr repr #'(c.repr void)])
+  ; a union specification:
   (define-syntax-class union-spec
     [pattern ((~literal union)
-              ((~literal case) (tag-accessor:string type:string/symbol)
-                               (~var v0 (union-variant-spec (syntax->datum #'type))) ...))
-             #:attr variants #'(v0.descr ...)
-             #:attr tag-type #'type.symbol]))
+              ((~literal case) (tag-accessor:string type:identifier)
+                               (~var v0 (union-variant-spec (syntax->datum #'type))) ...)) ; TODO: type can be bool, int, etc. in which case the scoping thing is wrong
+             #:attr repr #'(union (tag-accessor type.repr) (v0.repr ...))]))
 
 (define-syntax-parser define-constant
-  [(_ s:string/symbol (~var c (constant #f)))
-   #'(define s.symbol c.value)])
+  [(_ s:identifier (~var c (constant #f)))
+   #'(define s.repr c.repr)])
 
 (define-syntax-parser define-type
+  ; simple types
+  [(_ t1:identifier t2:simple-type)
+   #'(define t1.repr 't2.repr)]
   ; base types
-  [(_ t:string/symbol b:base-type)
-   #'(define t.symbol 'b.symbol)]
+  [(_ t:identifier b:base-type)
+   #'(define t.repr 'b.repr)]
   ; type alias
-  [(_ t1:string/symbol t2:string/symbol)
-   #'(define t1.symbol 't2.symbol)]
+  [(_ t1:identifier t2:identifier)
+   #'(define t1.repr 't2.repr)]
   ; fixed-length opaque array
-  [(_ t:string/symbol a:opaque-fixed-length-array)
-   #'(define t.symbol '(opaque-array a.nbits))]
+  [(_ t:identifier a:opaque-fixed-length-array)
+   #'(define t.repr a.repr)]
   ; variable-length opaque array
-  [(_ t:string/symbol a:opaque-variable-length-array)
-   #'(define t.symbol '(opaque-variable-array a.nbits))]
+  [(_ t:identifier a:opaque-variable-length-array)
+   #'(define t.repr '(opaque-variable-array a.nbytes))]
   ; enum
-  ; defines a symbol for each value (prefixed by the enum-type name) and a symbol for the enum type
-  [(_ t:string/symbol ((~literal enum) [(~var name0 (string/scoped-symbol (syntax->datum #'t))) (~var val0 (constant #f))] ...))
+  ; defines a symbol for each value (prefixed by the enum-type name) and a repr for the enum type
+  [(_ t:identifier ((~literal enum) [(~var name0 (string/scoped-repr (syntax->datum #'t))) (~var val0 (constant #f))] ...))
    #'(begin
-       (define name0.symbol val0.value) ...
-       (define t.symbol '(enum name0.symbol ...)))]
+       (define name0.repr val0.repr) ...
+       (define t.repr '(enum name0.repr ...)))]
   ; union
-  [(_ t:string/symbol u:union-spec)
-   #'(define t.symbol
-       '(union (u.tag-accessor u.tag-type) u.variants))]
+  [(_ t:identifier u:union-spec)
+   #'(define t.repr 'u.repr)]
   ; struct
-  [(_ t:string/symbol ((~literal struct) (accessor0:string type0:string/symbol) ...))
-   #'(define t.symbol
-       '(struct (accessor0 type0.symbol) ...))])
+  [(_ t:identifier ((~literal struct) (accessor0:string type0:simple-type) ...))
+   #'(define t.repr
+       '(struct (accessor0 type0.repr) ...))])
 
 ; tests
 (begin 
   (define-type "my-int" "int")
   (check-equal? my-int 'int)
   (define-type "test-type" (fixed-length-array "opaque" 32))
-  (check-equal? test-type (list 'opaque-array 32))
+  (check-equal? test-type '(opaque-array 32))
   (define-type "test-type-2" "test-type")
   (check-equal? test-type-2 'test-type)
   (define-constant "test-constant" 0)
   (check-equal? test-constant 0)
   (define-type "test-enum" (enum ["test-0" "test-constant"] ["test-1" 1] ["test-2" 2]))
   (check-equal? test-enum '(enum test-enum:test-0 test-enum:test-1 test-enum:test-2))
-  (define-type "test-union" (union (case ("test-union-tag" "test-enum") (("test-0") ("x" "test-type")) (("test-1") ("void")))))
-  (check-equal? test-union '(union ("test-union-tag" test-enum) ((test-enum:test-0 ("x" test-type)) (test-enum:test-1 'void))))
+  (define-type "test-union" (union (case ("test-union-tag" "test-enum") (("test-0") ("x" "test-type")) (("test-1") "void"))))
+  (check-equal? test-union '(union ("test-union-tag" test-enum) ((test-enum:test-0 ("x" test-type)) (test-enum:test-1 void))))
   (define-type "test-struct" (struct ("member1" "test-type") ("member2" "bool")))
   (check-equal? test-struct '(struct ("member1" test-type) ("member2" bool))))
