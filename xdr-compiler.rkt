@@ -7,7 +7,7 @@
 ; Note that we create names containing ":". This should be okay as per RFC45906, which states that the only special character allowed in XDR identifiers is "_".
 ; See https://datatracker.ietf.org/doc/html/rfc4506#section-6.2
 
-(provide define-type (all-from-out racket))
+(provide define-type define-constant bool bool:TRUE bool:FALSE (all-from-out racket))
 
 (require
   syntax/parse/define macro-debugger/stepper rackunit
@@ -19,7 +19,7 @@
     [pattern t:string
              #:attr repr (format-id #'t "~a" (syntax-e #'t))])
   (define base-types
-    (list "int" "unsigned int" "hyper" "unsigned hyper" "bool" "double" "quadruple" "float"))
+    (list "int" "unsigned int" "hyper" "unsigned hyper" "double" "quadruple" "float"))
   (define (base-type? t)
     (member t base-types))
   ; a base type:
@@ -27,30 +27,40 @@
     [pattern t:identifier
              #:fail-when (not (base-type? (syntax-e #'t))) (format "not a base type: ~a" (syntax-e #'t))
              #:attr repr #'t.repr])
-  (define-syntax-class opaque-fixed-length-array
-    [pattern ((~literal fixed-length-array) "opaque" nbytes:nat)
-             #:attr repr #'(opaque-array nbytes)])
-  (define-syntax-class opaque-variable-length-array
-    [pattern ((~literal variable-length-array) "opaque" nbytes:nat)
-             #:attr repr #'(opaque-variable-length-array nbytes)])
-  (define-syntax-class xdr-string
-    [pattern ((~literal string) nbytes:nat)
-             #:attr repr #'(string nbytes)])
-  ; either a base type, a type identifier, or an array
-  (define-syntax-class simple-type
-    [pattern (~or* t:base-type t:opaque-fixed-length-array t:opaque-variable-length-array t:identifier t:xdr-string)
-             #:attr repr #'t.repr])
-  ; matches a string t, creates the identifier 'scope:t:
-  (define-syntax-class (string/scoped-repr scope)
-    [pattern t:string
-             #:attr repr (if scope (format-id #'t "~a:~a" scope (syntax-e #'t)) (format-id #'t "~a" (syntax-e #'t)))])
   ; matches either a literal constant or an string t, in which case it creates the identifier 'scope:t if scope is not #f and otherwise 't:
   (define-syntax-class (constant scope)
-    [pattern n:number
+    [pattern n:number ; TODO: hex numbers
              #:attr repr #'n]
-    [pattern (~var s (string/scoped-repr scope)) ; TODO: can we check it's a constant?
+    [pattern (~var s (scoped-identifier scope)) ; TODO: can we check it's a constant?
              #:fail-when (not (identifier-binding #'s.repr)) (format "~a is not defined" (syntax-e #'s.repr))
              #:attr repr #'s.repr])
+  ; opaque fixed-length array
+  (define-syntax-class opaque-fixed-length-array
+    [pattern ((~literal fixed-length-array) "opaque" (~var nbytes (constant #f)))
+             #:attr repr #'(opaque-array nbytes.repr)])
+  ; opaque variable-length array
+  (define-syntax-class opaque-variable-length-array
+    [pattern ((~literal variable-length-array) "opaque" (~var nbytes (constant #f)))
+             #:attr repr #'(opaque-variable-length-array nbytes.repr)])
+  ; variable-length array
+  (define-syntax-class variable-length-array
+    [pattern ((~literal variable-length-array) elem-type:identifier (~var nbytes (constant #f)))
+             #:attr repr #'(variable-length-array elem-type.repr nbytes.repr)])
+  ; string
+  (define-syntax-class xdr-string
+    [pattern ((~literal string) (~var nbytes (constant #f)))
+             #:attr repr #'(string nbytes.repr)])
+  ; either a base type, a type identifier, or an array
+  (define-syntax-class simple-type
+    [pattern (~or* t:base-type t:opaque-fixed-length-array t:opaque-variable-length-array t:variable-length-array t:identifier t:xdr-string)
+             #:attr repr #'t.repr])
+  ; matches a string t, creates the identifier 'scope:t:
+  (define-syntax-class (scoped-identifier scope)
+    [pattern t:string
+             #:attr repr (if
+                          (or (not scope) (base-type? scope))
+                          (format-id #'t "~a" (syntax-e #'t))
+                          (format-id #'t "~a:~a" scope (syntax-e #'t)))])
   ; one variant of a union:
   (define-syntax-class (union-variant-spec scope)
     [pattern (((~var c (constant scope))) (accessor:string t:identifier))
@@ -61,7 +71,7 @@
   (define-syntax-class union-spec
     [pattern ((~literal union)
               ((~literal case) (tag-accessor:string type:identifier)
-                               (~var v0 (union-variant-spec (syntax->datum #'type))) ...)) ; TODO: type can be bool, int, etc. in which case the scoping thing is wrong
+                               (~var v0 (union-variant-spec (syntax->datum #'type))) ...))
              #:attr repr #'(union (tag-accessor type.repr) (v0.repr ...))]))
 
 (define-syntax-parser define-constant
@@ -86,7 +96,7 @@
    #'(define t.repr '(opaque-variable-array a.nbytes))]
   ; enum
   ; defines a symbol for each value (prefixed by the enum-type name) and a repr for the enum type
-  [(_ t:identifier ((~literal enum) [(~var name0 (string/scoped-repr (syntax->datum #'t))) (~var val0 (constant #f))] ...))
+  [(_ t:identifier ((~literal enum) [(~var name0 (scoped-identifier (syntax->datum #'t))) (~var val0 (constant #f))] ...))
    #'(begin
        (define name0.repr val0.repr) ...
        (define t.repr '(enum name0.repr ...)))]
@@ -94,9 +104,14 @@
   [(_ t:identifier u:union-spec)
    #'(define t.repr 'u.repr)]
   ; struct
-  [(_ t:identifier ((~literal struct) (accessor0:string type0:simple-type) ...))
+  [(_ t:identifier ((~literal struct) (accessor0:string type0:simple-type) ...)) ; TODO: all types can be nested, not just simple ones...
    #'(define t.repr
        '(struct (accessor0 type0.repr) ...))])
+
+; bool is predefined
+(define bool:TRUE 0)
+(define bool:FALSE 1)
+(define bool '(enum bool:TRUE bool:FALSE))
 
 ; tests
 (begin 
