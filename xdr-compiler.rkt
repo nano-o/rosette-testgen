@@ -1,84 +1,101 @@
 #lang racket
 
-; This module provides macros define-type and define-constant.
-; Those macros define symbols for each defined type and constant.
-; Each symbol corresponds to an XDR type or constant (including enum values) and is bound to its description.
+; The guile-rpc parser transforms an XDR file into a list of define-type and define-constant s-exprs.
+; This module provides macros that turn such an AST into a more useful, symbol-table-like data structure.
 
-; Note that we create names containing ":". This should be okay as per RFC45906, which states that the only special character allowed in XDR identifiers is "_".
-; See https://datatracker.ietf.org/doc/html/rfc4506#section-6.2
+; Note that we do not handle the all possible guile-rpc ASTs, but only a super-set of those that appear when parsing Stellar's XDR files.
 
-(provide define-type define-constant bool bool:TRUE bool:FALSE (all-from-out racket))
+#;(provide define-type define-constant bool bool:TRUE bool:FALSE (all-from-out racket))
+
+(provide parse-asts)
 
 (require
-  syntax/parse/define macro-debugger/stepper rackunit
-  (for-syntax racket/syntax))
+  syntax/parse syntax/parse/define racket/syntax rackunit macro-debugger/stepper
+  #;(for-syntax racket/syntax))
 
-(begin-for-syntax
-  ; matches a string t, creates the identifier 't
-  (define-syntax-class identifier
-    [pattern t:string
-             #:attr repr (format-id #'t "~a" (syntax-e #'t))])
-  (define base-types
-    (list "int" "unsigned int" "hyper" "unsigned hyper" "double" "quadruple" "float"))
-  (define (base-type? t)
-    (member t base-types))
-  ; a base type:
-  (define-syntax-class base-type
-    [pattern t:identifier
-             #:fail-when (not (base-type? (syntax-e #'t))) (format "not a base type: ~a" (syntax-e #'t))
-             #:attr repr #'t.repr])
-  ; matches either a literal constant or an string t, in which case it creates the identifier 'scope:t if scope is not #f and otherwise 't:
-  (define-syntax-class (constant scope)
-    [pattern n:number ; TODO: hex numbers
-             #:attr repr #'n]
-    [pattern (~var s (scoped-identifier scope)) ; TODO: can we check it's a constant?
-             #:fail-when (not (identifier-binding #'s.repr)) (format "~a is not defined" (syntax-e #'s.repr))
-             #:attr repr #'s.repr])
+; First pass: a recursive syntax class, type-decl, that just matches and guile-rpc AST type declaration
+(begin
+  (define-syntax-class constant
+    [pattern (~or* n:number s:string)])
   ; opaque fixed-length array
   (define-syntax-class opaque-fixed-length-array
-    [pattern ((~literal fixed-length-array) "opaque" (~var nbytes (constant #f)))
-             #:attr repr #'(opaque-array nbytes.repr)])
+    [pattern ((~literal fixed-length-array) "opaque" (~var nbytes constant))])
   ; opaque variable-length array
   (define-syntax-class opaque-variable-length-array
-    [pattern ((~literal variable-length-array) "opaque" (~var nbytes (constant #f)))
-             #:attr repr #'(opaque-variable-length-array nbytes.repr)])
+    [pattern ((~literal variable-length-array) "opaque" (~var nbytes constant))])
+  ; fixed-length array
+  (define-syntax-class fixed-length-array
+    [pattern ((~literal fixed-length-array) elem-type:string constant)]) ; TODO seems that elem-type can be an arbitrary, in-line, anonymous type
   ; variable-length array
   (define-syntax-class variable-length-array
-    [pattern ((~literal variable-length-array) elem-type:identifier (~var nbytes (constant #f)))
-             #:attr repr #'(variable-length-array elem-type.repr nbytes.repr)])
+    [pattern ((~literal variable-length-array) elem-type:string constant)]) ; TODO seems that elem-type can be an arbitrary, in-line, anonymous type
+  ; all arrays
+  (define-syntax-class array
+    [pattern (~or* a:opaque-fixed-length-array a:opaque-variable-length-array a:fixed-length-array a:variable-length-array)])
   ; string
   (define-syntax-class xdr-string
-    [pattern ((~literal string) (~var nbytes (constant #f)))
-             #:attr repr #'(string nbytes.repr)])
-  ; either a base type, a type identifier, or an array
-  (define-syntax-class simple-type
-    [pattern (~or* t:base-type t:opaque-fixed-length-array t:opaque-variable-length-array t:variable-length-array t:identifier t:xdr-string)
-             #:attr repr #'t.repr])
-  ; matches a string t, creates the identifier 'scope:t:
-  (define-syntax-class (scoped-identifier scope)
-    [pattern t:string
-             #:attr repr (if
-                          (or (not scope) (base-type? scope))
-                          (format-id #'t "~a" (syntax-e #'t))
-                          (format-id #'t "~a:~a" scope (syntax-e #'t)))])
+    [pattern ((~literal string) (~var nbytes constant))])
   ; one variant of a union:
-  (define-syntax-class (union-variant-spec scope)
-    [pattern (((~var c (constant scope))) (accessor:string t:identifier))
-             #:attr repr #'(c.repr (accessor t.repr))]
-    [pattern (((~var c (constant scope))) "void")
-            #:attr repr #'(c.repr void)])
+  (define-syntax-class union-variant
+    [pattern (((~var c constant)) (accessor:string (~or* string _:type-decl)))]
+    [pattern (((~var c constant)) "void")])
   ; a union specification:
-  (define-syntax-class union-spec
+  (define-syntax-class union
     [pattern ((~literal union)
-              ((~literal case) (tag-accessor:string type:identifier)
-                               (~var v0 (union-variant-spec (syntax->datum #'type))) ...))
-             #:attr repr #'(union (tag-accessor type.repr) (v0.repr ...))]))
+              ((~literal case) (tag-accessor:string type:string) ; TODO type could be an in-line type declaration
+                               (~var v0 union-variant)) ...)])
+  ; struct
+  (define-syntax-class struct
+    [pattern ((~literal struct) (accessor0:string type0:type-decl) ...)])
+  ; enum
+  (define-syntax-class enum
+    [pattern ((~literal enum) (t:string v:constant) ...)])
+  ; arbitrary type declaration
+  (define-splicing-syntax-class splicing-type-decl
+    [pattern (~seq s:string (~or* t:array t:xdr-string t:union t:struct t:enum))])
+  (define-syntax-class type-decl
+    [pattern (s:string (~or* t:array t:xdr-string t:union t:struct t:enum))])
+  (define-syntax-class type-def
+    [pattern ((~literal define-type) d:splicing-type-decl)])
+  (define-syntax-class const-def
+    [pattern ((~literal define-constant) s:string c:constant)])
+  (define-syntax-class defs
+    [pattern ((~or* _:type-def _:const-def) ...)]))
 
-(define-syntax-parser define-constant
-  [(_ s:identifier (~var c (constant #f)))
+; tests
+(define (parse-ast stx)
+  (syntax-parse stx 
+    [(~or* _:type-def _:const-def) #t]))
+(check-equal?
+ (parse-ast
+    #'(define-type
+        "uint256"
+        (fixed-length-array "opaque" 32)))
+ #t)
+(check-equal?
+ (parse-ast
+ #'(define-type
+     "PublicKeyType"
+     (enum ("PUBLIC_KEY_TYPE_ED25519" 0))))
+ #t)
+(check-equal?
+ (parse-ast
+  #'(define-type
+      "PublicKey"
+      (union (case ("type" "PublicKeyType")
+               (("PUBLIC_KEY_TYPE_ED25519")
+                ("ed25519" "uint256"))))))
+ #t)
+
+(define (parse-asts stx)
+  (syntax-parse stx 
+    [defs #t]))
+
+#;(define-syntax-parser define-constant
+  [(_ s:identifier (~var c constant))
    #'(define s.repr c.repr)])
 
-(define-syntax-parser define-type
+#;(define-syntax-parser define-type
   ; simple types
   [(_ t1:identifier t2:simple-type)
    #'(define t1.repr 't2.repr)]
@@ -109,12 +126,14 @@
        '(struct (accessor0 type0.repr) ...))])
 
 ; bool is predefined
+#|
 (define bool:TRUE 0)
 (define bool:FALSE 1)
 (define bool '(enum bool:TRUE bool:FALSE))
+|#
 
 ; tests
-(begin 
+#;(begin 
   (define-type "my-int" "int")
   (check-equal? my-int 'int)
   (define-type "test-type" (fixed-length-array "opaque" 32))
