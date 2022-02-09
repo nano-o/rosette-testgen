@@ -3,17 +3,22 @@
 ; The guile-rpc parser transforms an XDR file into a list of define-type and define-constant s-exprs.
 ; This module provides macros that turn such an AST into a more useful, symbol-table-like data structure.
 
-; Note that we do not handle the all possible guile-rpc ASTs, but only a super-set of those that appear when parsing Stellar's XDR files.
-
-#;(provide define-type define-constant bool bool:TRUE bool:FALSE (all-from-out racket))
+; Note that we do not handle the all possible guile-rpc ASTs, but only a super-set of those that appear in Stellar's XDR files.
 
 (provide parse-asts)
 
 (require
-  syntax/parse syntax/parse/define racket/syntax rackunit macro-debugger/stepper
+  syntax/parse syntax/parse/define racket/syntax
+  racket/hash
+  rackunit macro-debugger/stepper
   #;(for-syntax racket/syntax))
 
-; First pass: a recursive syntax class, type-decl, that just matches and guile-rpc AST type declaration
+; First pass: a recursive syntax class, defs, that builds a symbol table.
+; Each symbol is a type name and maps to the description of the type
+; The symbol for a types t1 that is a direct child of t2 is t1:t2
+; This should be okay as per RFC45906, which states that the only special character allowed in XDR identifiers is "_".
+; See https://datatracker.ietf.org/doc/html/rfc4506#section-6.2
+
 (begin
   (define-syntax-class constant
     [pattern (~or* n:number s:string)])
@@ -37,32 +42,63 @@
     [pattern ((~literal string) (~var nbytes constant))])
   ; one variant of a union:
   (define-syntax-class union-variant
-    [pattern (((~var c constant)) (accessor:string (~or* string _:type-decl)))]
+    #:description "a variant inside a union-type specification"
+    [pattern (((~var c constant)) (accessor:string (~or* string _:(type-decl "TODO"))))]
     [pattern (((~var c constant)) "void")])
   ; a union specification:
   (define-syntax-class union
+    #:description "a union-type specification"
     [pattern ((~literal union)
               ((~literal case) (tag-accessor:string type:string) ; TODO type could be an in-line type declaration
                                (~var v0 union-variant)) ...)])
   ; struct
-  (define-syntax-class struct
-    [pattern ((~literal struct) (accessor0:string type0:type-decl) ...)])
+  (define-syntax-class (struct-spec type-name)
+    #:description "a struct-type specification"
+    [pattern ((~literal struct) (accessor0:string type0:(type-spec type-name)) ...)])
   ; enum
-  (define-syntax-class enum
+  (define-syntax-class enum-spec
+    #:description "an enum-type specification"
     [pattern ((~literal enum) (t:string v:constant) ...)])
-  ; arbitrary type declaration
+  ; arbitrary spliced type declaration:
+  ; TODO: only used in type-decl, so could be inline there
   (define-splicing-syntax-class splicing-type-decl
-    [pattern (~seq s:string (~or* t:array t:xdr-string t:union t:struct t:enum))])
-  (define-syntax-class type-decl
-    [pattern (s:string (~or* t:array t:xdr-string t:union t:struct t:enum))])
+    #:description "a spliced type declaration"
+    [pattern (~seq (~var s string) (~or* t:array t:xdr-string t:union (~var t (struct-spec (syntax-e #'s))) t:enum-spec))
+             #:attr sym-table (hash (syntax-e #'s) "t.repr")])
+  ; arbitrary type declaration:
+  (define-syntax-class (type-decl scope)
+    #:description "a type declaration, optionally within a scope"
+    [pattern (s:string (~or* t:array t:xdr-string t:union (~var t (struct-spec (syntax-e #'s))) t:enum-spec))
+             #:attr sym-table (hash (if scope (format "~a:~a" scope (syntax-e #'s)) "t.repr"))])
+  ; define-type:
   (define-syntax-class type-def
-    [pattern ((~literal define-type) d:splicing-type-decl)])
+    #:description "a type definition"
+    [pattern ((~literal define-type) d:splicing-type-decl)
+             #:attr sym-table (attribute d.sym-table)])
+  ; define-constant:
   (define-syntax-class const-def
-    [pattern ((~literal define-constant) s:string c:constant)])
+    #:description "a constant definition"
+    [pattern ((~literal define-constant) s:string c:constant)
+             #:attr sym-table (hash (syntax-e #'s) (syntax-e #'c))])
+  ; a sequence of definitions:
+  ; TODO: couldn't figure out how to use an ellipsis here
+  (define-splicing-syntax-class splicing-defs
+    #:description "a spliced sequence of type and constant definitions"
+    [pattern (~seq (~or* d0:type-def d0:const-def) ds:splicing-defs)
+             #:attr sym-table (hash-union (attribute d0.sym-table) (attribute ds.sym-table))]
+    [pattern (~seq (~or* d0:type-def d0:const-def))
+             #:attr sym-table (attribute d0.sym-table)])
   (define-syntax-class defs
-    [pattern ((~or* _:type-def _:const-def) ...)]))
+    #:description "a sequence of type and constant definitions"
+    [pattern ((~or* d0:type-def d0:const-def) ds:splicing-defs)
+             #:attr sym-table (hash-union (attribute d0.sym-table) (attribute ds.sym-table))]
+    [pattern ((~or* d0:type-def d0:const-def))
+             #:attr sym-table (attribute d0.sym-table)]))
 
 ; tests
+(define (parse-asts stx)
+  (syntax-parse stx 
+    [ds:defs (attribute ds.sym-table)]))
 (define (parse-ast stx)
   (syntax-parse stx 
     [(~or* _:type-def _:const-def) #t]))
@@ -87,9 +123,25 @@
                 ("ed25519" "uint256"))))))
  #t)
 
-(define (parse-asts stx)
-  (syntax-parse stx 
-    [defs #t]))
+  (parse-asts
+   #'((define-type
+        "uint256"
+        (fixed-length-array "opaque" 32))
+      (define-type
+        "PublicKeyType"
+        (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))
+
+(check-equal?
+ (hash-ref
+  (parse-asts
+   #'((define-constant "MASK_ACCOUNT_FLAGS" 7)))
+  "MASK_ACCOUNT_FLAGS")
+ 7)
+#;(parse-asts
+   #'((define-constant "MASK_ACCOUNT_FLAGS" 7)
+      (define-constant "MASK_ACCOUNT_FLAGS_AGAIN" 8)))
+; See also ./guile-ast-example.rkt
+
 
 #;(define-syntax-parser define-constant
   [(_ s:identifier (~var c constant))
