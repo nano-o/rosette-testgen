@@ -5,6 +5,8 @@
 
 ; Note that we do not handle the all possible guile-rpc ASTs, but only a super-set of those that appear in Stellar's XDR files.
 
+; TODO: failures seem to cause divergence... e.g. remove the else case in unions.
+
 (provide parse-asts)
 
 (require
@@ -31,7 +33,7 @@
     #:description "a base type"
     [pattern t:string
              #:fail-when (not (base-type? (syntax-e #'t))) (format "not a base type: ~a" (syntax-e #'t))
-             #:attr repr (format-id #'t "~a" (syntax-e #'t))
+             #:attr repr (syntax-e (format-id #'t "~a" (syntax-e #'t)))
              #:attr sym-table (hash)
              #:attr symbol (attribute repr)])
   (define-syntax-class constant
@@ -81,13 +83,13 @@
   ; one variant of a union:
   (define-syntax-class (case-spec scope)
     #:description "a case specification inside a union-type specification"
-    [pattern (((~var c constant)) (~var d (type-decl scope)))
+    [pattern ((~or* ((~var c constant)) (~datum else)) (~var d (type-decl scope)))
              #:attr sym-table (attribute d.sym-table)
              #:attr symbol (attribute d.symbol)
-             #:attr tag-value (syntax-e #'c)])
+             #:attr tag-value (if (attribute c) (syntax-e #'c) 'else)])
   ; a union specification:
   (define-syntax-class (union-spec scope)
-    #:description "a union-type specification" ; TODO: add default case
+    #:description "a union-type specification"
     [pattern ((~datum union)
               ((~datum case) (~var tag-decl (type-decl scope))
                                (~var v (case-spec scope)) ...))
@@ -114,21 +116,21 @@
   ; arbitrary type declaration:
   (define-splicing-syntax-class (splicing-type-decl scope)
     #:description "a spliced type declaration, optionally within a scope"
-    [pattern (~seq s:string (~bind [inner-scope (add-scope scope (syntax-e #'s))])
+    [pattern (~seq s:string (~fail #:when (equal? (syntax-e #'s) "void")) (~bind [inner-scope (add-scope scope (syntax-e #'s))])
                        (~or* t:base-type t:symbol t:array t:xdr-string (~var t (union-spec (attribute inner-scope))) (~var t (struct-spec (attribute inner-scope))) (~var t (enum-spec (attribute inner-scope)))))
              #:attr symbol (add-scope scope (syntax-e #'s))
              #:attr repr  (attribute symbol)
              #:attr sym-table (hash-union
                                (hash (attribute symbol) (attribute t.repr))
-                               (attribute t.sym-table))]
-    [pattern "void"
-             #:attr repr "void"
-             #:attr sym-table (hash)
-             #:attr symbol "void"])
+                               (attribute t.sym-table))])
   (define-syntax-class (type-decl scope)
     #:description "a type declaration, optionally within a scope"
+    [pattern "void"
+             ;#:attr repr 'void
+             #:attr sym-table (hash)
+             #:attr symbol 'void]
     [pattern ((~var d (splicing-type-decl scope)))
-             #:attr repr (attribute d.repr)
+             ;#:attr repr (attribute d.repr)
              #:attr sym-table (attribute d.sym-table)
              #:attr symbol (attribute d.symbol)])
   ; define-type:
@@ -149,7 +151,26 @@
 
 (define (parse-asts stx)
   (syntax-parse stx 
+    ;[ds:defs (hash-count (attribute ds.sym-table))]))
     [ds:defs (attribute ds.sym-table)]))
+
+(parse-asts
+ #'((define-type
+      "CreateAccountResult"
+      (union (case ("code" "CreateAccountResultCode")
+               (("CREATE_ACCOUNT_SUCCESS") "void")
+               (else "void"))))))
+
+(parse-asts
+ #'((define-type
+      "AlphaNum12"
+      (struct
+        ("assetCode" "AssetCode12")
+        ("issuer" "AccountID")))
+    (define-type
+      "Asset"
+      (union (case ("type" "AssetType")
+               (("ASSET_TYPE_NATIVE") "void"))))))
 
 (parse-asts
  #'((define-constant "MASK_ACCOUNT_FLAGS" 7)
