@@ -83,10 +83,10 @@
   ; one variant of a union:
   (define-syntax-class (case-spec scope)
     #:description "a case specification inside a union-type specification"
-    [pattern ((~or* ((~var c constant)) (~datum else)) (~var d (type-decl scope)))
+    [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) (~var d (type-decl scope))) ; TODO we can have a list of possible tags, not just one
              #:attr sym-table (attribute d.sym-table)
              #:attr symbol (attribute d.symbol)
-             #:attr tag-value (if (attribute c) (syntax-e #'c) 'else)])
+             #:attr tag-value (if (attribute tag-val) (syntax->datum #'(tag-val ...)) 'else)])
   ; a union specification:
   (define-syntax-class (union-spec scope)
     #:description "a union-type specification"
@@ -146,7 +146,7 @@
   ; a sequence of definitions:
   (define-syntax-class defs
     #:description "a sequence of definitions of types and constants"
-    [pattern ((~or* d:type-def d:const-def) ...)
+    [pattern ((~commit (~or* d:type-def d:const-def)) ...) ; commit eliminates backtracking on already matched patterns upon failure, and does in all subpatterns it seems
              #:attr sym-table (apply hash-union (attribute d.sym-table))]))
 
 (define (parse-asts stx)
@@ -154,6 +154,24 @@
     ;[ds:defs (hash-count (attribute ds.sym-table))]))
     [ds:defs (attribute ds.sym-table)]))
 
+#;(parse-asts
+ #'((define-type
+      "ManageOfferSuccessResult"
+      (struct
+        ("offersClaimed"
+         (variable-length-array "ClaimAtom" #f))
+        ("offer"
+         (union (case ("effect" "ManageOfferEffect")
+                  (("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED")
+                   ("offer" "OfferEntry"))
+                  (else "void"))))))))
+
+(parse-asts
+ #'((define-type "offer"
+         (union (case ("effect" "ManageOfferEffect")
+                  (("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED") ; TODO this means both are tag values
+                   ("offer" "OfferEntry"))
+                  (else "void"))))))
 (parse-asts
  #'((define-type
       "CreateAccountResult"
