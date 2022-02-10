@@ -15,19 +15,19 @@
   rackunit macro-debugger/stepper
   #;(for-syntax racket/syntax))
 
-; First pass: a recursive syntax class, defs, that builds a symbol table.
+; First pass: a recursive syntax class, defs, that builds a symbol table where symbols are strings.
 ; Each symbol is a type name and maps to the description of the type
 ; The symbol for a types t1 that is a direct child of t2 is t1:t2
 ; This should be okay as per RFC45906, which states that the only special character allowed in XDR identifiers is "_".
 ; See https://datatracker.ietf.org/doc/html/rfc4506#section-6.2
 
 (define (ks-v-assoc->hash ks-v-assoc)
+  (define (ks-v->hash ks-v)
+    (for/hash ([k (car ks-v)])
+      (values k (cdr ks-v))))
   (for/fold ([h (hash)])
             ([ks-v ks-v-assoc])
-    (hash-union
-     h
-     (for/hash ([k (car ks-v)])
-       (values k (cdr ks-v))))))
+    (hash-union h (ks-v->hash ks-v))))
 
 (check-equal?
  (ks-v-assoc->hash
@@ -159,12 +159,11 @@
   ; a sequence of definitions:
   (define-syntax-class defs
     #:description "a sequence of definitions of types and constants"
-    [pattern ((~commit (~or* d:type-def d:const-def)) ...) ; commit eliminates backtracking on already matched patterns upon failure, and does in all subpatterns it seems
+    [pattern ((~commit (~or* d:type-def d:const-def)) ...) ; ~commit eliminates backtracking on already matched patterns upon failure, and does in all subpatterns (it seems)
              #:attr sym-table (apply hash-union (attribute d.sym-table))]))
 
 (define (parse-asts stx)
-  (syntax-parse stx 
-    ;[ds:defs (hash-count (attribute ds.sym-table))]))
+  (syntax-parse stx
     [ds:defs (attribute ds.sym-table)]))
 
 (parse-asts
@@ -230,16 +229,6 @@
         (union (case ("type" "PublicKeyType")
                  (("PUBLIC_KEY_TYPE_ED25519")
                   ("ed25519" "uint256")))))))
-
-#;(begin
-  (define-splicing-syntax-class c1
-    [pattern (~seq a b)])
-  (define-syntax-class c2
-    [pattern (x _:c1)])
-  (define-syntax-class c3
-    [pattern (x (_:c1))])
-  (syntax-parse #'(1 (2 3))
-    [_:c3 #t]))
 
 ; tests
 #;(begin
