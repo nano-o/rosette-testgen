@@ -21,6 +21,19 @@
 ; This should be okay as per RFC45906, which states that the only special character allowed in XDR identifiers is "_".
 ; See https://datatracker.ietf.org/doc/html/rfc4506#section-6.2
 
+(define (ks-v-assoc->hash ks-v-assoc)
+  (for/fold ([h (hash)])
+            ([ks-v ks-v-assoc])
+    (hash-union
+     h
+     (for/hash ([k (car ks-v)])
+       (values k (cdr ks-v))))))
+
+(check-equal?
+ (ks-v-assoc->hash
+  '((("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED") . "offer:offer") ((else) . void)))
+ #hash((else . void) ("MANAGE_OFFER_CREATED" . "offer:offer") ("MANAGE_OFFER_UPDATED" . "offer:offer")))
+       
 (begin
   (define (add-scope scope str)
     (if scope (format "~a:~a" scope str) str))
@@ -83,10 +96,10 @@
   ; one variant of a union:
   (define-syntax-class (case-spec scope)
     #:description "a case specification inside a union-type specification"
-    [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) (~var d (type-decl scope))) ; TODO we can have a list of possible tags, not just one
+    [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) (~var d (type-decl scope)))
              #:attr sym-table (attribute d.sym-table)
              #:attr symbol (attribute d.symbol)
-             #:attr tag-value (if (attribute tag-val) (syntax->datum #'(tag-val ...)) 'else)])
+             #:attr tag-value (if (attribute tag-val) (syntax->datum #'(tag-val ...)) '(else))])
   ; a union specification:
   (define-syntax-class (union-spec scope)
     #:description "a union-type specification"
@@ -96,13 +109,13 @@
              #:attr sym-table (hash-union
                                (attribute tag-decl.sym-table)
                                (apply hash-union (attribute v.sym-table)))
-             #:attr repr (list 'union-spec (attribute tag-decl.symbol) (zip (attribute v.tag-value) (attribute v.symbol)))])
+             #:attr repr (list 'union-spec (attribute tag-decl.symbol) (ks-v-assoc->hash (zip (attribute v.tag-value) (attribute v.symbol))))])
   ; struct
   (define-syntax-class (struct-spec scope)
     #:description "a struct-type specification"
     [pattern ((~datum struct) (~var d (type-decl scope)) ...)
              #:attr sym-table (apply hash-union (attribute d.sym-table))
-             #:attr repr (attribute d.symbol)])
+             #:attr repr (list 'struct (attribute d.symbol))]) ; this is a list
   ; enum
   (define-syntax-class (enum-spec scope)
     #:description "an enum-type specification"
@@ -154,7 +167,7 @@
     ;[ds:defs (hash-count (attribute ds.sym-table))]))
     [ds:defs (attribute ds.sym-table)]))
 
-#;(parse-asts
+(parse-asts
  #'((define-type
       "ManageOfferSuccessResult"
       (struct

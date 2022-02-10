@@ -868,8 +868,7 @@
       "CreateAccountResult"
       (union (case ("code" "CreateAccountResultCode")
                (("CREATE_ACCOUNT_SUCCESS") "void")
-               (else "void"))))))
-#|
+               (else "void"))))
     (define-type
       "PaymentResultCode"
       (enum ("PAYMENT_SUCCESS" 0)
@@ -1373,4 +1372,3 @@
                   (else "void"))))
         ("ext" (union (case ("v" "int") ((0) "void"))))))
     ))
-|#
