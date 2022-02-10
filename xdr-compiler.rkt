@@ -9,7 +9,7 @@
 
 (require
   syntax/parse syntax/parse/define racket/syntax
-  racket/hash
+  racket/hash list-util
   rackunit macro-debugger/stepper
   #;(for-syntax racket/syntax))
 
@@ -22,69 +22,119 @@
 (begin
   (define (add-scope scope str)
     (if scope (format "~a:~a" scope str) str))
+  ; base types
+  (define base-types
+    (list "int" "unsigned int" "hyper" "unsigned hyper" "bool" "double" "quadruple" "float"))
+  (define (base-type? t)
+    (member t base-types))
+  (define-syntax-class base-type
+    #:description "a base type"
+    [pattern t:string
+             #:fail-when (not (base-type? (syntax-e #'t))) (format "not a base type: ~a" (syntax-e #'t))
+             #:attr repr (format-id #'t "~a" (syntax-e #'t))
+             #:attr sym-table (hash)
+             #:attr symbol (attribute repr)])
   (define-syntax-class constant
+    #:description "a constant"
     [pattern (~or* n:number s:string)])
+  (define-syntax-class symbol
+    #:description "a type symbol"
+    [pattern s:string
+             #:attr repr (syntax-e #'s)
+             #:attr symbol (attribute repr)
+             #:attr sym-table (hash)])
   ; opaque fixed-length array
   (define-syntax-class opaque-fixed-length-array
-    [pattern ((~datum fixed-length-array) "opaque" (~var nbytes constant))])
+    #:description "an opaque fixed-length array"
+    [pattern ((~datum fixed-length-array) "opaque" (~var nbytes constant))
+             #:attr repr (list 'opaque-fixed-length-array (syntax-e #'nbytes))
+             #:attr sym-table (hash)])
   ; opaque variable-length array
   (define-syntax-class opaque-variable-length-array
-    [pattern ((~datum variable-length-array) "opaque" (~var nbytes constant))])
+    #:description "an opaque variable-length array"
+    [pattern ((~datum variable-length-array) "opaque" (~var nbytes constant))
+             #:attr repr (list 'opaque-variable-length-array (syntax-e #'nbytes))
+             #:attr sym-table (hash)])
   ; fixed-length array
   (define-syntax-class fixed-length-array
-    [pattern ((~datum fixed-length-array) elem-type:string constant)]) ; TODO seems that elem-type can be an arbitrary, in-line, anonymous type
+    #:description "an fixed-length array"
+    [pattern ((~datum fixed-length-array) (~or* elem-type:symbol elem-type:base-type) constant) ; TODO elem-type could be a type specification
+             #:attr repr (list 'fixed-length-array (attribute elem-type.symbol) (syntax-e #'nbytes))
+             #:attr sym-table (hash)])
   ; variable-length array
   (define-syntax-class variable-length-array
-    [pattern ((~datum variable-length-array) elem-type:string constant)]) ; TODO seems that elem-type can be an arbitrary, in-line, anonymous type
+    #:description "an opaque variable-length array"
+    [pattern ((~datum variable-length-array) (~or* elem-type:symbol elem-type:base-type) constant)  ; TODO elem-type could be a type specification
+             #:attr repr (list 'variable-length-array (attribute elem-type.symbol) (syntax-e #'nbytes))
+             #:attr sym-table (hash)])
   ; all arrays
   (define-syntax-class array
-    [pattern (~or* a:opaque-fixed-length-array a:opaque-variable-length-array a:fixed-length-array a:variable-length-array)])
+    #:description "an array"
+    [pattern (~or* a:opaque-fixed-length-array a:opaque-variable-length-array a:fixed-length-array a:variable-length-array)
+             #:attr repr (attribute a.repr)
+             #:attr sym-table (attribute a.sym-table)])
   ; string
   (define-syntax-class xdr-string
-    [pattern ((~datum string) (~var nbytes constant))])
+    [pattern ((~datum string) (~var nbytes constant))
+             #:attr sym-table (hash)
+             #:attr repr (list 'string (syntax-e #'nbytes))]) ; TODO what about the scope to resolve the length name?
   ; one variant of a union:
-  (define-syntax-class union-variant
-    #:description "a variant inside a union-type specification"
-    [pattern (((~var c constant)) (accessor:string (~or* string _:(type-decl "TODO"))))]
-    [pattern (((~var c constant)) "void")])
+  (define-syntax-class (case-spec scope)
+    #:description "a case specification inside a union-type specification"
+    [pattern (((~var c constant)) (~var d (type-decl scope)))
+             #:attr sym-table (attribute d.sym-table)
+             #:attr symbol (attribute d.symbol)
+             #:attr tag-value (syntax-e #'c)])
   ; a union specification:
-  (define-syntax-class union
-    #:description "a union-type specification"
+  (define-syntax-class (union-spec scope)
+    #:description "a union-type specification" ; TODO: add default case
     [pattern ((~datum union)
-              ((~datum case) (tag-accessor:string type:string) ; TODO type could be an in-line type declaration
-                               (~var v0 union-variant)) ...)])
+              ((~datum case) (~var tag-decl (type-decl scope))
+                               (~var v (case-spec scope)) ...))
+             #:attr sym-table (hash-union
+                               (attribute tag-decl.sym-table)
+                               (apply hash-union (attribute v.sym-table)))
+             #:attr repr (list 'union-spec (attribute tag-decl.symbol) (zip (attribute v.tag-value) (attribute v.symbol)))])
   ; struct
-  (define-syntax-class (struct-spec type-name)
+  (define-syntax-class (struct-spec scope)
     #:description "a struct-type specification"
-    [pattern ((~datum struct) d0:(type-decl type-name) ...)
-             #:attr sym-table (hash) ; TODO
-             #:attr repr '()]) ; TODO
+    [pattern ((~datum struct) (~var d (type-decl scope)) ...)
+             #:attr sym-table (apply hash-union (attribute d.sym-table))
+             #:attr repr (attribute d.symbol)])
   ; enum
   (define-syntax-class (enum-spec scope)
-    #:description "an enum-type specification, optionally within a scope"
+    #:description "an enum-type specification"
     [pattern ((~datum enum) (t0:string v0:constant) ...)
              ; create one symbol for each enum value:
-             #:attr sym-table (for/hash ([k (syntax-e #'(t0 ...))]
-                                         [v (syntax-e #'(v0 ...))])
+             #:attr sym-table (for/hash ([k (syntax->datum #'(t0 ...))]
+                                         [v (syntax->datum #'(v0 ...))])
                                 (values (add-scope scope k) v))
              ; representation is a list of symbols:
-             #:attr repr (map ((curry add-scope) scope) (syntax-e #'(t0 ...)))])
-  ; arbitrary spliced type declaration:
-  ; TODO: only used in type-decl, so could be inlined there
-  (define-splicing-syntax-class splicing-type-decl
-    #:description "a spliced type declaration"
-    [pattern (~seq (~var s string) (~or* t:array t:xdr-string t:union (~var t (struct-spec (syntax-e #'s))) (~var t (enum-spec (syntax-e #'s)))))
-             #:attr sym-table (hash (syntax-e #'s) "t.repr")])
+             #:attr repr (map ((curry add-scope) scope) (syntax->datum #'(t0 ...)))])
   ; arbitrary type declaration:
+  (define-splicing-syntax-class (splicing-type-decl scope)
+    #:description "a spliced type declaration, optionally within a scope"
+    [pattern (~seq s:string (~bind [inner-scope (add-scope scope (syntax-e #'s))])
+                       (~or* t:base-type t:symbol t:array t:xdr-string (~var t (union-spec (attribute inner-scope))) (~var t (struct-spec (attribute inner-scope))) (~var t (enum-spec (attribute inner-scope)))))
+             #:attr symbol (add-scope scope (syntax-e #'s))
+             #:attr repr  (attribute symbol)
+             #:attr sym-table (hash-union
+                               (hash (attribute symbol) (attribute t.repr))
+                               (attribute t.sym-table))]
+    [pattern "void"
+             #:attr repr "void"
+             #:attr sym-table (hash)
+             #:attr symbol "void"])
   (define-syntax-class (type-decl scope)
     #:description "a type declaration, optionally within a scope"
-    [pattern (s:string (~or* t:array t:xdr-string t:union (~var t (struct-spec (syntax-e #'s))) (~var t (enum-spec (syntax-e #'s)))))
-             #:attr repr (add-scope scope (syntax-e #'s))
-             #:attr sym-table (hash (attribute repr) "t.repr")])
+    [pattern ((~var d (splicing-type-decl scope)))
+             #:attr repr (attribute d.repr)
+             #:attr sym-table (attribute d.sym-table)
+             #:attr symbol (attribute d.symbol)])
   ; define-type:
   (define-syntax-class type-def
     #:description "the definition of a type"
-    [pattern ((~datum define-type) d:splicing-type-decl)
+    [pattern ((~datum define-type) (~var d (splicing-type-decl #f)))
              #:attr sym-table (attribute d.sym-table)])
   ; define-constant:
   (define-syntax-class const-def
@@ -92,40 +142,55 @@
     [pattern ((~datum define-constant) s:string c:constant)
              #:attr sym-table (hash (syntax-e #'s) (syntax-e #'c))])
   ; a sequence of definitions:
-  ; TODO: couldn't figure out how to use an ellipsis here
-  (define-splicing-syntax-class splicing-defs
-    #:description "a spliced sequence of definitions of type and constants"
-    [pattern (~seq (~or* d0:type-def d0:const-def) ds:splicing-defs)
-             #:attr sym-table (hash-union (attribute d0.sym-table) (attribute ds.sym-table))]
-    [pattern (~seq (~or* d0:type-def d0:const-def))
-             #:attr sym-table (attribute d0.sym-table)])
   (define-syntax-class defs
     #:description "a sequence of definitions of types and constants"
     [pattern ((~or* d:type-def d:const-def) ...)
              #:attr sym-table (apply hash-union (attribute d.sym-table))]))
 
-(define-syntax-class my-string
-  [pattern s:string
-           #:attr a (syntax-e #'s)])
-(define-syntax-class my-strings
-  [pattern (s0:my-string ...)
-           #:attr a (attribute s0.a)])
-(define (test stx)
-  (syntax-parse stx
-    [strs:my-strings (attribute strs.a)]))
-(test #'("hello" "world" ".")) ; TODO is this working?
-
 (define (parse-asts stx)
   (syntax-parse stx 
     [ds:defs (attribute ds.sym-table)]))
+
 (parse-asts
  #'((define-constant "MASK_ACCOUNT_FLAGS" 7)
     (define-constant "MASK_ACCOUNT_FLAGS_AGAIN" 8)))
+
+(parse-asts
+ #'((define-type
+     "uint256"
+     (fixed-length-array "opaque" 32))))
+
+(parse-asts
+ #'((define-type
+   "AlphaNum4"
+   (struct
+     ("assetCode" "AssetCode4")
+     ("issuer" "AccountID")))))
+ 
+(parse-asts
+ #'((define-type
+     "PublicKeyType"
+     (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))
+
+(parse-asts
+    #'((define-type
+        "PublicKey"
+        (union (case ("type" "PublicKeyType")
+                 (("PUBLIC_KEY_TYPE_ED25519")
+                  ("ed25519" "uint256")))))))
+
+#;(begin
+  (define-splicing-syntax-class c1
+    [pattern (~seq a b)])
+  (define-syntax-class c2
+    [pattern (x _:c1)])
+  (define-syntax-class c3
+    [pattern (x (_:c1))])
+  (syntax-parse #'(1 (2 3))
+    [_:c3 #t]))
+
 ; tests
 #;(begin
-  (define (parse-ast stx)
-    (syntax-parse stx 
-      [(~or* _:type-def _:const-def) #t]))
   (parse-ast
    #'(define-type "uint32" "unsigned int"))
   (check-equal?
