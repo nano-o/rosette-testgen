@@ -1,11 +1,20 @@
 #lang racket
 
+; Provides generators for the path explorer macro.
+; We use generators to enumerate paths in a tree.
+; The tree in question is supposed to be the control-flow graph of a program, which is assumed to be acyclic.
+; A path explorer visits nodes of a program tree; at each node, it calls the generator g with argument n where n is the fanout of the node.
+; The generator returns a number indicating which branch (0 to n) the path explorer should take.
+; When the path explorer reaches a leaf node, it calls the generator with argument 0.
+
 (require racket/generator rackunit)
 
 (provide constant-gen exhaustive-gen random-gen list-gen)
  
 ; we'll use a generator to produce numbers that encode which branch to take.
 ; for example, if we encounter a conditional with 3 branches we'll ask the generator for a number between 0 and 2 included.
+
+; a generator that always returns the same branch
 (define (constant-gen i)
   (generator (n)
     (let loop ([m n])
@@ -15,7 +24,7 @@
 (check-equal? (test-constant-gen 1) 0)
 (check-equal? (test-constant-gen 6) 5)
 
-  
+; this generator allows enumerating all possible paths in a control-flow tree
 (define (exhaustive-gen)
   (define (node-pos l i)
     (- (length l) i))
