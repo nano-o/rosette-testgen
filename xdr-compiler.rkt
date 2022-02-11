@@ -18,7 +18,8 @@
 ; This should be okay as per RFC45906, which states that the only special character allowed in XDR identifiers is "_".
 ; See https://datatracker.ietf.org/doc/html/rfc4506#section-6.2
 
-; TODO Second pass that checks for references to undefined stuff
+; TODO Second pass that ensures symbols are mapped to non-symbols
+; TODO Think about what we want in the type representations. We'll use this to generate Rosette grammars, but also to generate infrastructure to make it convenient to write a spec of the transaction-processing code.
 
 (define (ks-v-assoc->hash ks-v-assoc)
   (define (ks-v->hash ks-v)
@@ -127,7 +128,7 @@
                                          [v (syntax->datum #'(v0 ...))])
                                 (values (add-scope scope k) v))
              ; representation is a list of symbols:
-             #:attr repr (map ((curry add-scope) scope) (syntax->datum #'(t0 ...)))])
+             #:attr repr (list 'enum (map ((curry add-scope) scope) (syntax->datum #'(t0 ...))))])
   ; arbitrary type declaration:
   (define-splicing-syntax-class (splicing-type-decl scope)
     #:description "a spliced type declaration, optionally within a scope"
