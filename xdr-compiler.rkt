@@ -5,7 +5,7 @@
 
 ; Note that we do not handle the all possible guile-rpc ASTs, but only a super-set of those that appear in Stellar's XDR files.
 
-(provide parse-asts)
+(provide parse-asts ks-v-assoc->hash-tests parse-asts-tests)
 
 (require
   syntax/parse syntax/parse/define racket/syntax
@@ -19,6 +19,8 @@
 ; This should be okay as per RFC45906, which states that the only special character allowed in XDR identifiers is "_".
 ; See https://datatracker.ietf.org/doc/html/rfc4506#section-6.2
 
+; TODO Second pass that checks for references to undefined stuff
+
 (define (ks-v-assoc->hash ks-v-assoc)
   (define (ks-v->hash ks-v)
     (for/hash ([k (car ks-v)])
@@ -27,10 +29,11 @@
             ([ks-v ks-v-assoc])
     (hash-union h (ks-v->hash ks-v))))
 
-(check-equal?
- (ks-v-assoc->hash
-  '((("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED") . "offer:offer") ((else) . void)))
- #hash((else . void) ("MANAGE_OFFER_CREATED" . "offer:offer") ("MANAGE_OFFER_UPDATED" . "offer:offer")))
+(define-test-suite ks-v-assoc->hash-tests
+  (check-equal?
+   (ks-v-assoc->hash
+    '((("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED") . "offer:offer") ((else) . void)))
+   #hash((else . void) ("MANAGE_OFFER_CREATED" . "offer:offer") ("MANAGE_OFFER_UPDATED" . "offer:offer"))))
        
 (begin
   (define (add-scope scope str)
@@ -166,13 +169,8 @@
   (syntax-parse stx
     [ds:defs (attribute ds.sym-table)]))
 
-(parse-asts
-    #'((define-type
-        "uint256"
-        (fixed-length-array "opaque" 32))))
-
 ;tests
-(define-test-suite parse-asts-test
+(define-test-suite parse-asts-tests
  (test-case
   "Check that no exceptions are thrown"
   (check-not-exn
