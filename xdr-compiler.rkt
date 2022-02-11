@@ -5,8 +5,6 @@
 
 ; Note that we do not handle the all possible guile-rpc ASTs, but only a super-set of those that appear in Stellar's XDR files.
 
-; TODO: failures seem to cause divergence... e.g. remove the else case in unions.
-
 (provide parse-asts)
 
 (require
@@ -17,7 +15,7 @@
 
 ; First pass: a recursive syntax class, defs, that builds a symbol table where symbols are strings.
 ; Each symbol is a type name and maps to the description of the type
-; The symbol for a types t1 that is a direct child of t2 is t1:t2
+; The symbol for a types t1 that is a direct child of t2 is "t1:t2"
 ; This should be okay as per RFC45906, which states that the only special character allowed in XDR identifiers is "_".
 ; See https://datatracker.ietf.org/doc/html/rfc4506#section-6.2
 
