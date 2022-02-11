@@ -73,9 +73,9 @@
   ; fixed-length array
   (define-syntax-class fixed-length-array
     #:description "a fixed-length array"
-    [pattern ((~datum fixed-length-array) (~or* elem-type:symbol elem-type:base-type) constant) ; TODO elem-type could be a type specification
+    [pattern ((~datum fixed-length-array) (~or* elem-type:symbol elem-type:base-type) (~var n constant)) ; TODO elem-type could be a type specification
              #:fail-when (equal? (syntax-e #'elem-type) "opaque") "should be non-opaque"
-             #:attr repr (list 'fixed-length-array (attribute elem-type.symbol) (syntax-e #'nbytes))
+             #:attr repr (list 'fixed-length-array (attribute elem-type.symbol) (syntax-e #'n))
              #:attr sym-table (hash)])
   ; variable-length array
   (define-syntax-class variable-length-array
