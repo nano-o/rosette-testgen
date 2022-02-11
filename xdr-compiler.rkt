@@ -166,134 +166,98 @@
   (syntax-parse stx
     [ds:defs (attribute ds.sym-table)]))
 
-(parse-asts
- #'((define-type
-      "ManageOfferSuccessResult"
-      (struct
-        ("offersClaimed"
-         (variable-length-array "ClaimAtom" #f))
-        ("offer"
-         (union (case ("effect" "ManageOfferEffect")
-                  (("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED")
-                   ("offer" "OfferEntry"))
-                  (else "void"))))))))
+;tests
 
-(parse-asts
- #'((define-type "offer"
-         (union (case ("effect" "ManageOfferEffect")
-                  (("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED") ; TODO this means both are tag values
-                   ("offer" "OfferEntry"))
-                  (else "void"))))))
-(parse-asts
- #'((define-type
-      "CreateAccountResult"
-      (union (case ("code" "CreateAccountResultCode")
-               (("CREATE_ACCOUNT_SUCCESS") "void")
-               (else "void"))))))
-
-(parse-asts
- #'((define-type
-      "AlphaNum12"
-      (struct
-        ("assetCode" "AssetCode12")
-        ("issuer" "AccountID")))
-    (define-type
-      "Asset"
-      (union (case ("type" "AssetType")
-               (("ASSET_TYPE_NATIVE") "void"))))))
-
-(parse-asts
- #'((define-constant "MASK_ACCOUNT_FLAGS" 7)
-    (define-constant "MASK_ACCOUNT_FLAGS_AGAIN" 8)))
-
-(parse-asts
- #'((define-type
-     "uint256"
-     (fixed-length-array "opaque" 32))))
-
-(parse-asts
- #'((define-type
-   "AlphaNum4"
-   (struct
-     ("assetCode" "AssetCode4")
-     ("issuer" "AccountID")))))
- 
-(parse-asts
- #'((define-type
-     "PublicKeyType"
-     (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))
-
-(parse-asts
+(check-not-exn
+ (λ ()
+   (parse-asts
     #'((define-type
-        "PublicKey"
-        (union (case ("type" "PublicKeyType")
-                 (("PUBLIC_KEY_TYPE_ED25519")
-                  ("ed25519" "uint256")))))))
+         "ManageOfferSuccessResult"
+         (struct
+           ("offersClaimed"
+            (variable-length-array "ClaimAtom" #f))
+           ("offer"
+            (union (case ("effect" "ManageOfferEffect")
+                     (("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED")
+                      ("offer" "OfferEntry"))
+                     (else "void"))))))))))
 
-; tests
-#;(begin
-  (parse-ast
-   #'(define-type "uint32" "unsigned int"))
-  (check-equal?
-   (parse-ast
-    #'(define-type
-        "uint256"
-        (fixed-length-array "opaque" 32)))
-   #t)
-  (check-equal?
-   (parse-ast
-    #'(define-type
-        "PublicKeyType"
-        (enum ("PUBLIC_KEY_TYPE_ED25519" 0))))
-   #t)
-  (check-equal?
-   (parse-ast
-    #'(define-type
-        "PublicKey"
-        (union (case ("type" "PublicKeyType")
-                 (("PUBLIC_KEY_TYPE_ED25519")
-                  ("ed25519" "uint256"))))))
-   #t)
+(check-not-exn
+ (λ ()
+   (parse-asts
+    #'((define-type
+         "CreateAccountResult"
+         (union (case ("code" "CreateAccountResultCode")
+                  (("CREATE_ACCOUNT_SUCCESS") "void")
+                  (else "void"))))))))
+(check-not-exn
+ (λ ()
+   (parse-asts
+    #'((define-type
+         "AlphaNum12"
+         (struct
+           ("assetCode" "AssetCode12")
+           ("issuer" "AccountID")))
+       (define-type
+         "Asset"
+         (union (case ("type" "AssetType")
+                  (("ASSET_TYPE_NATIVE") "void"))))))))
+(check-not-exn
+ (λ ()
+   (parse-asts
+    #'((define-constant "MASK_ACCOUNT_FLAGS" 7)
+       (define-constant "MASK_ACCOUNT_FLAGS_AGAIN" 8)))))
 
+(check-not-exn
+ (λ ()
+   (parse-asts
+    #'((define-type
+         "uint256"
+         (fixed-length-array "opaque" 32))))))
+(check-not-exn
+ (λ ()
+   (parse-asts
+    #'((define-type
+         "AlphaNum4"
+         (struct
+           ("assetCode" "AssetCode4")
+           ("issuer" "AccountID")))))))
+
+(check-not-exn
+ (λ ()
+   (parse-asts
+    #'((define-type
+         "PublicKeyType"
+         (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))))
+
+(check-not-exn
+ (λ ()
+   (parse-asts
+    #'((define-type
+         "PublicKey"
+         (union (case ("type" "PublicKeyType")
+                  (("PUBLIC_KEY_TYPE_ED25519")
+                   ("ed25519" "uint256")))))))))
+(check-not-exn
+ (λ ()
   (parse-asts
+   #'((define-type "uint32" "unsigned int")))))
+
+(check-not-exn
+ (λ ()
+   (parse-asts
+    #'((define-type
+        "uint256"
+        (fixed-length-array "opaque" 32))))))
+
+(check-not-exn
+ (λ ()
+   (parse-asts
    #'((define-type
         "uint256"
         (fixed-length-array "opaque" 32))
       (define-type
         "PublicKeyType"
-        (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))
+        (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))))
 
-  (check-equal?
-   (hash-ref
-    (parse-asts
-     #'((define-constant "MASK_ACCOUNT_FLAGS" 7)))
-    "MASK_ACCOUNT_FLAGS")
-   7)
-  (parse-asts
-   #'((define-constant "MASK_ACCOUNT_FLAGS" 7)
-      (define-constant "MASK_ACCOUNT_FLAGS_AGAIN" 8)))
   ; See also ./guile-ast-example.rkt
-)
-; bool is predefined
-#|
-(define bool:TRUE 0)
-(define bool:FALSE 1)
-(define bool '(enum bool:TRUE bool:FALSE))
-|#
-
-; tests
-#;(begin 
-  (define-type "my-int" "int")
-  (check-equal? my-int 'int)
-  (define-type "test-type" (fixed-length-array "opaque" 32))
-  (check-equal? test-type '(opaque-array 32))
-  (define-type "test-type-2" "test-type")
-  (check-equal? test-type-2 'test-type)
-  (define-constant "test-constant" 0)
-  (check-equal? test-constant 0)
-  (define-type "test-enum" (enum ["test-0" "test-constant"] ["test-1" 1] ["test-2" 2]))
-  (check-equal? test-enum '(enum test-enum:test-0 test-enum:test-1 test-enum:test-2))
-  (define-type "test-union" (union (case ("test-union-tag" "test-enum") (("test-0") ("x" "test-type")) (("test-1") "void"))))
-  (check-equal? test-union '(union ("test-union-tag" test-enum) ((test-enum:test-0 ("x" test-type)) (test-enum:test-1 void))))
-  (define-type "test-struct" (struct ("member1" "test-type") ("member2" "bool")))
-  (check-equal? test-struct '(struct ("member1" test-type) ("member2" bool))))
