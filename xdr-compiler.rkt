@@ -72,14 +72,16 @@
              #:attr sym-table (hash)])
   ; fixed-length array
   (define-syntax-class fixed-length-array
-    #:description "an fixed-length array"
+    #:description "a fixed-length array"
     [pattern ((~datum fixed-length-array) (~or* elem-type:symbol elem-type:base-type) constant) ; TODO elem-type could be a type specification
+             #:fail-when (equal? (syntax-e #'elem-type) "opaque") "should be non-opaque"
              #:attr repr (list 'fixed-length-array (attribute elem-type.symbol) (syntax-e #'nbytes))
              #:attr sym-table (hash)])
   ; variable-length array
   (define-syntax-class variable-length-array
-    #:description "an opaque variable-length array"
+    #:description "a variable-length array"
     [pattern ((~datum variable-length-array) (~or* elem-type:symbol elem-type:base-type) constant)  ; TODO elem-type could be a type specification
+             #:fail-when (equal? (syntax-e #'elem-type) "opaque")  "should be non-opaque"
              #:attr repr (list 'variable-length-array (attribute elem-type.symbol) (syntax-e #'nbytes))
              #:attr sym-table (hash)])
   ; all arrays
@@ -166,98 +168,105 @@
   (syntax-parse stx
     [ds:defs (attribute ds.sym-table)]))
 
+(parse-asts
+    #'((define-type
+        "uint256"
+        (fixed-length-array "opaque" 32))))
+
 ;tests
+(define-test-suite parse-asts-test
+ (test-case
+  "Check that no exceptions are thrown"
+  (check-not-exn
+   (λ ()
+     (parse-asts
+      #'((define-type
+           "ManageOfferSuccessResult"
+           (struct
+             ("offersClaimed"
+              (variable-length-array "ClaimAtom" #f))
+             ("offer"
+              (union (case ("effect" "ManageOfferEffect")
+                       (("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED")
+                        ("offer" "OfferEntry"))
+                       (else "void"))))))))))
 
-(check-not-exn
- (λ ()
-   (parse-asts
-    #'((define-type
-         "ManageOfferSuccessResult"
-         (struct
-           ("offersClaimed"
-            (variable-length-array "ClaimAtom" #f))
-           ("offer"
-            (union (case ("effect" "ManageOfferEffect")
-                     (("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED")
-                      ("offer" "OfferEntry"))
-                     (else "void"))))))))))
+  (check-not-exn
+   (λ ()
+     (parse-asts
+      #'((define-type
+           "CreateAccountResult"
+           (union (case ("code" "CreateAccountResultCode")
+                    (("CREATE_ACCOUNT_SUCCESS") "void")
+                    (else "void"))))))))
+  (check-not-exn
+   (λ ()
+     (parse-asts
+      #'((define-type
+           "AlphaNum12"
+           (struct
+             ("assetCode" "AssetCode12")
+             ("issuer" "AccountID")))
+         (define-type
+           "Asset"
+           (union (case ("type" "AssetType")
+                    (("ASSET_TYPE_NATIVE") "void"))))))))
+  (check-not-exn
+   (λ ()
+     (parse-asts
+      #'((define-constant "MASK_ACCOUNT_FLAGS" 7)
+         (define-constant "MASK_ACCOUNT_FLAGS_AGAIN" 8)))))
 
-(check-not-exn
- (λ ()
-   (parse-asts
-    #'((define-type
-         "CreateAccountResult"
-         (union (case ("code" "CreateAccountResultCode")
-                  (("CREATE_ACCOUNT_SUCCESS") "void")
-                  (else "void"))))))))
-(check-not-exn
- (λ ()
-   (parse-asts
-    #'((define-type
-         "AlphaNum12"
-         (struct
-           ("assetCode" "AssetCode12")
-           ("issuer" "AccountID")))
-       (define-type
-         "Asset"
-         (union (case ("type" "AssetType")
-                  (("ASSET_TYPE_NATIVE") "void"))))))))
-(check-not-exn
- (λ ()
-   (parse-asts
-    #'((define-constant "MASK_ACCOUNT_FLAGS" 7)
-       (define-constant "MASK_ACCOUNT_FLAGS_AGAIN" 8)))))
+  (check-not-exn
+   (λ ()
+     (parse-asts
+      #'((define-type
+           "uint256"
+           (fixed-length-array "opaque" 32))))))
+  (check-not-exn
+   (λ ()
+     (parse-asts
+      #'((define-type
+           "AlphaNum4"
+           (struct
+             ("assetCode" "AssetCode4")
+             ("issuer" "AccountID")))))))
 
-(check-not-exn
- (λ ()
-   (parse-asts
-    #'((define-type
-         "uint256"
-         (fixed-length-array "opaque" 32))))))
-(check-not-exn
- (λ ()
-   (parse-asts
-    #'((define-type
-         "AlphaNum4"
-         (struct
-           ("assetCode" "AssetCode4")
-           ("issuer" "AccountID")))))))
+  (check-not-exn
+   (λ ()
+     (parse-asts
+      #'((define-type
+           "PublicKeyType"
+           (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))))
 
-(check-not-exn
- (λ ()
-   (parse-asts
-    #'((define-type
-         "PublicKeyType"
-         (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))))
+  (check-not-exn
+   (λ ()
+     (parse-asts
+      #'((define-type
+           "PublicKey"
+           (union (case ("type" "PublicKeyType")
+                    (("PUBLIC_KEY_TYPE_ED25519")
+                     ("ed25519" "uint256")))))))))
+  (check-not-exn
+   (λ ()
+     (parse-asts
+      #'((define-type "uint32" "unsigned int")))))
 
-(check-not-exn
- (λ ()
-   (parse-asts
-    #'((define-type
-         "PublicKey"
-         (union (case ("type" "PublicKeyType")
-                  (("PUBLIC_KEY_TYPE_ED25519")
-                   ("ed25519" "uint256")))))))))
-(check-not-exn
- (λ ()
-  (parse-asts
-   #'((define-type "uint32" "unsigned int")))))
+  (check-not-exn
+   (λ ()
+     (parse-asts
+      #'((define-type
+           "uint256"
+           (fixed-length-array "opaque" 32))))))
 
-(check-not-exn
- (λ ()
-   (parse-asts
-    #'((define-type
-        "uint256"
-        (fixed-length-array "opaque" 32))))))
+  (check-not-exn
+   (λ ()
+     (parse-asts
+      #'((define-type
+           "uint256"
+           (fixed-length-array "opaque" 32))
+         (define-type
+           "PublicKeyType"
+           (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))))))
 
-(check-not-exn
- (λ ()
-   (parse-asts
-   #'((define-type
-        "uint256"
-        (fixed-length-array "opaque" 32))
-      (define-type
-        "PublicKeyType"
-        (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))))
-
-  ; See also ./guile-ast-example.rkt
+; See also ./guile-ast-example.rkt
