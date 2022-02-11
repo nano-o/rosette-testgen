@@ -10,8 +10,7 @@
 (require
   syntax/parse syntax/parse/define racket/syntax
   racket/hash list-util
-  rackunit macro-debugger/stepper
-  #;(for-syntax racket/syntax))
+  rackunit)
 
 ; First pass: a recursive syntax class, defs, that builds a symbol table where symbols are strings.
 ; Each symbol is a type name and maps to the description of the type

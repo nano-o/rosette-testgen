@@ -1,8 +1,7 @@
 #lang racket
 
 (provide test-grammar)
-;(require "xdr-compiler.rkt" "guile-ast-example.rkt")
-(require racket/syntax
+(require "xdr-compiler.rkt" ;"guile-ast-example.rkt"
   (for-template rosette rosette/lib/synthax))
 
 ; TODO generate a Rosette grammar for this:
@@ -10,7 +9,7 @@
  (stellar-symbol-table)
  "TransactionEnvelope")
 
-; TODO a simpler example:
+; a simpler example:
 (define test-ast
   #'((define-type
       "uint256"
@@ -23,7 +22,7 @@
       (union (case ("type" "PublicKeyType")
                (("PUBLIC_KEY_TYPE_ED25519") ("ed25519" "uint256")))))))
 
-#;(define test-sym-table
+(define test-sym-table
   (parse-asts test-ast))
 
 ; Produce a syntax object defining a Rosette grammar
