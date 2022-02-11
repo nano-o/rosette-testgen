@@ -9,7 +9,7 @@
 
 (require racket/generator rackunit)
 
-(provide constant-gen exhaustive-gen random-gen list-gen)
+(provide constant-gen exhaustive-gen random-gen list-gen generator-tests)
  
 ; we'll use a generator to produce numbers that encode which branch to take.
 ; for example, if we encounter a conditional with 3 branches we'll ask the generator for a number between 0 and 2 included.
@@ -19,10 +19,6 @@
   (generator (n)
     (let loop ([m n])
       (loop (yield (modulo i m))))))
-
-(define test-constant-gen (constant-gen 5))
-(check-equal? (test-constant-gen 1) 0)
-(check-equal? (test-constant-gen 6) 5)
 
 ; this generator allows enumerating all possible paths in a control-flow tree
 (define (exhaustive-gen)
@@ -67,28 +63,6 @@
                             path
                             (+ pos 1))))])))) ; increment position
 
-(define test-exhaustive-gen (exhaustive-gen))
-(check-equal? (test-exhaustive-gen 3) 0)
-(check-equal? (test-exhaustive-gen 1) 0)
-(check-equal? (test-exhaustive-gen 0) 0)
-(check-equal? (test-exhaustive-gen 3) 1)
-(check-equal? (test-exhaustive-gen 0) 0)
-(check-equal? (test-exhaustive-gen 3) 2)
-(check-equal? (test-exhaustive-gen 0) -1) ; -1 indicates we're done
-
-(define test-exhaustive-gen-2 (exhaustive-gen))
-(check-equal? (test-exhaustive-gen-2 2) 0)
-(check-equal? (test-exhaustive-gen-2 3) 0)
-(check-equal? (test-exhaustive-gen-2 0) 0)
-(check-equal? (test-exhaustive-gen-2 2) 0)
-(check-equal? (test-exhaustive-gen-2 3) 1)
-(check-equal? (test-exhaustive-gen-2 0) 0)
-(check-equal? (test-exhaustive-gen-2 2) 0)
-(check-equal? (test-exhaustive-gen-2 3) 2)
-(check-equal? (test-exhaustive-gen-2 0) 0)
-(check-equal? (test-exhaustive-gen-2 2) 1)
-(check-equal? (test-exhaustive-gen-2 0) -1) ; -1 indicates we're done
-
 (define random-gen ; TODO random is not in rosette/safe; is it okay to use it anyway?
   (generator (n)
              (let loop ([m n])
@@ -100,7 +74,45 @@
                (begin
                  (if (> (car l) m) (error (format "chosen branch ~a but we have only ~a branches" (car l) m)) (list))
                  (loop (yield (car l)) (append (cdr l) (list (car l))))))))
-(define test-list-gen (list-gen (list 0 1 5)))
-(check-equal? (test-list-gen 3) 0)
-(check-equal? (test-list-gen 3) 1)
-(check-exn exn:fail? (thunk (test-list-gen 3)))
+
+; tests
+
+(define-test-suite generator-tests
+  (test-case
+   "constant-gen test"
+   (define test-constant-gen (constant-gen 5))
+   (check-equal? (test-constant-gen 1) 0)
+   (check-equal? (test-constant-gen 6) 5))
+  
+  (test-case
+   "exhaustive-gen test 1"
+   (define test-exhaustive-gen (exhaustive-gen))
+   (check-equal? (test-exhaustive-gen 3) 0)
+   (check-equal? (test-exhaustive-gen 1) 0)
+   (check-equal? (test-exhaustive-gen 0) 0)
+   (check-equal? (test-exhaustive-gen 3) 1)
+   (check-equal? (test-exhaustive-gen 0) 0)
+   (check-equal? (test-exhaustive-gen 3) 2)
+   (check-equal? (test-exhaustive-gen 0) -1)) ; -1 indicates we're done
+  
+  (test-case
+   "exhaustive-gen test 2"
+   (define test-exhaustive-gen-2 (exhaustive-gen))
+   (check-equal? (test-exhaustive-gen-2 2) 0)
+   (check-equal? (test-exhaustive-gen-2 3) 0)
+   (check-equal? (test-exhaustive-gen-2 0) 0)
+   (check-equal? (test-exhaustive-gen-2 2) 0)
+   (check-equal? (test-exhaustive-gen-2 3) 1)
+   (check-equal? (test-exhaustive-gen-2 0) 0)
+   (check-equal? (test-exhaustive-gen-2 2) 0)
+   (check-equal? (test-exhaustive-gen-2 3) 2)
+   (check-equal? (test-exhaustive-gen-2 0) 0)
+   (check-equal? (test-exhaustive-gen-2 2) 1)
+   (check-equal? (test-exhaustive-gen-2 0) -1)) ; -1 indicates we're done
+
+  (test-case
+   "list-gen"
+   (define test-list-gen (list-gen (list 0 1 5)))
+   (check-equal? (test-list-gen 3) 0)
+   (check-equal? (test-list-gen 3) 1)
+   (check-exn exn:fail? (thunk (test-list-gen 3)))))
