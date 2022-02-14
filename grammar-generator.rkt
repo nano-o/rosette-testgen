@@ -40,18 +40,21 @@
 
 ; Builds a syntax object containing a list of grammar rules
 (define (xdr-types->grammar sym-table type)
-  (define (rule-id str [index 0])
+  (define index 0)
+  (define (next-index)
+    (set! index (+ index 1))
+    index)
+  (define (rule-id str)
     ; Rosette seems to be relying on source location information to create symbolic variable names.
     ; Since we want all grammar holes to be independent, we need to use a unique location each time.
-    ; TODO: use a shared counter to ensure uniqueness
-    (format-id #f "~a-rule" str #:source (make-srcloc (format "~a-rule:~a" str index) 1 0 1 0)))
+    (format-id #f "~a-rule" str #:source (make-srcloc (format "~a-rule:~a" str (next-index)) 1 0 1 0)))
   ; arrays are represented by vectors
   (define (array type size)
     #`(vector
        #,@(datum->syntax
            #'()
            (for/list ([i (in-range size)])
-             #`(#,(rule-id type i))))))
+             #`(#,(rule-id type))))))
   ; enum values are represented by 32-bit words:
   (define (enum-values vs)
     (let ([values
@@ -74,7 +77,7 @@
         #;[`(union ,tag-type ,variants)
          ; TODO: do we need one rule per variant and a big choose rule with all the variants? Seems so.
          ; The "else" case is a problem, and it looks like we're going to have to emit a validity predicate for that (then we'll assume this predicate holds before symbolic execution).
-         #`([#,rule-name (list #,(rule-id tag-type 0) )])])))
+         #`([#,rule-name (list #,(rule-id tag-type) )])])))
   (grammar-for type))
 
 (define (test-grammar)
