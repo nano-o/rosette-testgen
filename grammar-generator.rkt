@@ -38,7 +38,6 @@
     #`[my-rule (?? (bitvector 32))])
   #`(define-grammar (#,(format-id stx-context "g")) #,(the-grammar type)))
 
-; Builds two syntax objects: a list of Rosette grammar rules and a validity predicate
 (define (xdr-types->grammar sym-table type)
   (define get-index (generator ()
                       (let loop ([index 0])
@@ -48,37 +47,54 @@
     ; Rosette seems to be relying on source location information to create symbolic variable names.
     ; Since we want all grammar holes to be independent, we need to use a unique location each time.
     (format-id #f "~a-rule" str #:source (make-srcloc (format "~a-rule:~a" str (get-index)) 1 0 1 0)))
-  ; arrays are represented by vectors
-  (define (array type size)
+  ; Next we define a few helper functions to build grammar rules for various types.
+  ; Fixed-size, non-opaque arrays are represented by vectors.
+  (define (fixed-size-array type size)
     #`(vector
        #,@(datum->syntax
            #'()
            (for/list ([i (in-range size)])
              #`(#,(rule-id type))))))
-  ; enum values are represented by 32-bit words:
+  ; Enum values are represented by 32-bit words:
   (define (enum-values vs)
     (let ([values
            (map ((curry hash-ref) sym-table) vs)])
       (map (λ (v) #`(bv #,v (bitvector 32))) values)))
-  (define (grammar-for t)
+  ; We are going to accumulate rules in a mutable hash table
+  (define rules (make-hash)) ; mutable hash table with equal? comparison
+  (define (add-rule key r)
+    (if (not (hash-has-key? rules key))
+               (hash-set! rules key r) (void)))
+  ; The main procedure:
+  (define (make-rules t)
     (let ([rule-name (rule-id t)])
       (match (hash-ref sym-table t)
         ; Opaque fixed-length array. Represented by a bitvector.
         [`(opaque-fixed-length-array ,nbytes)
-         #`([#,rule-name (?? (bitvector #,(* nbytes 8)))])]
+         (add-rule (syntax-e rule-name)
+                   #`[#,rule-name (?? (bitvector #,(* nbytes 8)))])]
         ; Fixed length array. Represented by a vector.
         [`(fixed-length-array ,elem-type ,size)
-         (let ([top-rule #`[#,rule-name #,(array elem-type size)]])
-           #`(#,top-rule #,@(grammar-for elem-type)))] ; TODO what if elem-type is referenced somewhere else?
+         (let ([top-rule #`[#,rule-name #,(fixed-size-array elem-type size)]])
+           (begin
+             (add-rule (syntax-e rule-name) top-rule)
+             (make-rules elem-type)))]
         ; Enum. Represented by a bitvector of size 32.
         [`(enum ,vs)
-         #`([#,rule-name (choose #,@(enum-values vs))])]
+         (add-rule (syntax-e rule-name)
+                   #`[#,rule-name (choose #,@(enum-values vs))])]
         ; union:
         #;[`(union ,tag-type ,variants)
          ; TODO: do we need one rule per variant and a big choose rule with all the variants? Seems so.
          ; The "else" case is a problem, and it looks like we're going to have to emit a validity predicate for that (then we'll assume this predicate holds before symbolic execution).
          #`([#,rule-name (list #,(rule-id tag-type) )])])))
-  `(,(grammar-for type) . '()))
+  (begin
+    (make-rules type)
+    ; return a syntax object consisting of a list of rules, starting with the rule for type
+    (let* ([top-key (syntax-e (rule-id type))]
+          [top-rule (hash-ref rules top-key)]
+          [rest (map (curry cdr) (filter (λ (kv) (not (equal? (car kv) top-key))) (hash->list rules)))])
+      #`(#,top-rule #,@rest))))
 
 (define (test-grammar)
-  (car (xdr-types->grammar test-sym-table "my-array")))
+  (xdr-types->grammar test-sym-table "my-array"))
