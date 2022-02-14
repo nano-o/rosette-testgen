@@ -2,7 +2,7 @@
 
 (provide test-grammar)
 (require
-  racket/match racket/syntax
+  racket/match racket/syntax racket/generator
   "xdr-compiler.rkt" ;"guile-ast-example.rkt"
   (for-template rosette rosette/lib/synthax))
 
@@ -38,16 +38,16 @@
     #`[my-rule (?? (bitvector 32))])
   #`(define-grammar (#,(format-id stx-context "g")) #,(the-grammar type)))
 
-; Builds a syntax object containing a list of grammar rules
+; Builds two syntax objects: a list of Rosette grammar rules and a validity predicate
 (define (xdr-types->grammar sym-table type)
-  (define index 0)
-  (define (next-index)
-    (set! index (+ index 1))
-    index)
+  (define get-index (generator ()
+                      (let loop ([index 0])
+                        (yield index)
+                        (loop (+ index 1)))))
   (define (rule-id str)
     ; Rosette seems to be relying on source location information to create symbolic variable names.
     ; Since we want all grammar holes to be independent, we need to use a unique location each time.
-    (format-id #f "~a-rule" str #:source (make-srcloc (format "~a-rule:~a" str (next-index)) 1 0 1 0)))
+    (format-id #f "~a-rule" str #:source (make-srcloc (format "~a-rule:~a" str (get-index)) 1 0 1 0)))
   ; arrays are represented by vectors
   (define (array type size)
     #`(vector
@@ -69,7 +69,7 @@
         ; Fixed length array. Represented by a vector.
         [`(fixed-length-array ,elem-type ,size)
          (let ([top-rule #`[#,rule-name #,(array elem-type size)]])
-           #`(#,top-rule #,@(grammar-for elem-type)))]
+           #`(#,top-rule #,@(grammar-for elem-type)))] ; TODO what if elem-type is referenced somewhere else?
         ; Enum. Represented by a bitvector of size 32.
         [`(enum ,vs)
          #`([#,rule-name (choose #,@(enum-values vs))])]
@@ -78,7 +78,7 @@
          ; TODO: do we need one rule per variant and a big choose rule with all the variants? Seems so.
          ; The "else" case is a problem, and it looks like we're going to have to emit a validity predicate for that (then we'll assume this predicate holds before symbolic execution).
          #`([#,rule-name (list #,(rule-id tag-type) )])])))
-  (grammar-for type))
+  `(,(grammar-for type) . '()))
 
 (define (test-grammar)
-  (xdr-types->grammar test-sym-table "my-array"))
+  (car (xdr-types->grammar test-sym-table "my-array")))
