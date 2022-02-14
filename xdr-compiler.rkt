@@ -122,7 +122,7 @@
   ; enum
   (define-syntax-class (enum-spec scope)
     #:description "an enum-type specification"
-    [pattern ((~datum enum) (t0:string v0:constant) ...)
+    [pattern ((~datum enum) (t0:string v0:number) ...)
              ; create one symbol for each enum value:
              #:attr sym-table (for/hash ([k (syntax->datum #'(t0 ...))]
                                          [v (syntax->datum #'(v0 ...))])
@@ -184,8 +184,55 @@
          (define-type
            "my-array"
            (fixed-length-array "uint256" 2))))
-     '#hash(("myy-array" . (fixed-length-array "uint256" 2)) ("uint256" . (opaque-fixed-length-array 32)))))
-  
+     '#hash(("my-array" . (fixed-length-array "uint256" 2)) ("uint256" . (opaque-fixed-length-array 32)))))
+
+   (test-case
+    "XDR union"
+    (check-equal?
+     (parse-asts
+      #'((define-type
+       "uint256"
+       (fixed-length-array "opaque" 32))
+     (define-type
+       "my-array"
+       (fixed-length-array "uint256" 2))
+     (define-type
+       "PublicKeyType"
+       (enum ("PUBLIC_KEY_TYPE_ED25519" 0) ("OTHER_PUBLIC_KEY_TYPE" 1)))
+     (define-type
+       "PublicKey"
+       (union (case ("type" "PublicKeyType")
+                (("PUBLIC_KEY_TYPE_ED25519") ("ed25519" "uint256"))
+                (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array")))))))
+     '#hash(
+            ("PublicKey" . (union "PublicKey:type" #hash(("OTHER_PUBLIC_KEY_TYPE" . "PublicKey:array2") ("PUBLIC_KEY_TYPE_ED25519" . "PublicKey:ed25519"))))
+            ("PublicKey:array2" . "my-array")
+            ("PublicKey:ed25519" . "uint256")
+            ("PublicKey:type" . "PublicKeyType")
+            ("PublicKeyType" . (enum ("PublicKeyType:PUBLIC_KEY_TYPE_ED25519" "PublicKeyType:OTHER_PUBLIC_KEY_TYPE")))
+            ("PublicKeyType:OTHER_PUBLIC_KEY_TYPE" . 1)
+            ("PublicKeyType:PUBLIC_KEY_TYPE_ED25519" . 0)
+            ("my-array" . (fixed-length-array "uint256" 2))
+            ("uint256" . (opaque-fixed-length-array 32)))))
+
+   #; (test-case
+    "Enum referring to other enum" ; TODO is this even allowed by the RFC?
+    (check-equal?
+     (parse-asts
+      #'((define-type
+          "enum-1"
+          (enum ("val-1" 1) ("val-2" 2)))
+         (define-type
+           "enum-2"
+           (enum ("x" "val-1") ("y" "val-2")))))
+     '#hash(
+            ("enum-1" . (enum ("enum-1:val-1" "enum-1:val-2")))
+            ("enum-1:val-1" . 1)
+            ("enum-1:val-2" . 2)
+            ("enum-2" . (enum ("enum-2:x" "enum-2:y")))
+            ("enum-2:x" . "enum-1:val-1") ; TODO
+            ("enum-2:y" . "enum-2:val-2")))) ; TODO
+   
    (test-case
     "Check that no exceptions are thrown"
     (check-not-exn
