@@ -4,6 +4,7 @@
 ; This module provides macros that turn such an AST into a more useful, symbol-table-like data structure.
 
 ; Note that we do not handle the all possible guile-rpc ASTs, but only a super-set of those that appear in Stellar's XDR files.
+; Notable, this does not support recursive XDR types.
 
 (provide parse-asts ks-v-assoc->hash-tests parse-asts-tests)
 
