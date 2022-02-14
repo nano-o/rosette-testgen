@@ -215,23 +215,17 @@
             ("my-array" . (fixed-length-array "uint256" 2))
             ("uint256" . (opaque-fixed-length-array 32)))))
 
-   #; (test-case
-    "Enum referring to other enum" ; TODO is this even allowed by the RFC?
-    (check-equal?
-     (parse-asts
-      #'((define-type
-          "enum-1"
-          (enum ("val-1" 1) ("val-2" 2)))
-         (define-type
-           "enum-2"
-           (enum ("x" "val-1") ("y" "val-2")))))
-     '#hash(
-            ("enum-1" . (enum ("enum-1:val-1" "enum-1:val-2")))
-            ("enum-1:val-1" . 1)
-            ("enum-1:val-2" . 2)
-            ("enum-2" . (enum ("enum-2:x" "enum-2:y")))
-            ("enum-2:x" . "enum-1:val-1") ; TODO
-            ("enum-2:y" . "enum-2:val-2")))) ; TODO
+   (test-case
+    "Enum referring to other enum"
+    (check-exn exn:fail?
+     (λ ()
+       (parse-asts
+        #'((define-type
+             "enum-1"
+             (enum ("val-1" 1) ("val-2" 2)))
+           (define-type
+             "enum-2"
+             (enum ("x" "val-1") ("y" "val-2"))))))))
    
    (test-case
     "Check that no exceptions are thrown"
