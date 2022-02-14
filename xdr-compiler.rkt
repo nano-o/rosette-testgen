@@ -6,7 +6,7 @@
 ; Note that we do not handle the all possible guile-rpc ASTs, but only a super-set of those that appear in Stellar's XDR files.
 ; Notable, this does not support recursive XDR types.
 
-(provide parse-asts ks-v-assoc->hash-tests parse-asts-tests)
+(provide parse-asts ks-v-assoc->hash-tests compiler-tests)
 
 (require
   syntax/parse syntax/parse/define racket/syntax
@@ -170,99 +170,116 @@
     [ds:defs (attribute ds.sym-table)]))
 
 ;tests
-(define-test-suite parse-asts-tests
- (test-case
-  "Check that no exceptions are thrown"
-  (check-not-exn
-   (λ ()
-     (parse-asts
-      #'((define-type
-           "ManageOfferSuccessResult"
-           (struct
-             ("offersClaimed"
-              (variable-length-array "ClaimAtom" #f))
-             ("offer"
-              (union (case ("effect" "ManageOfferEffect")
-                       (("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED")
-                        ("offer" "OfferEntry"))
-                       (else "void"))))))))))
-
-  (check-not-exn
-   (λ ()
-     (parse-asts
-      #'((define-type
-           "CreateAccountResult"
-           (union (case ("code" "CreateAccountResultCode")
-                    (("CREATE_ACCOUNT_SUCCESS") "void")
-                    (else "void"))))))))
-  (check-not-exn
-   (λ ()
-     (parse-asts
-      #'((define-type
-           "AlphaNum12"
-           (struct
-             ("assetCode" "AssetCode12")
-             ("issuer" "AccountID")))
-         (define-type
-           "Asset"
-           (union (case ("type" "AssetType")
-                    (("ASSET_TYPE_NATIVE") "void"))))))))
-  (check-not-exn
-   (λ ()
-     (parse-asts
-      #'((define-constant "MASK_ACCOUNT_FLAGS" 7)
-         (define-constant "MASK_ACCOUNT_FLAGS_AGAIN" 8)))))
-
-  (check-not-exn
-   (λ ()
-     (parse-asts
-      #'((define-type
-           "uint256"
-           (fixed-length-array "opaque" 32))))))
-  (check-not-exn
-   (λ ()
-     (parse-asts
-      #'((define-type
-           "AlphaNum4"
-           (struct
-             ("assetCode" "AssetCode4")
-             ("issuer" "AccountID")))))))
-
-  (check-not-exn
-   (λ ()
-     (parse-asts
-      #'((define-type
-           "PublicKeyType"
-           (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))))
-
-  (check-not-exn
-   (λ ()
-     (parse-asts
-      #'((define-type
-           "PublicKey"
-           (union (case ("type" "PublicKeyType")
-                    (("PUBLIC_KEY_TYPE_ED25519")
-                     ("ed25519" "uint256")))))))))
-  (check-not-exn
-   (λ ()
-     (parse-asts
-      #'((define-type "uint32" "unsigned int")))))
-
-  (check-not-exn
-   (λ ()
-     (parse-asts
-      #'((define-type
-           "uint256"
-           (fixed-length-array "opaque" 32))))))
-
-  (check-not-exn
-   (λ ()
+(define compiler-tests
+  (test-suite
+   "tests for xdr-compiler.rkt"
+  
+   (test-case
+    "Opaque array with non-primitive element type"
+    (check-equal?
      (parse-asts
       #'((define-type
            "uint256"
            (fixed-length-array "opaque" 32))
          (define-type
-           "PublicKeyType"
-           (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))))))
+           "my-array"
+           (fixed-length-array "uint256" 2))))
+     '#hash(("myy-array" . (fixed-length-array "uint256" 2)) ("uint256" . (opaque-fixed-length-array 32)))))
+  
+   (test-case
+    "Check that no exceptions are thrown"
+    (check-not-exn
+     (λ ()
+       (parse-asts
+        #'((define-type
+             "ManageOfferSuccessResult"
+             (struct
+               ("offersClaimed"
+                (variable-length-array "ClaimAtom" #f))
+               ("offer"
+                (union (case ("effect" "ManageOfferEffect")
+                         (("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED")
+                          ("offer" "OfferEntry"))
+                         (else "void"))))))))))
 
+    (check-not-exn
+     (λ ()
+       (parse-asts
+        #'((define-type
+             "CreateAccountResult"
+             (union (case ("code" "CreateAccountResultCode")
+                      (("CREATE_ACCOUNT_SUCCESS") "void")
+                      (else "void"))))))))
+    (check-not-exn
+     (λ ()
+       (parse-asts
+        #'((define-type
+             "AlphaNum12"
+             (struct
+               ("assetCode" "AssetCode12")
+               ("issuer" "AccountID")))
+           (define-type
+             "Asset"
+             (union (case ("type" "AssetType")
+                      (("ASSET_TYPE_NATIVE") "void"))))))))
+    (check-not-exn
+     (λ ()
+       (parse-asts
+        #'((define-constant "MASK_ACCOUNT_FLAGS" 7)
+           (define-constant "MASK_ACCOUNT_FLAGS_AGAIN" 8)))))
+
+    (check-not-exn
+     (λ ()
+       (parse-asts
+        #'((define-type
+             "uint256"
+             (fixed-length-array "opaque" 32))))))
+    (check-not-exn
+     (λ ()
+       (parse-asts
+        #'((define-type
+             "AlphaNum4"
+             (struct
+               ("assetCode" "AssetCode4")
+               ("issuer" "AccountID")))))))
+
+    (check-not-exn
+     (λ ()
+       (parse-asts
+        #'((define-type
+             "PublicKeyType"
+             (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))))
+
+    (check-not-exn
+     (λ ()
+       (parse-asts
+        #'((define-type
+             "PublicKey"
+             (union (case ("type" "PublicKeyType")
+                      (("PUBLIC_KEY_TYPE_ED25519")
+                       ("ed25519" "uint256")))))))))
+    (check-not-exn
+     (λ ()
+       (parse-asts
+        #'((define-type "uint32" "unsigned int")))))
+
+    (check-not-exn
+     (λ ()
+       (parse-asts
+        #'((define-type
+             "uint256"
+             (fixed-length-array "opaque" 32))))))
+
+    (check-not-exn
+     (λ ()
+       (parse-asts
+        #'((define-type
+             "uint256"
+             (fixed-length-array "opaque" 32))
+           (define-type
+             "PublicKeyType"
+             (enum ("PUBLIC_KEY_TYPE_ED25519" 0))))))))))
+
+;(require rackunit/text-ui)
+;(run-tests compiler-tests)
 ; See also ./guile-ast-example.rkt
