@@ -18,7 +18,6 @@
 ; This should be okay as per RFC45906, which states that the only special character allowed in XDR identifiers is "_".
 ; See https://datatracker.ietf.org/doc/html/rfc4506#section-6.2
 
-; TODO Second pass that ensures symbols are mapped to non-symbols
 ; TODO Think about what we want in the type representations. We'll use this to generate Rosette grammars, but also to generate infrastructure to make it convenient to write a spec of the transaction-processing code.
 
 (define (ks-v-assoc->hash ks-v-assoc)
@@ -112,7 +111,7 @@
              #:attr sym-table (hash-union
                                (attribute tag-decl.sym-table)
                                (apply hash-union (attribute v.sym-table)))
-             #:attr repr (list 'union-spec (attribute tag-decl.symbol) (ks-v-assoc->hash (zip (attribute v.tag-value) (attribute v.symbol))))])
+             #:attr repr (list 'union (attribute tag-decl.symbol) (ks-v-assoc->hash (zip (attribute v.tag-value) (attribute v.symbol))))])
   ; struct
   (define-syntax-class (struct-spec scope)
     #:description "a struct-type specification"
@@ -158,7 +157,7 @@
   (define-syntax-class const-def
     #:description "the definition of a constant"
     [pattern ((~datum define-constant) s:string c:constant)
-             #:attr sym-table (hash (syntax-e #'s) (syntax-e #'c))])
+             #:attr sym-table (hash (syntax-e #'s) (list 'constant (syntax-e #'c)))])
   ; a sequence of definitions:
   (define-syntax-class defs
     #:description "a sequence of definitions of types and constants"
