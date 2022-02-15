@@ -84,12 +84,7 @@
                         [h2 '#hash(('a . 'c))])
                     (hash-merge h1 h2)))))))
 
-#;(begin
-  (require (submod "." test))
-  (require rackunit/text-ui)
-  (run-tests hash-merge/test))
-
-(begin
+(begin ; NOTE: for performance it would have been better to use symbols instead of strings.
   (define (add-scope scope str)
     (if scope (format "~a:~a" scope str) str))
   ; base types
@@ -110,9 +105,9 @@
   (define-syntax-class symbol
     #:description "a type symbol"
     [pattern "bool" ; special case of bool
-             #:attr repr `(enum ("bool:FALSE" "bool:TRUE"))
+             #:attr repr "bool"
              #:attr symbol "bool"
-             #:attr sym-table (hash "bool:FALSE" 0 "bool:TRUE" 1)]
+             #:attr sym-table (hash "bool:FALSE" 0 "bool:TRUE" 1 "bool" `(enum ("bool:FALSE" "bool:TRUE")))]
     [pattern s:string
              #:attr repr (syntax-e #'s)
              #:attr symbol (attribute repr)
@@ -191,7 +186,13 @@
   (define-splicing-syntax-class (splicing-type-decl scope)
     #:description "a spliced type declaration, optionally within a scope"
     [pattern (~seq s:string (~fail #:when (equal? (syntax-e #'s) "void")) (~bind [inner-scope (add-scope scope (syntax-e #'s))])
-                       (~or* t:base-type t:symbol t:array t:xdr-string (~var t (union-spec (attribute inner-scope))) (~var t (struct-spec (attribute inner-scope))) (~var t (enum-spec (attribute inner-scope)))))
+                       (~or* t:base-type
+                             t:symbol
+                             t:array
+                             t:xdr-string
+                             (~var t (union-spec (attribute inner-scope)))
+                             (~var t (struct-spec (attribute inner-scope)))
+                             (~var t (enum-spec (attribute inner-scope)))))
              #:attr symbol (add-scope scope (syntax-e #'s))
              #:attr repr  (attribute symbol)
              #:attr sym-table (hash-merge
