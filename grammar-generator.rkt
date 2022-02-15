@@ -1,35 +1,39 @@
 #lang racket
 
-(provide test-grammar)
 (require
   racket/match racket/syntax racket/generator
   "xdr-compiler.rkt" ;"guile-ast-example.rkt"
   (for-template rosette rosette/lib/synthax))
+(provide xdr-types->grammar)
+
+(module+ test
+  (require rackunit))
 
 ; TODO generate a Rosette grammar for this:
 #; (hash-ref
  (stellar-symbol-table)
  "TransactionEnvelope")
 
-; a simpler example:
-(define test-ast
-  #'((define-type
-       "uint256"
-       (fixed-length-array "opaque" 32))
-     (define-type
-       "my-array"
-       (fixed-length-array "uint256" 2))
-     (define-type
-       "PublicKeyType"
-       (enum ("PUBLIC_KEY_TYPE_ED25519" 0) ("OTHER_PUBLIC_KEY_TYPE" 1)))
-     (define-type
-       "PublicKey"
-       (union (case ("type" "PublicKeyType")
-                (("PUBLIC_KEY_TYPE_ED25519") ("ed25519" "uint256"))
-                (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array")))))))
+(module+ test
+  ; a simpler example:
+  (define test-ast
+    #'((define-type
+         "uint256"
+         (fixed-length-array "opaque" 32))
+       (define-type
+         "my-array"
+         (fixed-length-array "uint256" 2))
+       (define-type
+         "PublicKeyType"
+         (enum ("PUBLIC_KEY_TYPE_ED25519" 0) ("OTHER_PUBLIC_KEY_TYPE" 1)))
+       (define-type
+         "PublicKey"
+         (union (case ("type" "PublicKeyType")
+                  (("PUBLIC_KEY_TYPE_ED25519") ("ed25519" "uint256"))
+                  (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array")))))))
 
-(define test-sym-table
-  (parse-asts test-ast))
+  (define test-sym-table
+    (parse-asts test-ast)))
 
 ; Produce a syntax object defining a Rosette grammar
 ; Note that we need a syntax-object to use as context, provided by the macro calling this, otherwise g will be out of scope for the code that follows.
@@ -97,6 +101,7 @@
         [`(union ,tag ,variants)
          ; TODO: do we need one rule per variant and a big choose rule with all the variants? Seems so.
          ; The "else" case is a problem, and it looks like we're going to have to emit a validity predicate for that (then we'll assume this predicate holds before symbolic execution).
+         ; For enums, we can deal with "else" because the RFC says: "It is an error to encode as an enum any integer other than those that have been given assignments in the enum declaration."
            (begin
              (define (format-variant-rule-name v)
                (format "~a:~a" t v))
@@ -116,10 +121,11 @@
              (define union-holes
                (for/list ([v vlist])
                  (rule-hole (format-variant-rule-name (car v)))))
-             (void)
              (add-rule!
               (syntax-e rule-name)
-              #`(#,rule-name (choose #,@union-holes))))])))
+              #`(#,rule-name (choose #,@union-holes))))]
+        ; TODO struct
+        #;[`(struct ,s)])))
   ; creates a list of the rules in the variables `rules`, starting with the rule for `type`
   (define (rules-list)
     (let* ([top-key (syntax-e (rule-id type))]
@@ -130,7 +136,8 @@
     (make-rules! type)
     (rules-list)))
 
-(define (test-grammar)
-  (xdr-types->grammar test-sym-table "my-array"))
+(module+ test
+  (define (test-grammar)
+    (xdr-types->grammar test-sym-table "my-array")))
 
-(test-grammar)
+;(test-grammar)
