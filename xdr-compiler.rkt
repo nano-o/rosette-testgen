@@ -40,14 +40,14 @@
     (if scope (format "~a:~a" scope str) str))
   ; base types
   (define base-types
-    (list "int" "unsigned int" "hyper" "unsigned hyper" "bool" "double" "quadruple" "float"))
+    (list "int" "unsigned int" "hyper" "unsigned hyper" "double" "quadruple" "float"))
   (define (base-type? t)
     (member t base-types))
   (define-syntax-class base-type
     #:description "a base type"
     [pattern t:string
              #:fail-when (not (base-type? (syntax-e #'t))) (format "not a base type: ~a" (syntax-e #'t))
-             #:attr repr (syntax-e (format-id #'t "~a" (syntax-e #'t)))
+             #:attr repr (string->symbol (syntax-e #'t))
              #:attr sym-table (hash)
              #:attr symbol (attribute repr)])
   (define-syntax-class constant
@@ -55,6 +55,10 @@
     [pattern (~or* n:number s:string)])
   (define-syntax-class symbol
     #:description "a type symbol"
+    [pattern "bool" ; special case of bool
+             #:attr repr `(enum ("bool:FALSE" "bool:TRUE"))
+             #:attr symbol "bool"
+             #:attr sym-table (hash "bool:FALSE" 0 "bool:TRUE" 1)]
     [pattern s:string
              #:attr repr (syntax-e #'s)
              #:attr symbol (attribute repr)
@@ -226,7 +230,25 @@
            (define-type
              "enum-2"
              (enum ("x" "val-1") ("y" "val-2"))))))))
+
+   (test-case
+    "int"
+    (check-equal?
+     (parse-asts
+      #'((define-type
+           "my-int" "int")))
+     '#hash(("my-int" . int))))
    
+   (test-case
+    "bool"
+    (check-equal?
+     (parse-asts
+      #'((define-type
+           "my-bool" "bool")
+         (define-type
+           "my-bool-again" "bool"))) ; TODO using the same type twice causes an error
+     '#hash(("bool:FALSE" . 0) ("bool:TRUE" . 1) ("my-bool" . (enum ("bool:FALSE" "bool:TRUE"))))))
+      
    (test-case
     "Check that no exceptions are thrown"
     (check-not-exn
