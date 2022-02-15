@@ -7,7 +7,8 @@
 (provide xdr-types->grammar)
 
 (module+ test
-  (require rackunit))
+  (require rackunit)
+  (provide test-sym-table test-grammar))
 
 ; TODO generate a Rosette grammar for this:
 #; (hash-ref
@@ -25,12 +26,14 @@
          (fixed-length-array "uint256" 2))
        (define-type
          "PublicKeyType"
-         (enum ("PUBLIC_KEY_TYPE_ED25519" 0) ("OTHER_PUBLIC_KEY_TYPE" 1)))
+         (enum ("PUBLIC_KEY_TYPE_ED25519" 0) ("OTHER_PUBLIC_KEY_TYPE" 1) ("ANOTHER_PUBLIC_KEY_TYPE" 2)))
        (define-type
          "PublicKey"
          (union (case ("type" "PublicKeyType")
                   (("PUBLIC_KEY_TYPE_ED25519") ("ed25519" "uint256"))
-                  (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array")))))))
+                  (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array"))
+                  (("ANOTHER_PUBLIC_KEY_TYPE") ("myint" "int"))
+                  (else "void"))))))
 
   (define test-sym-table
     (parse-asts test-ast)))
@@ -68,64 +71,77 @@
            (map ((curry hash-ref) sym-table) vs)])
       (map (λ (v) #`(bv #,v (bitvector 32))) values)))
   ; We are going to accumulate rules in a mutable hash table
+  ; TODO why the mutable hash instead of recursively combining hash tables?
   (define rules (make-hash)) ; mutable hash table with equal? comparison
   (define (add-rule! key r)
     (if (not (hash-has-key? rules key))
                (hash-set! rules key r) (void)))
   ; The main procedure:
   (define (make-rules! t)
-    (let ([rule-name (rule-id t)])
-      (match (hash-ref sym-table t)
-        ; A type symbol
-        [s #:when (string? s)
-           (begin
-             (add-rule!
-              (syntax-e rule-name)
-              #`(#,rule-name #,(rule-hole s)))
-             (make-rules! s))]
-        ; Opaque fixed-length array. Represented by a bitvector.
-        [`(opaque-fixed-length-array ,nbytes)
-         (add-rule! (syntax-e rule-name)
-                   #`[#,rule-name (?? (bitvector #,(* nbytes 8)))])]
-        ; Fixed length array. Represented by a vector.
-        [`(fixed-length-array ,elem-type ,size)
-         (let ([top-rule #`[#,rule-name #,(fixed-size-array elem-type size)]])
-           (begin
-             (add-rule! (syntax-e rule-name) top-rule)
-             (make-rules! elem-type)))]
-        ; Enum. Represented by a bitvector of size 32.
-        [`(enum ,vs)
-         (add-rule! (syntax-e rule-name)
-                   #`[#,rule-name (choose #,@(enum-values vs))])]
-        ; union:
-        [`(union ,tag ,variants)
-         ; TODO: do we need one rule per variant and a big choose rule with all the variants? Seems so.
-         ; The "else" case is a problem, and it looks like we're going to have to emit a validity predicate for that (then we'll assume this predicate holds before symbolic execution).
-         ; For enums, we can deal with "else" because the RFC says: "It is an error to encode as an enum any integer other than those that have been given assignments in the enum declaration."
-           (begin
-             (define (format-variant-rule-name v)
-               (format "~a:~a" t v))
-             (define vlist (hash->list variants))
-             ; first make the rules for all subtypes:
-             (for ([t (cons tag (map (curry cdr) vlist))])
-               (make-rules! t))
-             ; now make a rule for each union variant:
-             (for ([v vlist])
-               (let ([variant-rule-name (rule-id (format-variant-rule-name (car v)))]
-                     [tag-hole (if (equal? (car v) 'else) #'(?? (bitvector 32)) (constant-hole (format "~a:~a" (hash-ref sym-table tag) (car v))))] ; TODO: make sure the sym-table contains a constant for `car v`.
-                     [value-hole (rule-hole (cdr v))])
-                 (add-rule!
-                  (syntax-e variant-rule-name)
-                  #`(#,variant-rule-name (cons #,tag-hole #,value-hole)))))
-             ; finally make a rule for the enum
-             (define union-holes
-               (for/list ([v vlist])
-                 (rule-hole (format-variant-rule-name (car v)))))
-             (add-rule!
-              (syntax-e rule-name)
-              #`(#,rule-name (choose #,@union-holes))))]
-        ; TODO struct
-        #;[`(struct ,s)])))
+    (define rule-name (rule-id t))
+    (define (add-this-rule! r) (add-rule! (syntax-e rule-name) #`(#,rule-name #,r)))
+    (match t
+      ; void
+      ['void (add-this-rule! #'())]
+      ; Built-in types
+      ['int (add-this-rule! #'(?? (bitvector 32)))]
+      ['unsigned-int (add-this-rule! #'(?? (bitvector 32)))]
+      ['hyper (add-this-rule! #'(?? (bitvector 64)))]
+      ['unsigned-hyper (add-this-rule! #'(?? (bitvector 64)))]
+      [t #:when (string? t)
+         (match (hash-ref sym-table t)
+           ; A type symbol
+           [s #:when (string? s)
+              (begin
+                (add-this-rule! (rule-hole s))
+                (make-rules! s))]
+           ; A built-in
+           [s #:when (symbol? s)
+              (begin
+                (add-this-rule! (rule-hole s))
+                (make-rules! s))]
+           ; Opaque fixed-length array. Represented by a bitvector.
+           [`(opaque-fixed-length-array ,nbytes)
+            (add-this-rule! #`(?? (bitvector #,(* nbytes 8))))]
+           ; Fixed length array. Represented by a vector.
+           [`(fixed-length-array ,elem-type ,size)
+            (let ([top-rule (fixed-size-array elem-type size)])
+              (begin
+                (add-this-rule! top-rule)
+                (make-rules! elem-type)))]
+           ; Enum. Represented by a bitvector of size 32.
+           [`(enum ,vs)
+            (add-rule! (syntax-e rule-name)
+                       #`[#,rule-name (choose #,@(enum-values vs))])]
+           ; union:
+           [`(union ,tag ,variants)
+            ; TODO: do we need one rule per variant and a big choose rule with all the variants? Seems so.
+            ; The "else" case is a problem, and it looks like we're going to have to emit a validity predicate for that (then we'll assume this predicate holds before symbolic execution).
+            ; For enums, we can deal with "else" because the RFC says: "It is an error to encode as an enum any integer other than those that have been given assignments in the enum declaration."
+            (begin
+              (define (format-variant-rule-name v)
+                (format "~a:~a" t v))
+              (define vlist (hash->list variants))
+              ; first make the rules for all subtypes:
+              (for ([t (cons tag (map (curry cdr) vlist))])
+                (make-rules! t))
+              ; now make a rule for each union variant:
+              (for ([v vlist])
+                (let ([variant-rule-name (rule-id (format-variant-rule-name (car v)))]
+                      [tag-hole (if (equal? (car v) 'else) #'(?? (bitvector 32)) (constant-hole (format "~a:~a" (hash-ref sym-table tag) (car v))))]
+                      [value-hole (rule-hole (cdr v))])
+                  (add-rule!
+                   (syntax-e variant-rule-name)
+                   #`(#,variant-rule-name (cons #,tag-hole #,value-hole)))))
+              ; finally make a rule for the enum
+              (define union-holes
+                (for/list ([v vlist])
+                  (rule-hole (format-variant-rule-name (car v)))))
+              (add-rule!
+               (syntax-e rule-name)
+               #`(#,rule-name (choose #,@union-holes))))]
+           ; TODO struct
+           #;[`(struct ,s)])]))
   ; creates a list of the rules in the variables `rules`, starting with the rule for `type`
   (define (rules-list)
     (let* ([top-key (syntax-e (rule-id type))]
@@ -138,6 +154,6 @@
 
 (module+ test
   (define (test-grammar)
-    (xdr-types->grammar test-sym-table "my-array")))
+    (xdr-types->grammar test-sym-table "PublicKey")))
 
 ;(test-grammar)
