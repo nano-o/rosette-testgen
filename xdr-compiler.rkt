@@ -37,27 +37,15 @@
   (define-test-suite ks-v-assoc->hash/test
     (check-equal?
      (ks-v-assoc->hash
-      '((("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED") . "offer:offer") ((else) . void)))
-     #hash((else . void) ("MANAGE_OFFER_CREATED" . "offer:offer") ("MANAGE_OFFER_UPDATED" . "offer:offer")))))
+      '(((a b) . c) ((d) . e)))
+     #hash((a . c) (b . c) (d . e)))))
 
 (define (hash-merge h . rest)
-  (define (merge-two h1 h2)
-    (define (duplicate? k) ; precondition: k is a key of h1
-      (if (not (hash-has-key? h2 k))
-          #f
-          (if 
-           (and (hash-has-key? h2 k)
-                (not (equal? (hash-ref h1 k) (hash-ref h2 k))))
-           (error "cannot merge hash maps with conflicting keys")
-           #t)))
-    (define h3
-      (for/hash ([kv (hash->list h1)]
-                 #:unless (duplicate? (car kv)))
-        (values (car kv) (cdr kv))))
-    (hash-union h3 h2))
-  (for/fold ([result (hash)])
-            ([h (cons h rest)])
-    (merge-two result h)))
+  (apply hash-union h rest
+         #:combine (λ (v1 v2)
+                     (if (not (equal? v1 v2))
+                         (error "cannot merge hash maps with conflicting keys")
+                         v1))))
 
 (module+ test
   (define-test-suite hash-merge/test
@@ -304,7 +292,7 @@
      '#hash(("my-int" . int))))
    
    (test-case
-    "bool" ; TODO
+    "bool"
     (check-equal?
      (parse-ast
       #'((define-type
@@ -313,6 +301,21 @@
            "my-bool-again" "bool")))
      '#hash(("bool:FALSE" . 0) ("bool:TRUE" . 1) ("bool" . (enum ("bool:FALSE" "bool:TRUE"))) ("my-bool" . "bool") ("my-bool-again" . "bool"))))
       
+   (test-case
+    "struct"
+    (check-equal?
+     (parse-ast
+      #'((define-type
+        "AlphaNum4"
+        (struct
+          ("assetCode" "AssetCode4")
+          ("issuer" "AccountID")
+          ("array" (fixed-length-array "opaque" 32))))))
+     '#hash(("AlphaNum4" . (struct ("AlphaNum4:assetCode" "AlphaNum4:issuer" "AlphaNum4:array")))
+       ("AlphaNum4:array" . (opaque-fixed-length-array 32))
+       ("AlphaNum4:assetCode" . "AssetCode4")
+       ("AlphaNum4:issuer" . "AccountID"))))
+           
    (test-case
     "Check that no exceptions are thrown"
     (check-not-exn
