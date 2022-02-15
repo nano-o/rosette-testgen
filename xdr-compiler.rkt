@@ -6,15 +6,19 @@
 ; Note that we do not handle the all possible guile-rpc ASTs, but only a super-set of those that appear in Stellar's XDR files.
 ; Notable, this does not support recursive XDR types.
 
-(provide parse-asts ks-v-assoc->hash-tests compiler-tests)
+(provide parse-ast)
 
 (require
   syntax/parse syntax/parse/define racket/syntax
   racket/hash list-util
   rackunit)
 
+(module+ test
+  (require rackunit)
+  (provide ks-v-assoc->hash/test parse-ast/test hash-merge/test))
+
 ; First pass: a recursive syntax class, defs, that builds a symbol table where symbols are strings.
-; Each symbol is a type name and maps to the description of the type
+; Each symbol is a type name or constant name and maps to a representation of the type or constant.
 ; The symbol for a types t1 that is a direct child of t2 is "t1:t2"
 ; This should be okay as per RFC45906, which states that the only special character allowed in XDR identifiers is "_".
 ; See https://datatracker.ietf.org/doc/html/rfc4506#section-6.2
@@ -29,12 +33,62 @@
             ([ks-v ks-v-assoc])
     (hash-union h (ks-v->hash ks-v))))
 
-(define-test-suite ks-v-assoc->hash-tests
-  (check-equal?
-   (ks-v-assoc->hash
-    '((("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED") . "offer:offer") ((else) . void)))
-   #hash((else . void) ("MANAGE_OFFER_CREATED" . "offer:offer") ("MANAGE_OFFER_UPDATED" . "offer:offer"))))
-       
+(module+ test
+  (define-test-suite ks-v-assoc->hash/test
+    (check-equal?
+     (ks-v-assoc->hash
+      '((("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED") . "offer:offer") ((else) . void)))
+     #hash((else . void) ("MANAGE_OFFER_CREATED" . "offer:offer") ("MANAGE_OFFER_UPDATED" . "offer:offer")))))
+
+(define (hash-merge h . rest)
+  (define (merge-two h1 h2)
+    (define (duplicate? k) ; precondition: k is a key of h1
+      (if (not (hash-has-key? h2 k))
+          #f
+          (if 
+           (and (hash-has-key? h2 k)
+                (not (equal? (hash-ref h1 k) (hash-ref h2 k))))
+           (error "cannot merge hash maps with conflicting keys")
+           #t)))
+    (define h3
+      (for/hash ([kv (hash->list h1)]
+                 #:unless (duplicate? (car kv)))
+        (values (car kv) (cdr kv))))
+    (hash-union h3 h2))
+  (for/fold ([result (hash)])
+            ([h (cons h rest)])
+    (merge-two result h)))
+
+(module+ test
+  (define-test-suite hash-merge/test
+    (test-case
+     "successful merge"
+     (check-equal?
+      (let ([h1 '#hash(('a . 'b) ('e . 'f))]
+            [h2 '#hash(('a . 'b) ('c . 'd))])
+        (hash-merge h1 h2))
+      '#hash(('a . 'b) ('c . 'd) ('e . 'f))))
+    (test-case
+     "successful multiple merges"
+     (check-equal?
+      (let ([h1 '#hash(('a . 'b) ('e . 'f))]
+            [h2 '#hash(('a . 'b) ('c . 'd))]
+            [h3 '#hash(('c . 'd) ('g . 'h))])
+        (hash-merge h1 h2 h3))
+      '#hash(('a . 'b) ('c . 'd) ('e . 'f) ('g . 'h))))
+    (test-case
+     "failed merge"
+     (check-exn exn:fail?
+                (λ () 
+                  (let ([h1 '#hash(('a . 'b))]
+                        [h2 '#hash(('a . 'c))])
+                    (hash-merge h1 h2)))))))
+
+#;(begin
+  (require (submod "." test))
+  (require rackunit/text-ui)
+  (run-tests hash-merge/test))
+
 (begin
   (define (add-scope scope str)
     (if scope (format "~a:~a" scope str) str))
@@ -113,15 +167,15 @@
     [pattern ((~datum union)
               ((~datum case) (~var tag-decl (type-decl scope))
                                (~var v (case-spec scope)) ...))
-             #:attr sym-table (hash-union
+             #:attr sym-table (hash-merge
                                (attribute tag-decl.sym-table)
-                               (apply hash-union (attribute v.sym-table)))
+                               (apply hash-merge (attribute v.sym-table)))
              #:attr repr (list 'union (attribute tag-decl.symbol) (ks-v-assoc->hash (zip (attribute v.tag-value) (attribute v.symbol))))])
   ; struct
   (define-syntax-class (struct-spec scope)
     #:description "a struct-type specification"
     [pattern ((~datum struct) (~var d (type-decl scope)) ...)
-             #:attr sym-table (apply hash-union (attribute d.sym-table))
+             #:attr sym-table (apply hash-merge (attribute d.sym-table))
              #:attr repr (list 'struct (attribute d.symbol))]) ; this is a list
   ; enum
   (define-syntax-class (enum-spec scope)
@@ -140,7 +194,7 @@
                        (~or* t:base-type t:symbol t:array t:xdr-string (~var t (union-spec (attribute inner-scope))) (~var t (struct-spec (attribute inner-scope))) (~var t (enum-spec (attribute inner-scope)))))
              #:attr symbol (add-scope scope (syntax-e #'s))
              #:attr repr  (attribute symbol)
-             #:attr sym-table (hash-union
+             #:attr sym-table (hash-merge
                                (hash (attribute symbol) (attribute t.repr))
                                (attribute t.sym-table))])
   (define-syntax-class (type-decl scope)
@@ -167,21 +221,21 @@
   (define-syntax-class defs
     #:description "a sequence of definitions of types and constants"
     [pattern ((~commit (~or* d:type-def d:const-def)) ...) ; ~commit eliminates backtracking on already matched patterns upon failure, and does in all subpatterns (it seems)
-             #:attr sym-table (apply hash-union (attribute d.sym-table))]))
+             #:attr sym-table (apply hash-merge (attribute d.sym-table))]))
 
-(define (parse-asts stx)
+(define (parse-ast stx)
   (syntax-parse stx
     [ds:defs (attribute ds.sym-table)]))
 
 ;tests
-(define compiler-tests
+(define parse-ast/test
   (test-suite
-   "tests for xdr-compiler.rkt"
+   "tests for parse-ast"
   
    (test-case
     "Opaque array with non-primitive element type"
     (check-equal?
-     (parse-asts
+     (parse-ast
       #'((define-type
            "uint256"
            (fixed-length-array "opaque" 32))
@@ -193,7 +247,7 @@
    (test-case
     "XDR union"
     (check-equal?
-     (parse-asts
+     (parse-ast
       #'((define-type
        "uint256"
        (fixed-length-array "opaque" 32))
@@ -223,7 +277,7 @@
     "Enum referring to other enum"
     (check-exn exn:fail?
      (λ ()
-       (parse-asts
+       (parse-ast
         #'((define-type
              "enum-1"
              (enum ("val-1" 1) ("val-2" 2)))
@@ -234,26 +288,26 @@
    (test-case
     "int"
     (check-equal?
-     (parse-asts
+     (parse-ast
       #'((define-type
            "my-int" "int")))
      '#hash(("my-int" . int))))
    
    (test-case
-    "bool"
+    "bool" ; TODO
     (check-equal?
-     (parse-asts
+     (parse-ast
       #'((define-type
            "my-bool" "bool")
          (define-type
-           "my-bool-again" "bool"))) ; TODO using the same type twice causes an error
-     '#hash(("bool:FALSE" . 0) ("bool:TRUE" . 1) ("my-bool" . (enum ("bool:FALSE" "bool:TRUE"))))))
+           "my-bool-again" "bool")))
+     '#hash(("bool:FALSE" . 0) ("bool:TRUE" . 1) ("bool" . (enum ("bool:FALSE" "bool:TRUE"))) ("my-bool" . "bool") ("my-bool-again" . "bool"))))
       
    (test-case
     "Check that no exceptions are thrown"
     (check-not-exn
      (λ ()
-       (parse-asts
+       (parse-ast
         #'((define-type
              "ManageOfferSuccessResult"
              (struct
@@ -267,7 +321,7 @@
 
     (check-not-exn
      (λ ()
-       (parse-asts
+       (parse-ast
         #'((define-type
              "CreateAccountResult"
              (union (case ("code" "CreateAccountResultCode")
@@ -275,7 +329,7 @@
                       (else "void"))))))))
     (check-not-exn
      (λ ()
-       (parse-asts
+       (parse-ast
         #'((define-type
              "AlphaNum12"
              (struct
@@ -287,19 +341,19 @@
                       (("ASSET_TYPE_NATIVE") "void"))))))))
     (check-not-exn
      (λ ()
-       (parse-asts
+       (parse-ast
         #'((define-constant "MASK_ACCOUNT_FLAGS" 7)
            (define-constant "MASK_ACCOUNT_FLAGS_AGAIN" 8)))))
 
     (check-not-exn
      (λ ()
-       (parse-asts
+       (parse-ast
         #'((define-type
              "uint256"
              (fixed-length-array "opaque" 32))))))
     (check-not-exn
      (λ ()
-       (parse-asts
+       (parse-ast
         #'((define-type
              "AlphaNum4"
              (struct
@@ -308,14 +362,14 @@
 
     (check-not-exn
      (λ ()
-       (parse-asts
+       (parse-ast
         #'((define-type
              "PublicKeyType"
              (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))))
 
     (check-not-exn
      (λ ()
-       (parse-asts
+       (parse-ast
         #'((define-type
              "PublicKey"
              (union (case ("type" "PublicKeyType")
@@ -323,19 +377,19 @@
                        ("ed25519" "uint256")))))))))
     (check-not-exn
      (λ ()
-       (parse-asts
+       (parse-ast
         #'((define-type "uint32" "unsigned int")))))
 
     (check-not-exn
      (λ ()
-       (parse-asts
+       (parse-ast
         #'((define-type
              "uint256"
              (fixed-length-array "opaque" 32))))))
 
     (check-not-exn
      (λ ()
-       (parse-asts
+       (parse-ast
         #'((define-type
              "uint256"
              (fixed-length-array "opaque" 32))

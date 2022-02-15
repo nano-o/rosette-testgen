@@ -1,9 +1,10 @@
 #lang racket
 
-(require "xdr-compiler.rkt" "guile-ast-example.rkt" "generators.rkt"
+(require (submod "xdr-compiler.rkt" test) "guile-ast-example.rkt" "generators.rkt"
          rackunit/text-ui)
 
 (run-tests generator-tests)
-(run-tests compiler-tests)
-(run-tests ks-v-assoc->hash-tests)
-(run-tests stellar-xdr-tests)
+(run-tests parse-ast/test)
+(run-tests ks-v-assoc->hash/test)
+(run-tests hash-merge/test)
+(run-tests parse-stellar-xdr/test)
