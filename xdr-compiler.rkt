@@ -160,8 +160,8 @@
 ; define-constant:
 (define-syntax-class const-def
   #:description "the definition of a constant"
-  [pattern ((~datum define-constant) s:identifier c:constant)
-           #:attr kv `(,(attribute s.repr) . ,(attribute c.repr))])
+  [pattern ((~datum define-constant) s:identifier n:number) ; TODO: n could be another constant
+           #:attr kv `(,(attribute s.repr) . ,(syntax-e #'n))])
 ; a sequence of definitions:
 (define-syntax-class defs
   #:description "a sequence of definitions of types and constants"
