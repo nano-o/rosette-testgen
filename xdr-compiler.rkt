@@ -116,6 +116,7 @@
             ((~datum case) (~var tag-decl type-decl)
                            (~var v case-spec) ...))
            #:fail-when (not (string? (attribute tag-decl.repr))) "inline type specification in union tag-type is not supported"; TODO: in theory the tag type could be an inline type specification but we exclude this case for now
+           #:fail-when (and (base-type? (attribute tag-decl.repr)) (member '(else) (map car (attribute v.repr)))) "int or unsigned int as tag type not supported when there is an else variant"
            #:attr repr `(union (,(attribute tag-decl.symbol) . ,(attribute tag-decl.repr)) ,(ks-v-assoc->hash (attribute v.repr)))])
 ; struct
 (define-syntax-class struct-spec
@@ -213,6 +214,15 @@
             ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0)))
             ("my-array" . (fixed-length-array "uint256" . 2))
             ("uint256" . (opaque-fixed-length-array . 32)))))
+
+   
+   (test-case
+    "XDR union, int tag, and else variant"
+    (check-exn exn:fail?
+               (λ ()
+                 (parse-ast
+                  #'((define-type
+                       "test-union" (union (case ("type" "int") (else "void")))))))))
 
    (test-case
     "Enum referring to other enum"
