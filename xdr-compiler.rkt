@@ -104,7 +104,7 @@
 ; one variant of a union:
 (define-syntax-class case-spec
   #:description "a case specification inside a union-type specification"
-  [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) d:type-decl)
+  [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) d:type-decl) ; NOTE here we must support inline type declarations (occurs in Stellar XDR)
            #:attr repr (let ([vals (if (attribute tag-val) (attribute tag-val.repr) '(else))]
                              [accessor (attribute d.symbol)]
                              [type-repr (attribute d.repr)])
@@ -116,7 +116,7 @@
             ((~datum case) (~var tag-decl type-decl)
                            (~var v case-spec) ...))
            #:fail-when (not (string? (attribute tag-decl.repr))) "inline type specification in union tag-type is not supported"; TODO: in theory the tag type could be an inline type specification but we exclude this case for now
-           #:attr repr `(union (,(attribute tag-decl.symbol) . ,(attribute tag-decl.repr)) ,(ks-v-assoc->hash (attribute v.repr)))]) ; TODO: check that this works
+           #:attr repr `(union (,(attribute tag-decl.symbol) . ,(attribute tag-decl.repr)) ,(ks-v-assoc->hash (attribute v.repr)))])
 ; struct
 (define-syntax-class struct-spec
   #:description "a struct-type specification"
@@ -143,8 +143,8 @@
 (define-syntax-class type-decl
   #:description "a type declaration"
   [pattern "void" ; TODO okay?
-           #:attr symbol 'void
-           #:attr repr 'void]
+           #:attr symbol "void"
+           #:attr repr "void"]
   [pattern (d:splicing-type-decl)
            #:attr repr (attribute d.repr)
            #:attr symbol (attribute d.symbol)])
