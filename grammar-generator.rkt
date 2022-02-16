@@ -89,31 +89,58 @@
     [(number? c) #`(bv ,c (bitvector 32))]
     [else (error "c should be a string or number")]))
 
-; make-rules returns a rule body for the type t and a list of types whose rules the body depends on.
-(define (make-rule t)
+; body-depss returns a rule body for the type t and a list of types whose rules the body depends on.
+(define (body-deps t)
   (match t
-    ["void" (cons #'null null)]
-    ["int" (cons #'(?? (bitvector 32)) null)]
-    ["unsigned-int" (cons #'(?? (bitvector 32)) null)]
-    ["hyper" (cons #'(?? (bitvector 64)) null)]
-    ["unsigned-hyper" (cons #'(?? (bitvector 64)) null)]
+    ["void" (list #'null)]
+    ["int" (list #'(?? (bitvector 32)))]
+    ["unsigned-int" (list #'(?? (bitvector 32)))]
+    ["hyper" (list #'(?? (bitvector 64)))]
+    ["unsigned-hyper" (list #'(?? (bitvector 64)))]
     [s #:when (string? s)
        (cons (rule-hole s) (list s))]
     ; Opaque fixed-length array. Represented by a bitvector.
     [`(opaque-fixed-length-array . ,nbytes)
-     (cons #`(?? (bitvector #,(* nbytes 8))) null)]
+     (list #`(?? (bitvector #,(* nbytes 8))))]
     ; Fixed length array. Represented by a vector.
     ; TODO would it be better to create a rule for the element type if it's an inline type?
     [`(fixed-length-array ,elem-type . ,size)
-     (match-let* ([(cons elem-body deps) (make-rule elem-type)]
+     (match-let* ([(cons elem-body deps) (body-deps elem-type)]
                   [body #`(vector
                            #,@(for/list ([i (in-range size)]) elem-body))])
        (cons body deps))]
-    [`(enum ,kv ...) 'TODO]))
+    [`(enum ,kv ...)
+     (let* ([vs (map cdr kv)]
+            [bvs (map (λ (v) #`(bv #,v (bitvector 32))) vs)])
+       (list #`(choose #,@bvs)))]
+    [`(union (,tag . ,tag-type) ,variants)
+     ; Variants can in principle refer to enum constants defined inline in tag-type, but we don't support that inline tag-types.
+     ; The type of a variant can however be an inline type specification.
+     (begin
+       (if (not (string? tag-type)) (error "we do not support inline tag types") (void))
+       ; variant accessor -> body dependencies
+       (let* ([vs-body-deps (make-immutable-hash
+                        (hash-map variants ;'(tag-value accessor . type) where type is not void, or '(tag-value . void)
+                                  (λ (k v) (if (eq? (cdr v) void)
+                                               (list (car v) #'())
+                                               (cons (car v) (body-deps (cdr v)))))))]
+             [deps (append
+                    (if (member tag-type '("int" "unsigned int"))
+                        '()
+                        (list tag-type))
+                    (flatten (hash-map
+                              vs-body-deps
+                              (λ (k v)
+                                (if (pair? v)
+                                    (cdr v)
+                                    '())))))])
+         `(#'() . ,deps)))]))
 
 ; a few tests
-(make-rule '(fixed-length-array (opaque-fixed-length-array . 32) . 3))
-(cdr (make-rule '(fixed-length-array "some-type" . 3)))
+(body-deps '(fixed-length-array (opaque-fixed-length-array . 32) . 3))
+(body-deps '(fixed-length-array "some-type" . 3))
+(body-deps '(enum ("A" . 1) ("B" . 2)))
+(body-deps '(union ("tag" . "my-other-type") #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")))))
 
 (define (xdr-types->grammar sym-table type) null)
 
