@@ -105,6 +105,7 @@
 (define-syntax-class case-spec
   #:description "a case specification inside a union-type specification"
   [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) (~or* d:type-decl d:void)) ; NOTE here we must support inline type declarations (occurs in Stellar XDR)
+           #:fail-when (and (not (string? (attribute d.repr))) (eq? (car (attribute d.repr)) 'enum)) "inline enum-type declaration not supported"
            #:attr repr (let ([vals (if (attribute tag-val) (attribute tag-val.repr) '(else))])
                          (if (equal? (syntax-e #'d) "void")
                              `(,vals . "void")
@@ -128,7 +129,7 @@
 ; enum
 (define-syntax-class enum-spec
   #:description "an enum-type specification"
-  [pattern ((~datum enum) (t0:identifier v0:number) ...)
+  [pattern ((~datum enum) (t0:identifier v0:number) ...) ; TODO v0 could be any constant
            #:attr repr `(enum ,(zip (attribute t0.repr) (map syntax-e (syntax->list #'(v0 ...)))))])
 ; arbitrary type declaration:
 (define-splicing-syntax-class splicing-type-decl
