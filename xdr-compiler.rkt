@@ -106,8 +106,9 @@
   #:description "a case specification inside a union-type specification"
   [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) d:type-decl)
            #:attr repr (let ([vals (if (attribute tag-val) (attribute tag-val.repr) '(else))]
+                             [accessor (attribute d.symbol)]
                              [type-repr (attribute d.repr)])
-                         `(,vals . ,type-repr))])
+                         `(,vals ,accessor . ,type-repr))])
 ; a union specification:
 (define-syntax-class union-spec
   #:description "a union-type specification"
@@ -203,7 +204,10 @@
        (union (case ("type" "PublicKeyType")
                 (("PUBLIC_KEY_TYPE_ED25519" "SOMETHING") ("ed25519" "uint256"))
                 (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array")))))))
-     '#hash(("PublicKey" . (union ("type" . "PublicKeyType") #hash(("OTHER_PUBLIC_KEY_TYPE" . "my-array") ("PUBLIC_KEY_TYPE_ED25519" . "uint256") ("SOMETHING" . "uint256"))))
+     '#hash(("PublicKey" . (union ("type" . "PublicKeyType")
+                                  #hash(("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
+                                        ("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256"))
+                                        ("SOMETHING" . ("ed25519" . "uint256")))))
             ("PublicKeyType" . (enum (("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1))))
             ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0)))
             ("my-array" . (fixed-length-array "uint256" . 2))
