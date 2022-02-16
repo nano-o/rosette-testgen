@@ -115,6 +115,7 @@
   [pattern ((~datum union)
             ((~datum case) (~var tag-decl type-decl)
                            (~var v case-spec) ...))
+           #:fail-when (not (string? (attribute tag-decl.repr))) "inline type specification in union tag-type is not supported"; TODO: in theory the tag type could be an inline type specification but we exclude this case for now
            #:attr repr `(union (,(attribute tag-decl.symbol) . ,(attribute tag-decl.repr)) ,(ks-v-assoc->hash (attribute v.repr)))]) ; TODO: check that this works
 ; struct
 (define-syntax-class struct-spec
