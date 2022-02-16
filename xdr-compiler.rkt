@@ -104,11 +104,13 @@
 ; one variant of a union:
 (define-syntax-class case-spec
   #:description "a case specification inside a union-type specification"
-  [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) d:type-decl) ; NOTE here we must support inline type declarations (occurs in Stellar XDR)
-           #:attr repr (let ([vals (if (attribute tag-val) (attribute tag-val.repr) '(else))]
-                             [accessor (attribute d.symbol)]
-                             [type-repr (attribute d.repr)])
-                         `(,vals ,accessor . ,type-repr))])
+  [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) (~or* d:type-decl d:void)) ; NOTE here we must support inline type declarations (occurs in Stellar XDR)
+           #:attr repr (let ([vals (if (attribute tag-val) (attribute tag-val.repr) '(else))])
+                         (if (equal? (syntax-e #'d) "void")
+                             `(,vals . "void")
+                             (let ([accessor (if (attribute d.symbol) (attribute d.symbol) 'void)]
+                                   [type-repr (attribute d.repr)])
+                               `(,vals ,accessor . ,type-repr))))])
 ; a union specification:
 (define-syntax-class union-spec
   #:description "a union-type specification"
@@ -141,11 +143,11 @@
                        t:enum-spec)))
            #:attr symbol (syntax->symbol #'s)
            #:attr repr  (attribute t.repr)])
+(define-syntax-class void
+  [pattern "void"
+           #:attr repr "void"])
 (define-syntax-class type-decl
   #:description "a type declaration"
-  [pattern "void" ; TODO okay?
-           #:attr symbol "void"
-           #:attr repr "void"]
   [pattern (d:splicing-type-decl)
            #:attr repr (attribute d.repr)
            #:attr symbol (attribute d.symbol)])
@@ -205,16 +207,19 @@
        "PublicKey"
        (union (case ("type" "PublicKeyType")
                 (("PUBLIC_KEY_TYPE_ED25519" "SOMETHING") ("ed25519" "uint256"))
-                (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array")))))))
+                (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array"))
+                (("TAG") "void")
+                (else ("my-int" "int")))))))
      '#hash(("PublicKey" . (union ("type" . "PublicKeyType")
-                                  #hash(("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
+                                  #hash((else . ("my-int" . "int"))
+                                        ("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
                                         ("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256"))
-                                        ("SOMETHING" . ("ed25519" . "uint256")))))
+                                        ("SOMETHING" . ("ed25519" . "uint256"))
+                                        ("TAG" . "void"))))
             ("PublicKeyType" . (enum (("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1))))
             ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0)))
             ("my-array" . (fixed-length-array "uint256" . 2))
             ("uint256" . (opaque-fixed-length-array . 32)))))
-
    
    (test-case
     "XDR union, int tag, and else variant"
