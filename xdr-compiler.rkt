@@ -9,13 +9,13 @@
 (provide parse-ast)
 
 (require
-  syntax/parse syntax/parse/define racket/syntax
+  syntax/parse
   racket/hash list-util
   rackunit)
 
 (module+ test
   (require rackunit)
-  (provide ks-v-assoc->hash/test parse-ast/test hash-merge/test))
+  (provide ks-v-assoc->hash/test parse-ast/test))
 
 ; First pass: a recursive syntax class, defs, that builds a symbol table where symbols are strings.
 ; Each symbol is a type name or constant name and maps to a representation of the type or constant.
@@ -39,38 +39,6 @@
      (ks-v-assoc->hash
       '(((a b) . c) ((d) . e)))
      #hash((a . c) (b . c) (d . e)))))
-
-(define (hash-merge h . rest)
-  (apply hash-union h rest
-         #:combine (λ (v1 v2)
-                     (if (not (equal? v1 v2))
-                         (error "cannot merge hash maps with conflicting keys")
-                         v1))))
-
-(module+ test
-  (define-test-suite hash-merge/test
-    (test-case
-     "successful merge"
-     (check-equal?
-      (let ([h1 '#hash(('a . 'b) ('e . 'f))]
-            [h2 '#hash(('a . 'b) ('c . 'd))])
-        (hash-merge h1 h2))
-      '#hash(('a . 'b) ('c . 'd) ('e . 'f))))
-    (test-case
-     "successful multiple merges"
-     (check-equal?
-      (let ([h1 '#hash(('a . 'b) ('e . 'f))]
-            [h2 '#hash(('a . 'b) ('c . 'd))]
-            [h3 '#hash(('c . 'd) ('g . 'h))])
-        (hash-merge h1 (list h2 h3)))
-      '#hash(('a . 'b) ('c . 'd) ('e . 'f) ('g . 'h))))
-    (test-case
-     "failed merge"
-     (check-exn exn:fail?
-                (λ () 
-                  (let ([h1 '#hash(('a . 'b))]
-                        [h2 '#hash(('a . 'c))])
-                    (hash-merge h1 h2)))))))
 
 (define (add-scope scope str)
   (if scope (format "~a:~a" scope str) str))
@@ -381,6 +349,4 @@
              "PublicKeyType"
              (enum ("PUBLIC_KEY_TYPE_ED25519" 0))))))))))
 
-;(require rackunit/text-ui)
-;(run-tests compiler-tests)
 ; See also ./guile-ast-example.rkt

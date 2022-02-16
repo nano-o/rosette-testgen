@@ -6,5 +6,5 @@
 (run-tests generator-tests)
 (run-tests parse-ast/test)
 (run-tests ks-v-assoc->hash/test)
-(run-tests hash-merge/test)
+;(run-tests hash-merge/test)
 (run-tests parse-stellar-xdr/test)

@@ -1361,7 +1361,7 @@
 
 (define-test-suite parse-stellar-xdr/test
   (test-case
-   "no exception thrown"
+   "Parsing Stellar AST does not throw exceptions"
    (check-not-exn
     (λ ()
       (stellar-symbol-table)))))
