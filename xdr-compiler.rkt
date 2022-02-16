@@ -129,8 +129,8 @@
 ; enum
 (define-syntax-class enum-spec
   #:description "an enum-type specification"
-  [pattern ((~datum enum) (t0:identifier v0:number) ...) ; TODO v0 could be any constant
-           #:attr repr `(enum ,(zip (attribute t0.repr) (map syntax-e (syntax->list #'(v0 ...)))))])
+  [pattern ((~datum enum) (ident:identifier v:number) ...) ; TODO v0 could be any constant
+           #:attr repr `(enum ,@(zip (attribute ident.repr) (map syntax-e (syntax->list #'(v ...)))))])
 ; arbitrary type declaration:
 (define-splicing-syntax-class splicing-type-decl
   #:description "a spliced type declaration"
@@ -217,7 +217,7 @@
                                         ("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256"))
                                         ("SOMETHING" . ("ed25519" . "uint256"))
                                         ("TAG" . "void"))))
-            ("PublicKeyType" . (enum (("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1))))
+            ("PublicKeyType" . (enum ("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1)))
             ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0)))
             ("my-array" . (fixed-length-array "uint256" . 2))
             ("uint256" . (opaque-fixed-length-array . 32)))))
