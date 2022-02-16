@@ -62,7 +62,7 @@
       (let ([h1 '#hash(('a . 'b) ('e . 'f))]
             [h2 '#hash(('a . 'b) ('c . 'd))]
             [h3 '#hash(('c . 'd) ('g . 'h))])
-        (hash-merge h1 h2 h3))
+        (hash-merge h1 (list h2 h3)))
       '#hash(('a . 'b) ('c . 'd) ('e . 'f) ('g . 'h))))
     (test-case
      "failed merge"
@@ -83,11 +83,11 @@
 ; Another try.
 ; We assume that only top-level type and constant definition can subsequently be reffered to, except when an enum is defined inside the specification of a tagged union.
 ; We also assume that there are no constant-name clashes even if we merge all scopes.
-; First pass just puts all top-level declarations into a hash map and changes the representation (converts everything to Racket symbols, since we only need equality between them).
+; First pass just puts all top-level declarations into a hash map and does some minor processing.
 ; TODO Second pass that resolves everything
 (define (syntax->symbol stx)
   (syntax-parse stx
-    [s:string (string->symbol (syntax-e #'s))]))
+    [s:string (syntax-e #'s)]))
 (define-syntax-class base-type
   #:description "a base type"
   [pattern t:string
@@ -106,24 +106,24 @@
 (define-syntax-class opaque-fixed-length-array
   #:description "an opaque fixed-length array"
   [pattern ((~datum fixed-length-array) "opaque" (~var nbytes constant))
-           #:attr repr (list 'opaque-fixed-length-array (syntax-e #'nbytes))])
+           #:attr repr `(opaque-fixed-length-array . ,(syntax-e #'nbytes))])
 ; opaque variable-length array
 (define-syntax-class opaque-variable-length-array
   #:description "an opaque variable-length array"
   [pattern ((~datum variable-length-array) "opaque" (~var nbytes constant))
-           #:attr repr (list 'opaque-variable-length-array (syntax-e #'nbytes))])
+           #:attr repr `(opaque-variable-length-array . ,(syntax-e #'nbytes))])
 ; fixed-length array
 (define-syntax-class fixed-length-array
   #:description "a fixed-length array"
   [pattern ((~datum fixed-length-array) (~or* elem-type:identifier elem-type:base-type) (~var n constant)) ; TODO elem-type could be a nested type specification
            #:fail-when (equal? (syntax-e #'elem-type) "opaque") "should be non-opaque"
-           #:attr repr (list 'fixed-length-array (attribute elem-type.repr) (syntax-e #'n))])
+           #:attr repr `(fixed-length-array ,(attribute elem-type.repr) . ,(syntax-e #'n))])
 ; variable-length array
 (define-syntax-class variable-length-array
   #:description "a variable-length array"
   [pattern ((~datum variable-length-array) (~or* elem-type:identifier elem-type:base-type) constant)  ; TODO elem-type could be a nested type specification
            #:fail-when (equal? (syntax-e #'elem-type) "opaque")  "should be non-opaque"
-           #:attr repr (list 'variable-length-array (attribute elem-type.repr) (syntax-e #'nbytes))])
+           #:attr repr `(variable-length-array ,(attribute elem-type.repr) . ,(syntax-e #'nbytes))])
 ; all arrays
 (define-syntax-class array
   #:description "an array"
@@ -137,8 +137,9 @@
 (define-syntax-class case-spec
   #:description "a case specification inside a union-type specification"
   [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) d:type-decl)
-           #:attr repr (let ([vals (if (attribute tag-val) (attribute tag-val.repr) '(else))])
-                         `(,vals . ,(attribute d.repr)))])
+           #:attr repr (let ([vals (if (attribute tag-val) (attribute tag-val.repr) '(else))]
+                             [type-repr (attribute d.repr)])
+                         `(,vals . ,type-repr))])
 ; a union specification:
 (define-syntax-class union-spec
   #:description "a union-type specification"
@@ -152,10 +153,10 @@
   [pattern ((~datum struct) (~var d type-decl) ...)
            #:attr repr `(struct ,(zip (attribute d.symbol) (attribute d.repr)))]) ; this is a list because we need to preserve the order
 ; enum
-(define-syntax-class (enum-spec scope)
+(define-syntax-class enum-spec
   #:description "an enum-type specification"
   [pattern ((~datum enum) (t0:identifier v0:number) ...)
-           #:attr repr `(enum ,(zip (attribute t0.repr) (map syntax-e #'(v0 ...))))])
+           #:attr repr `(enum ,(zip (attribute t0.repr) (map syntax-e (syntax->list #'(v0 ...)))))])
 ; arbitrary type declaration:
 (define-splicing-syntax-class splicing-type-decl
   #:description "a spliced type declaration"
@@ -166,7 +167,7 @@
                        t:xdr-string
                        t:union-spec
                        t:struct-spec
-                       t: enum-spec)))
+                       t:enum-spec)))
            #:attr symbol (syntax->symbol #'s)
            #:attr repr  (attribute t.repr)])
 (define-syntax-class type-decl
@@ -178,24 +179,26 @@
            #:attr repr (attribute d.repr)
            #:attr symbol (attribute d.symbol)])
 ; define-type:
-(define-syntax-class (type-def h)
+(define-syntax-class type-def
   #:description "the definition of a type"
   [pattern (~commit ((~datum define-type) d:splicing-type-decl))
-           #:do ((hash-set! h (attribute d.symbol) (attribute d.repr)))])
+           #:attr kv `(,(attribute d.symbol) . ,(attribute d.repr))])
 ; define-constant:
-(define-syntax-class (const-def h)
+(define-syntax-class const-def
   #:description "the definition of a constant"
   [pattern ((~datum define-constant) s:identifier c:constant)
-           #:do ((hash-set! h (attribute s.repr) (attribute c.repr)))])
+           #:attr kv `(,(attribute s.repr) . ,(attribute c.repr))])
 ; a sequence of definitions:
-(define-syntax-class (defs h)
+(define-syntax-class defs
   #:description "a sequence of definitions of types and constants"
-  [pattern ((~or* (~var d (type-def h)) (~var d (const-def h))) ...)])
+  [pattern ((~or* d:type-def d:const-def) ...)
+           #:attr h (hash-union bool (make-immutable-hash (attribute d.kv)))])
+(define bool ; bool is pre-defined
+  (hash "bool"  '(enum ("TRUE" . 1) ("FALSE" . 0))))
 
 (define (parse-ast stx)
-  (define h (make-hash))
   (syntax-parse stx
-    [(~var s (defs h)) h]))
+    [s:defs (attribute s.h)]))
 
 ;tests
 (define parse-ast/test
@@ -212,7 +215,7 @@
          (define-type
            "my-array"
            (fixed-length-array "uint256" 2))))
-     '#hash(("my-array" . (fixed-length-array "uint256" 2)) ("uint256" . (opaque-fixed-length-array 32)))))
+     '#hash(("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))) ("my-array" . (fixed-length-array "uint256" . 2)) ("uint256" . (opaque-fixed-length-array . 32)))))
 
    (test-case
     "XDR union"
@@ -230,18 +233,13 @@
      (define-type
        "PublicKey"
        (union (case ("type" "PublicKeyType")
-                (("PUBLIC_KEY_TYPE_ED25519") ("ed25519" "uint256"))
+                (("PUBLIC_KEY_TYPE_ED25519" "SOMETHING") ("ed25519" "uint256"))
                 (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array")))))))
-     '#hash(
-            ("PublicKey" . (union "PublicKey:type" #hash(("OTHER_PUBLIC_KEY_TYPE" . "PublicKey:array2") ("PUBLIC_KEY_TYPE_ED25519" . "PublicKey:ed25519"))))
-            ("PublicKey:array2" . "my-array")
-            ("PublicKey:ed25519" . "uint256")
-            ("PublicKey:type" . "PublicKeyType")
-            ("PublicKeyType" . (enum ("PublicKeyType:PUBLIC_KEY_TYPE_ED25519" "PublicKeyType:OTHER_PUBLIC_KEY_TYPE")))
-            ("PublicKeyType:OTHER_PUBLIC_KEY_TYPE" . 1)
-            ("PublicKeyType:PUBLIC_KEY_TYPE_ED25519" . 0)
-            ("my-array" . (fixed-length-array "uint256" 2))
-            ("uint256" . (opaque-fixed-length-array 32)))))
+     '#hash(("PublicKey" . (union ("type" . "PublicKeyType") #hash(("OTHER_PUBLIC_KEY_TYPE" . "my-array") ("PUBLIC_KEY_TYPE_ED25519" . "uint256") ("SOMETHING" . "uint256"))))
+            ("PublicKeyType" . (enum (("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1))))
+            ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0)))
+            ("my-array" . (fixed-length-array "uint256" . 2))
+            ("uint256" . (opaque-fixed-length-array . 32)))))
 
    (test-case
     "Enum referring to other enum"
@@ -261,7 +259,7 @@
      (parse-ast
       #'((define-type
            "my-int" "int")))
-     '#hash(("my-int" . int))))
+     '#hash(("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))) ("my-int" . "int"))))
    
    (test-case
     "bool"
@@ -271,7 +269,7 @@
            "my-bool" "bool")
          (define-type
            "my-bool-again" "bool")))
-     '#hash(("bool:FALSE" . 0) ("bool:TRUE" . 1) ("bool" . (enum ("bool:FALSE" "bool:TRUE"))) ("my-bool" . "bool") ("my-bool-again" . "bool"))))
+     '#hash(("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))) ("my-bool" . "bool") ("my-bool-again" . "bool"))))
       
    (test-case
     "struct"
@@ -283,10 +281,11 @@
           ("assetCode" "AssetCode4")
           ("issuer" "AccountID")
           ("array" (fixed-length-array "opaque" 32))))))
-     '#hash(("AlphaNum4" . (struct ("AlphaNum4:assetCode" "AlphaNum4:issuer" "AlphaNum4:array")))
-       ("AlphaNum4:array" . (opaque-fixed-length-array 32))
-       ("AlphaNum4:assetCode" . "AssetCode4")
-       ("AlphaNum4:issuer" . "AccountID"))))
+     '#hash(("AlphaNum4" . (struct (
+                                  ("assetCode" . "AssetCode4")
+                                  ("issuer" . "AccountID")
+                                  ("array" opaque-fixed-length-array . 32))))
+            ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))))))
            
    (test-case
     "Check that no exceptions are thrown"
