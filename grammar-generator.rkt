@@ -217,7 +217,9 @@
                                   vs-body-deps
                                   (λ (_ v) (if (pair? v) (cdr v) '()))))]
               [deps (append tag-type-dep recursive-deps)]
-              [bodys (map (match-lambda [`(,k ,b . ,d) #`(cons #,(datum->syntax #'() (hash-ref sym-table k)) #,b)]) (dict->list vs-body-deps))] ; TODO: the tag values should be bitvectors
+              [bodys (map (match-lambda [`(,k ,b . ,d)
+                                         #`(cons (bv #,(hash-ref sym-table k) (bitvector 32)) #,b)])
+                          (dict->list vs-body-deps))]
               [body #`(choose #,@bodys)])
          `(,body . ,deps)))]))
 
