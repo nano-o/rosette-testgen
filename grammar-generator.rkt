@@ -35,6 +35,18 @@
                   (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array"))
                   (("ANOTHER_PUBLIC_KEY_TYPE") ("myint" "int"))
                   (else "void"))))))
+  
+  (define test-ast-literal-tag-value
+    #'((define-type
+         "PublicKeyType"
+         (enum ("PUBLIC_KEY_TYPE_ED25519" 0) ("OTHER_PUBLIC_KEY_TYPE" 1) ("ANOTHER_PUBLIC_KEY_TYPE" 2) ("THREE" 3) ("FOUR" 4)))
+       (define-type
+         "PublicKey"
+         (union (case ("type" "PublicKeyType")
+                  (("PUBLIC_KEY_TYPE_ED25519") ("ed25519" "uint256"))
+                  (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array"))
+                  ((2) ("myint" "int"))
+                  (else "void"))))))
 
   (define test-sym-table
     (parse-ast test-ast)))
@@ -131,16 +143,18 @@
   (define (replace-else-in t) ; t is a type representation
     (match t
       [`(union (,tag . ,tag-type) ,variants) ; we assume tag-type is an enum type and all tag values are given by id (not literal values); TODO check
-       (let ([has-else? (ormap (λ (kv) (eq? 'else (car kv))) variants)])
-         (if has-else?
-             (match-let ([`(enum (,id . ,_) ...) (hash-ref sym-table tag-type)] ; all enum values (no 'else here)
-                         [`((,tag-id . ,_) ...) variants]) ; tags appearing in the union (may contain 'else)
-               (let* ([missing-ids (set-subtract id (set-subtract tag-id '(else)))]
-                      [else-decl (dict-ref variants 'else)]
-                      [old-variants (dict-remove variants 'else)]; without else
-                      [new-variants (map (λ (m) `(,m . ,else-decl)) missing-ids)])
-                 `(union (,tag . ,tag-type) ,(append old-variants new-variants))))
-             t))]
+       (begin
+         (dict-for-each variants (λ (k v) (if (number? k) (error "literal tag values not supported") (void))))
+         (let ([has-else? (ormap (λ (kv) (eq? 'else (car kv))) variants)])
+           (if has-else?
+               (match-let ([`(enum (,id . ,_) ...) (hash-ref sym-table tag-type)] ; all enum values (no 'else here)
+                           [`((,tag-id . ,_) ...) variants]) ; tags appearing in the union (may contain 'else)
+                 (let* ([missing-ids (set-subtract id (set-subtract tag-id '(else)))]
+                        [else-decl (dict-ref variants 'else)]
+                        [old-variants (dict-remove variants 'else)]; without else
+                        [new-variants (map (λ (m) `(,m . ,else-decl)) missing-ids)])
+                   `(union (,tag . ,tag-type) ,(append old-variants new-variants))))
+               t)))]
       [_ t]))
   (for/hash ([kv (hash->list sym-table)])
     (values (car kv) (replace-else-in (cdr kv)))))
@@ -157,7 +171,11 @@
               ("OTHER_PUBLIC_KEY_TYPE" "array2" . "my-array")
               ("ANOTHER_PUBLIC_KEY_TYPE" "myint" . "int")
               ("FOUR" . "void")
-              ("THREE" . "void")))))))
+              ("THREE" . "void")))))
+    (test-case
+     "literal tag value"
+     (check-exn exn:fail?
+                (λ () (replace-else (parse-ast test-ast-literal-tag-value)))))))
 
 ; body-deps returns a rule body for the type t and a list of types whose rules the body depends on.
 (define (body-deps t)
@@ -184,7 +202,7 @@
             [bvs (map (λ (v) #`(bv #,v (bitvector 32))) vs)])
        (list #`(choose #,@bvs)))]
     [`(union (,tag . ,tag-type) ,variants)
-     ; Variants can in principle refer to enum constants defined inline in tag-type, but we don't support that inline tag-types.
+     ; Variants can in principle refer to enum constants defined inline in tag-type, but we don't support inline tag-types.
      ; The type of a variant can however be an inline type specification.
      (begin
        (if (not (string? tag-type)) (error "we do not support inline tag types") (void))
