@@ -27,7 +27,7 @@
          (fixed-length-array "uint256" 2))
        (define-type
          "PublicKeyType"
-         (enum ("PUBLIC_KEY_TYPE_ED25519" 0) ("OTHER_PUBLIC_KEY_TYPE" 1) ("ANOTHER_PUBLIC_KEY_TYPE" 2)))
+         (enum ("PUBLIC_KEY_TYPE_ED25519" 0) ("OTHER_PUBLIC_KEY_TYPE" 1) ("ANOTHER_PUBLIC_KEY_TYPE" 2) ("THREE" 3) ("FOUR" 4)))
        (define-type
          "PublicKey"
          (union (case ("type" "PublicKeyType")
@@ -113,30 +113,51 @@
              ("FALSE" . 0)
              ("OTHER_PUBLIC_KEY_TYPE" . 1)
              ("PUBLIC_KEY_TYPE_ED25519" . 0)
-             ("PublicKey"
-              .
-              (union ("type" . "PublicKeyType")
-                     (("PUBLIC_KEY_TYPE_ED25519" "ed25519" . "uint256")
-                      ("OTHER_PUBLIC_KEY_TYPE" "array2" . "my-array")
-                      ("ANOTHER_PUBLIC_KEY_TYPE" "myint" . "int")
-                      (else . "void"))))
-             ("PublicKeyType" . (enum ("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1) ("ANOTHER_PUBLIC_KEY_TYPE" . 2)))
+             ("PublicKey" . (union ("type" . "PublicKeyType")
+                                   (("PUBLIC_KEY_TYPE_ED25519" "ed25519" . "uint256")
+                                    ("OTHER_PUBLIC_KEY_TYPE" "array2" . "my-array")
+                                    ("ANOTHER_PUBLIC_KEY_TYPE" "myint" . "int")
+                                    (else . "void"))))
+             ("PublicKeyType" . (enum ("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1) ("ANOTHER_PUBLIC_KEY_TYPE" . 2) ("THREE" . 3) ("FOUR" . 4)))
              ("TRUE" . 1)
+             ("THREE" . 3)
+             ("FOUR" . 4)
              ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0)))
              ("my-array" . (fixed-length-array "uint256" . 2))
              ("uint256" . (opaque-fixed-length-array . 32)))))))
 
 ; replace else variants in unions
-#;(define (replace-else t sym-table)
-  (match t
-    [`(union (,tag . ,tag-type) ,variants) ; assume tag-type is an enum type
-     (let ([has-else? (ormap (λ (kv) (eq? 'else (car kv))) (hash->list variants))])
-       (if has-else?
-           (match-let* ([`(enum (,id . ,val) ...) (hash-ref sym-table tag-type)] ; all enum values
-                        [`((,tag-id . ,rest) ...) (hash->list variants)] ; tags appearing in the union
-             ))))]))
-                        
-                  ; all the values of the enum
+(define (replace-else sym-table)
+  (define (replace-else-in t) ; t is a type representation
+    (match t
+      [`(union (,tag . ,tag-type) ,variants) ; we assume tag-type is an enum type and all tag values are given by id (not literal values); TODO check
+       (let ([has-else? (ormap (λ (kv) (eq? 'else (car kv))) variants)])
+         (if has-else?
+             (match-let ([`(enum (,id . ,_) ...) (hash-ref sym-table tag-type)] ; all enum values (no 'else here)
+                         [`((,tag-id . ,_) ...) variants]) ; tags appearing in the union (may contain 'else)
+               (let* ([missing-ids (set-subtract id (set-subtract tag-id '(else)))]
+                      [else-decl (dict-ref variants 'else)]
+                      [old-variants (dict-remove variants 'else)]; without else
+                      [new-variants (map (λ (m) `(,m . ,else-decl)) missing-ids)])
+                 `(union (,tag . ,tag-type) ,(append old-variants new-variants))))
+             t))]
+      [_ t]))
+  (for/hash ([kv (hash->list sym-table)])
+    (values (car kv) (replace-else-in (cdr kv)))))
+
+(module+ test
+  (provide replace-else/test)
+  (define-test-suite replace-else/test
+    (test-case
+     "replace-else"
+     (check-equal?
+      (hash-ref (replace-else test-sym-table) "PublicKey")
+      '(union ("type" . "PublicKeyType")
+             (("PUBLIC_KEY_TYPE_ED25519" "ed25519" . "uint256")
+              ("OTHER_PUBLIC_KEY_TYPE" "array2" . "my-array")
+              ("ANOTHER_PUBLIC_KEY_TYPE" "myint" . "int")
+              ("FOUR" . "void")
+              ("THREE" . "void")))))))
 
 ; body-deps returns a rule body for the type t and a list of types whose rules the body depends on.
 (define (body-deps t)
