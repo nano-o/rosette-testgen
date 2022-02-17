@@ -3,6 +3,7 @@
 (require
   racket/match racket/syntax racket/generator racket/hash
   "xdr-compiler.rkt" ;"guile-ast-example.rkt"
+  "util.rkt"
   (for-template rosette rosette/lib/synthax))
 (provide xdr-types->grammar)
 
@@ -46,6 +47,7 @@
                          v1))))
 
 (module+ test
+  (provide hash-merge/test)
   (define-test-suite hash-merge/test
     (test-case
      "successful merge"
@@ -89,7 +91,54 @@
     [(number? c) #`(bv ,c (bitvector 32))]
     [else (error "c should be a string or number")]))
 
-; body-depss returns a rule body for the type t and a list of types whose rules the body depends on.
+; adds enum constants to symbol table
+(define (with-enum-consts sym-table)
+  (let ([enum-consts
+         (flatten-one-level
+          (hash-map sym-table
+                    (λ (k v)
+                      (match v
+                        [`(enum ,id-val ...) id-val]
+                        [_ null]))))])
+    (hash-union sym-table (make-immutable-hash enum-consts))))
+
+(module+ test
+  (provide with-enum-consts/test)
+  (define-test-suite with-enum-consts/test
+    (test-case
+     "with-enum-consts"
+     (check-equal?
+      (with-enum-consts test-sym-table)
+      '#hash(("ANOTHER_PUBLIC_KEY_TYPE" . 2)
+             ("FALSE" . 0)
+             ("OTHER_PUBLIC_KEY_TYPE" . 1)
+             ("PUBLIC_KEY_TYPE_ED25519" . 0)
+             ("PublicKey"
+              .
+              (union ("type" . "PublicKeyType")
+                     (("PUBLIC_KEY_TYPE_ED25519" "ed25519" . "uint256")
+                      ("OTHER_PUBLIC_KEY_TYPE" "array2" . "my-array")
+                      ("ANOTHER_PUBLIC_KEY_TYPE" "myint" . "int")
+                      (else . "void"))))
+             ("PublicKeyType" . (enum ("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1) ("ANOTHER_PUBLIC_KEY_TYPE" . 2)))
+             ("TRUE" . 1)
+             ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0)))
+             ("my-array" . (fixed-length-array "uint256" . 2))
+             ("uint256" . (opaque-fixed-length-array . 32)))))))
+
+; replace else variants in unions
+#;(define (replace-else t sym-table)
+  (match t
+    [`(union (,tag . ,tag-type) ,variants) ; assume tag-type is an enum type
+     (let ([has-else? (ormap (λ (kv) (eq? 'else (car kv))) (hash->list variants))])
+       (if has-else?
+           (match-let* ([`(enum (,id . ,val) ...) (hash-ref sym-table tag-type)] ; all enum values
+                        [`((,tag-id . ,rest) ...) (hash->list variants)] ; tags appearing in the union
+             ))))]))
+                        
+                  ; all the values of the enum
+
+; body-deps returns a rule body for the type t and a list of types whose rules the body depends on.
 (define (body-deps t)
   (match t
     ["void" (list #'null)]
@@ -119,7 +168,8 @@
      (begin
        (if (not (string? tag-type)) (error "we do not support inline tag types") (void))
        ; variant accessor -> body dependencies
-       (let* ([vs-body-deps (make-immutable-hash
+       (let* ([has-else? (ormap (λ (kv) (eq? 'else (car kv))) (hash->list variants))]
+              [vs-body-deps (make-immutable-hash
                         (hash-map variants ;'(tag-value accessor . type) where type is not void, or '(tag-value . void)
                                   (λ (k v) (if (eq? (cdr v) void)
                                                (list (car v) #'())
@@ -134,13 +184,13 @@
                                 (if (pair? v)
                                     (cdr v)
                                     '())))))])
-         `(#'() . ,deps)))]))
+         `(#'() . ,deps)))])) ; TODO choose between variants; maybe the simplest thing for else would be to expand it before hand (with all remaining enum values)
 
 ; a few tests
 (body-deps '(fixed-length-array (opaque-fixed-length-array . 32) . 3))
 (body-deps '(fixed-length-array "some-type" . 3))
 (body-deps '(enum ("A" . 1) ("B" . 2)))
-(body-deps '(union ("tag" . "my-other-type") #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")))))
+(body-deps '(union ("tag" . "my-other-type") #hash(("V1" . ("acc" . "my-type")) (else . ("acc2" . "my-type-2")))))
 
 (define (xdr-types->grammar sym-table type) null)
 

@@ -1,7 +1,12 @@
 #lang racket
 
-(require (submod "xdr-compiler.rkt" test) "guile-ast-example.rkt" (submod "generators.rkt" test)
-         rackunit/text-ui)
+(require
+  (submod "xdr-compiler.rkt" test)
+  "guile-ast-example.rkt"
+  (submod "generators.rkt" test)
+  (submod "grammar-generator.rkt" test)
+  (submod "util.rkt" test)
+  rackunit/text-ui)
 
 (define (get-test-exports m)
   (let-values ([(val syn)
@@ -23,4 +28,6 @@
 ; run all tests
 (run-all "xdr-compiler.rkt")
 (run-all "generators.rkt")
+(run-all "grammar-generator.rkt")
+(run-all "util.rkt")
 (run-tests parse-stellar-xdr/test)

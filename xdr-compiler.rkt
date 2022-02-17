@@ -11,6 +11,7 @@
 (require
   syntax/parse
   racket/hash list-util
+  "util.rkt"
   rackunit)
 
 (module+ test
@@ -25,20 +26,22 @@
 
 ; TODO Think about what we want in the type representations. We'll use this to generate Rosette grammars, but also to generate infrastructure to make it convenient to write a spec of the transaction-processing code.
 
-(define (ks-v-assoc->hash ks-v-assoc)
-  (define (ks-v->hash ks-v)
-    (for/hash ([k (car ks-v)])
-      (values k (cdr ks-v))))
-  (for/fold ([h (hash)])
-            ([ks-v ks-v-assoc])
-    (hash-union h (ks-v->hash ks-v))))
+(define (ks-v->alist ks-v)
+  (define (flatten-ks-v ks v)
+    (for/list ([k ks])
+      `(,k . ,v)))
+  (flatten-one-level
+   (for/list ([p ks-v])
+     (match-let
+       ([`(,ks . ,v) p])
+       (flatten-ks-v ks v)))))
 
 (module+ test
   (define-test-suite ks-v-assoc->hash/test
     (check-equal?
-     (ks-v-assoc->hash
+     (ks-v->alist
       '(((a b) . c) ((d) . e)))
-     #hash((a . c) (b . c) (d . e)))))
+     '((a . c) (b . c) (d . e)))))
 
 (define (add-scope scope str)
   (if scope (format "~a:~a" scope str) str))
@@ -104,8 +107,9 @@
 ; one variant of a union:
 (define-syntax-class case-spec
   #:description "a case specification inside a union-type specification"
-  [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) (~or* d:type-decl d:void)) ; NOTE here we must support inline type declarations (occurs in Stellar XDR)
+  [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) (~or* d:type-decl d:void)) ; NOTE here we must support inline type declarations which occur in Stellar XDR (enum doesn't)
            #:fail-when (and (not (string? (attribute d.repr))) (eq? (car (attribute d.repr)) 'enum)) "inline enum-type declaration not supported"
+           ; #:fail-when (and (attribute tag-val) (ormap number? (map syntax-e (syntax->list #'(tag-val ...))))) "xx"
            #:attr repr (let ([vals (if (attribute tag-val) (attribute tag-val.repr) '(else))])
                          (if (equal? (syntax-e #'d) "void")
                              `(,vals . "void")
@@ -120,7 +124,7 @@
                            (~var v case-spec) ...))
            #:fail-when (not (string? (attribute tag-decl.repr))) "inline type specification in union tag-type is not supported"; TODO: in theory the tag type could be an inline type specification but we exclude this case for now
            #:fail-when (and (base-type? (attribute tag-decl.repr)) (member '(else) (map car (attribute v.repr)))) "int or unsigned int as tag type not supported when there is an else variant"
-           #:attr repr `(union (,(attribute tag-decl.symbol) . ,(attribute tag-decl.repr)) ,(ks-v-assoc->hash (attribute v.repr)))])
+           #:attr repr `(union (,(attribute tag-decl.symbol) . ,(attribute tag-decl.repr)) ,(ks-v->alist (attribute v.repr)))])
 ; struct
 (define-syntax-class struct-spec
   #:description "a struct-type specification"
@@ -209,12 +213,13 @@
                      (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array"))
                      (("TAG") "void")
                      (else ("my-int" "int")))))))
-      '#hash(("PublicKey" . (union ("type" . "PublicKeyType")
-                                   #hash((else . ("my-int" . "int"))
-                                         ("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
-                                         ("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256"))
-                                         ("SOMETHING" . ("ed25519" . "uint256"))
-                                         ("TAG" . "void"))))
+      '#hash(("PublicKey" . (union
+                             ("type" . "PublicKeyType")
+                             (("PUBLIC_KEY_TYPE_ED25519" "ed25519" . "uint256")
+                              ("SOMETHING" "ed25519" . "uint256")
+                              ("OTHER_PUBLIC_KEY_TYPE" "array2" . "my-array")
+                              ("TAG" . "void")
+                              (else "my-int" . "int"))))
              ("PublicKeyType" . (enum ("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1)))
              ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0)))
              ("my-array" . (fixed-length-array "uint256" . 2))
