@@ -178,7 +178,7 @@
                 (λ () (replace-else (parse-ast test-ast-literal-tag-value)))))))
 
 ; body-deps returns a rule body for the type t and a list of types whose rules the body depends on.
-(define (body-deps t)
+(define (body-deps t sym-table) ; TODO: here we assume all 'else have been removed from unions
   (match t
     ["void" (list #'null)]
     ["int" (list #'(?? (bitvector 32)))]
@@ -193,7 +193,7 @@
     ; Fixed length array. Represented by a vector.
     ; TODO would it be better to create a rule for the element type if it's an inline type?
     [`(fixed-length-array ,elem-type . ,size)
-     (match-let* ([(cons elem-body deps) (body-deps elem-type)]
+     (match-let* ([(cons elem-body deps) (body-deps elem-type sym-table)]
                   [body #`(vector
                            #,@(for/list ([i (in-range size)]) elem-body))])
        (cons body deps))]
@@ -206,30 +206,26 @@
      ; The type of a variant can however be an inline type specification.
      (begin
        (if (not (string? tag-type)) (error "we do not support inline tag types") (void))
-       ; variant accessor -> body dependencies
-       (let* ([has-else? (ormap (λ (kv) (eq? 'else (car kv))) (hash->list variants))]
-              [vs-body-deps (make-immutable-hash
-                        (hash-map variants ;'(tag-value accessor . type) where type is not void, or '(tag-value . void)
-                                  (λ (k v) (if (eq? (cdr v) void)
-                                               (list (car v) #'())
-                                               (cons (car v) (body-deps (cdr v)))))))]
-             [deps (append
-                    (if (member tag-type '("int" "unsigned int"))
-                        '()
-                        (list tag-type))
-                    (flatten (hash-map
-                              vs-body-deps
-                              (λ (k v)
-                                (if (pair? v)
-                                    (cdr v)
-                                    '())))))])
-         `(#'() . ,deps)))])) ; TODO choose between variants; maybe the simplest thing for else would be to expand it before hand (with all remaining enum values)
+       (let* ([vs-body-deps ; an alist mapping tag-identifier to '(body . deps)
+               (dict-map variants ;'(tag-value accessor . type) where type is not void, or '(tag-value . void)
+                         (λ (k v) (cons k (body-deps (cdr v) sym-table))))]
+              [tag-type-dep 
+               (if (member tag-type '("int" "unsigned int"))
+                   '()
+                   (list tag-type))]
+              [recursive-deps (flatten (dict-map
+                                  vs-body-deps
+                                  (λ (_ v) (if (pair? v) (cdr v) '()))))]
+              [deps (append tag-type-dep recursive-deps)]
+              [bodys (map (match-lambda [`(,k ,b . ,d) #`(cons #,(datum->syntax #'() (hash-ref sym-table k)) #,b)]) (dict->list vs-body-deps))] ; TODO: the tag values should be bitvectors
+              [body #`(choose #,@bodys)])
+         `(,body . ,deps)))]))
 
 ; a few tests
-(body-deps '(fixed-length-array (opaque-fixed-length-array . 32) . 3))
-(body-deps '(fixed-length-array "some-type" . 3))
-(body-deps '(enum ("A" . 1) ("B" . 2)))
-(body-deps '(union ("tag" . "my-other-type") #hash(("V1" . ("acc" . "my-type")) (else . ("acc2" . "my-type-2")))))
+(body-deps '(fixed-length-array (opaque-fixed-length-array . 32) . 3) '#hash())
+(body-deps '(fixed-length-array "some-type" . 3) '#hash())
+(body-deps '(enum ("A" . 1) ("B" . 2)) '#hash())
+(body-deps '(union ("tag" . "my-other-type") #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")))) '#hash(("V1" . 1) ("V2" . 2)))  ; TODO: the tag values should be bitvectors
 
 (define (xdr-types->grammar sym-table type) null)
 
