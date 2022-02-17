@@ -175,199 +175,197 @@
     [s:defs (attribute s.h)]))
 
 ;tests
-(define parse-ast/test
-  (test-suite
-   "tests for parse-ast"
-  
-   (test-case
-    "Opaque array with non-primitive element type"
-    (check-equal?
-     (parse-ast
-      #'((define-type
-           "uint256"
-           (fixed-length-array "opaque" 32))
-         (define-type
-           "my-array"
-           (fixed-length-array "uint256" 2))))
-     '#hash(("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))) ("my-array" . (fixed-length-array "uint256" . 2)) ("uint256" . (opaque-fixed-length-array . 32)))))
+(module+ test
+  (define-test-suite parse-ast/test
+    (test-case
+     "Opaque array with non-primitive element type"
+     (check-equal?
+      (parse-ast
+       #'((define-type
+            "uint256"
+            (fixed-length-array "opaque" 32))
+          (define-type
+            "my-array"
+            (fixed-length-array "uint256" 2))))
+      '#hash(("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))) ("my-array" . (fixed-length-array "uint256" . 2)) ("uint256" . (opaque-fixed-length-array . 32)))))
 
-   (test-case
-    "XDR union"
-    (check-equal?
-     (parse-ast
-      #'((define-type
-       "uint256"
-       (fixed-length-array "opaque" 32))
-     (define-type
-       "my-array"
-       (fixed-length-array "uint256" 2))
-     (define-type
-       "PublicKeyType"
-       (enum ("PUBLIC_KEY_TYPE_ED25519" 0) ("OTHER_PUBLIC_KEY_TYPE" 1)))
-     (define-type
-       "PublicKey"
-       (union (case ("type" "PublicKeyType")
-                (("PUBLIC_KEY_TYPE_ED25519" "SOMETHING") ("ed25519" "uint256"))
-                (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array"))
-                (("TAG") "void")
-                (else ("my-int" "int")))))))
-     '#hash(("PublicKey" . (union ("type" . "PublicKeyType")
-                                  #hash((else . ("my-int" . "int"))
-                                        ("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
-                                        ("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256"))
-                                        ("SOMETHING" . ("ed25519" . "uint256"))
-                                        ("TAG" . "void"))))
-            ("PublicKeyType" . (enum ("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1)))
-            ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0)))
-            ("my-array" . (fixed-length-array "uint256" . 2))
-            ("uint256" . (opaque-fixed-length-array . 32)))))
+    (test-case
+     "XDR union"
+     (check-equal?
+      (parse-ast
+       #'((define-type
+            "uint256"
+            (fixed-length-array "opaque" 32))
+          (define-type
+            "my-array"
+            (fixed-length-array "uint256" 2))
+          (define-type
+            "PublicKeyType"
+            (enum ("PUBLIC_KEY_TYPE_ED25519" 0) ("OTHER_PUBLIC_KEY_TYPE" 1)))
+          (define-type
+            "PublicKey"
+            (union (case ("type" "PublicKeyType")
+                     (("PUBLIC_KEY_TYPE_ED25519" "SOMETHING") ("ed25519" "uint256"))
+                     (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array"))
+                     (("TAG") "void")
+                     (else ("my-int" "int")))))))
+      '#hash(("PublicKey" . (union ("type" . "PublicKeyType")
+                                   #hash((else . ("my-int" . "int"))
+                                         ("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
+                                         ("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256"))
+                                         ("SOMETHING" . ("ed25519" . "uint256"))
+                                         ("TAG" . "void"))))
+             ("PublicKeyType" . (enum ("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1)))
+             ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0)))
+             ("my-array" . (fixed-length-array "uint256" . 2))
+             ("uint256" . (opaque-fixed-length-array . 32)))))
    
-   (test-case
-    "XDR union, int tag, and else variant"
-    (check-exn exn:fail?
-               (λ ()
-                 (parse-ast
-                  #'((define-type
-                       "test-union" (union (case ("type" "int") (else "void")))))))))
+    (test-case
+     "XDR union, int tag, and else variant"
+     (check-exn exn:fail?
+                (λ ()
+                  (parse-ast
+                   #'((define-type
+                        "test-union" (union (case ("type" "int") (else "void")))))))))
 
-   (test-case
-    "Enum referring to other enum"
-    (check-exn exn:fail?
-     (λ ()
-       (parse-ast
-        #'((define-type
-             "enum-1"
-             (enum ("val-1" 1) ("val-2" 2)))
-           (define-type
-             "enum-2"
-             (enum ("x" "val-1") ("y" "val-2"))))))))
+    (test-case
+     "Enum referring to other enum"
+     (check-exn exn:fail?
+                (λ ()
+                  (parse-ast
+                   #'((define-type
+                        "enum-1"
+                        (enum ("val-1" 1) ("val-2" 2)))
+                      (define-type
+                        "enum-2"
+                        (enum ("x" "val-1") ("y" "val-2"))))))))
 
-   (test-case
-    "int"
-    (check-equal?
-     (parse-ast
-      #'((define-type
-           "my-int" "int")))
-     '#hash(("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))) ("my-int" . "int"))))
+    (test-case
+     "int"
+     (check-equal?
+      (parse-ast
+       #'((define-type
+            "my-int" "int")))
+      '#hash(("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))) ("my-int" . "int"))))
    
-   (test-case
-    "bool"
-    (check-equal?
-     (parse-ast
-      #'((define-type
-           "my-bool" "bool")
-         (define-type
-           "my-bool-again" "bool")))
-     '#hash(("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))) ("my-bool" . "bool") ("my-bool-again" . "bool"))))
+    (test-case
+     "bool"
+     (check-equal?
+      (parse-ast
+       #'((define-type
+            "my-bool" "bool")
+          (define-type
+            "my-bool-again" "bool")))
+      '#hash(("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))) ("my-bool" . "bool") ("my-bool-again" . "bool"))))
       
-   (test-case
-    "struct"
-    (check-equal?
-     (parse-ast
-      #'((define-type
-        "AlphaNum4"
-        (struct
-          ("assetCode" "AssetCode4")
-          ("issuer" "AccountID")
-          ("array" (fixed-length-array "opaque" 32))))))
-     '#hash(("AlphaNum4" . (struct (
-                                  ("assetCode" . "AssetCode4")
-                                  ("issuer" . "AccountID")
-                                  ("array" opaque-fixed-length-array . 32))))
-            ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))))))
+    (test-case
+     "struct"
+     (check-equal?
+      (parse-ast
+       #'((define-type
+            "AlphaNum4"
+            (struct
+              ("assetCode" "AssetCode4")
+              ("issuer" "AccountID")
+              ("array" (fixed-length-array "opaque" 32))))))
+      '#hash(("AlphaNum4" . (struct (
+                                     ("assetCode" . "AssetCode4")
+                                     ("issuer" . "AccountID")
+                                     ("array" opaque-fixed-length-array . 32))))
+             ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))))))
            
-   (test-case
-    "Check that no exceptions are thrown"
-    (check-not-exn
-     (λ ()
-       (parse-ast
-        #'((define-type
-             "ManageOfferSuccessResult"
-             (struct
-               ("offersClaimed"
-                (variable-length-array "ClaimAtom" #f))
-               ("offer"
-                (union (case ("effect" "ManageOfferEffect")
-                         (("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED")
-                          ("offer" "OfferEntry"))
-                         (else "void"))))))))))
+    (test-case
+     "Check that no exceptions are thrown"
+     (check-not-exn
+      (λ ()
+        (parse-ast
+         #'((define-type
+              "ManageOfferSuccessResult"
+              (struct
+                ("offersClaimed"
+                 (variable-length-array "ClaimAtom" #f))
+                ("offer"
+                 (union (case ("effect" "ManageOfferEffect")
+                          (("MANAGE_OFFER_CREATED" "MANAGE_OFFER_UPDATED")
+                           ("offer" "OfferEntry"))
+                          (else "void"))))))))))
 
-    (check-not-exn
-     (λ ()
-       (parse-ast
-        #'((define-type
-             "CreateAccountResult"
-             (union (case ("code" "CreateAccountResultCode")
-                      (("CREATE_ACCOUNT_SUCCESS") "void")
-                      (else "void"))))))))
-    (check-not-exn
-     (λ ()
-       (parse-ast
-        #'((define-type
-             "AlphaNum12"
-             (struct
-               ("assetCode" "AssetCode12")
-               ("issuer" "AccountID")))
-           (define-type
-             "Asset"
-             (union (case ("type" "AssetType")
-                      (("ASSET_TYPE_NATIVE") "void"))))))))
-    (check-not-exn
-     (λ ()
-       (parse-ast
-        #'((define-constant "MASK_ACCOUNT_FLAGS" 7)
-           (define-constant "MASK_ACCOUNT_FLAGS_AGAIN" 8)))))
+     (check-not-exn
+      (λ ()
+        (parse-ast
+         #'((define-type
+              "CreateAccountResult"
+              (union (case ("code" "CreateAccountResultCode")
+                       (("CREATE_ACCOUNT_SUCCESS") "void")
+                       (else "void"))))))))
+     (check-not-exn
+      (λ ()
+        (parse-ast
+         #'((define-type
+              "AlphaNum12"
+              (struct
+                ("assetCode" "AssetCode12")
+                ("issuer" "AccountID")))
+            (define-type
+              "Asset"
+              (union (case ("type" "AssetType")
+                       (("ASSET_TYPE_NATIVE") "void"))))))))
+     (check-not-exn
+      (λ ()
+        (parse-ast
+         #'((define-constant "MASK_ACCOUNT_FLAGS" 7)
+            (define-constant "MASK_ACCOUNT_FLAGS_AGAIN" 8)))))
 
-    (check-not-exn
-     (λ ()
-       (parse-ast
-        #'((define-type
-             "uint256"
-             (fixed-length-array "opaque" 32))))))
-    (check-not-exn
-     (λ ()
-       (parse-ast
-        #'((define-type
-             "AlphaNum4"
-             (struct
-               ("assetCode" "AssetCode4")
-               ("issuer" "AccountID")))))))
+     (check-not-exn
+      (λ ()
+        (parse-ast
+         #'((define-type
+              "uint256"
+              (fixed-length-array "opaque" 32))))))
+     (check-not-exn
+      (λ ()
+        (parse-ast
+         #'((define-type
+              "AlphaNum4"
+              (struct
+                ("assetCode" "AssetCode4")
+                ("issuer" "AccountID")))))))
 
-    (check-not-exn
-     (λ ()
-       (parse-ast
-        #'((define-type
-             "PublicKeyType"
-             (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))))
+     (check-not-exn
+      (λ ()
+        (parse-ast
+         #'((define-type
+              "PublicKeyType"
+              (enum ("PUBLIC_KEY_TYPE_ED25519" 0)))))))
 
-    (check-not-exn
-     (λ ()
-       (parse-ast
-        #'((define-type
-             "PublicKey"
-             (union (case ("type" "PublicKeyType")
-                      (("PUBLIC_KEY_TYPE_ED25519")
-                       ("ed25519" "uint256")))))))))
-    (check-not-exn
-     (λ ()
-       (parse-ast
-        #'((define-type "uint32" "unsigned int")))))
+     (check-not-exn
+      (λ ()
+        (parse-ast
+         #'((define-type
+              "PublicKey"
+              (union (case ("type" "PublicKeyType")
+                       (("PUBLIC_KEY_TYPE_ED25519")
+                        ("ed25519" "uint256")))))))))
+     (check-not-exn
+      (λ ()
+        (parse-ast
+         #'((define-type "uint32" "unsigned int")))))
 
-    (check-not-exn
-     (λ ()
-       (parse-ast
-        #'((define-type
-             "uint256"
-             (fixed-length-array "opaque" 32))))))
+     (check-not-exn
+      (λ ()
+        (parse-ast
+         #'((define-type
+              "uint256"
+              (fixed-length-array "opaque" 32))))))
 
-    (check-not-exn
-     (λ ()
-       (parse-ast
-        #'((define-type
-             "uint256"
-             (fixed-length-array "opaque" 32))
-           (define-type
-             "PublicKeyType"
-             (enum ("PUBLIC_KEY_TYPE_ED25519" 0))))))))))
+     (check-not-exn
+      (λ ()
+        (parse-ast
+         #'((define-type
+              "uint256"
+              (fixed-length-array "opaque" 32))
+            (define-type
+              "PublicKeyType"
+              (enum ("PUBLIC_KEY_TYPE_ED25519" 0))))))))))
 
 ; See also ./guile-ast-example.rkt

@@ -79,8 +79,8 @@
 
 (module+ test
   (require rackunit)
-  (provide generator-tests)
-  (define-test-suite generator-tests
+  (provide generators/test)
+  (define-test-suite generators/test
     (test-case
      "constant-gen test"
      (define test-constant-gen (constant-gen 5))
