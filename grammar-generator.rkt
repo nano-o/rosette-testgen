@@ -145,8 +145,17 @@
      (check-exn exn:fail?
                 (λ () (replace-else (parse-ast test-ast-literal-tag-value)))))))
 
+(define (variant-type v)
+  (match v
+    [`(,_ . ,t) t]
+    ["void" "void"]
+    [_ (error "v should be a pair or \"void\"")]
+  ))
+
 ; body-deps returns a rule body for the type t and a list of types whose rules the body depends on.
-(define (body-deps t sym-table) ; NOTE here we assume all 'else cases have been removed from unions
+(define (body-deps sym-table t)
+  ; NOTE here we assume all 'else cases have been removed from unions
+  ; NOTE we need the sym-table to look up the values of constants
   (match t
     ["void" (list #'null)]
     ["int" (list #'(?? (bitvector 32)))]
@@ -161,41 +170,48 @@
     ; Fixed length array. Represented by a vector.
     ; TODO would it be better to create a rule for the element type if it's an inline type?
     [`(fixed-length-array ,elem-type . ,size)
-     (match-let* ([(cons elem-body deps) (body-deps elem-type sym-table)]
+     (match-let* ([`(,elem-body . ,deps) (body-deps sym-table elem-type)]
                   [body #`(vector
                            #,@(for/list ([i (in-range size)]) elem-body))])
        (cons body deps))]
-    [`(enum ,kv ...)
-     (let* ([vs (map cdr kv)]
-            [bvs (map (λ (v) #`(bv #,v (bitvector 32))) vs)])
+    [`(enum (,_ . ,v) ...)
+     (let* ([bvs (map (λ (w) #`(bv #,w (bitvector 32))) v)])
        (list #`(choose #,@bvs)))]
     [`(union (,tag . ,tag-type) ,variants)
      ; Variants can in principle refer to enum constants defined inline in tag-type, but we don't support inline tag-types.
      ; The type of a variant can however be an inline type specification.
      (begin
        (if (not (string? tag-type)) (error "we do not support inline tag types") (void))
-       (let* ([vs-body-deps ; an alist mapping tag-identifier to '(body . deps)
+       (let* ([vs-body-deps ; a dict mapping tag-identifier to '(body . deps)
                (dict-map variants ;'(tag-value accessor . type) where type is not void, or '(tag-value . void)
-                         (λ (k v) (cons k (body-deps (cdr v) sym-table))))]
+                         (λ (k v) (cons k (body-deps sym-table (variant-type v)))))]
               [tag-type-dep 
                (if (member tag-type '("int" "unsigned int"))
                    '()
                    (list tag-type))]
-              [recursive-deps (flatten (dict-map
-                                  vs-body-deps
-                                  (λ (_ v) (if (pair? v) (cdr v) '()))))]
-              [deps (append tag-type-dep recursive-deps)]
+              [recursive-deps (apply set-union (dict-map vs-body-deps (λ (k v) (cdr v))))]
+              [deps (set-union tag-type-dep recursive-deps)]
               [bodys (map (match-lambda [`(,k ,b . ,d)
                                          #`(cons (bv #,(hash-ref sym-table k) (bitvector 32)) #,b)])
                           (dict->list vs-body-deps))]
               [body #`(choose #,@bodys)])
-         `(,body . ,deps)))]))
+         `(,body . ,deps)))]
+    ; struct TODO
+    ; Here we need to generate a Racket struct type too; we'll do that in another pass
+    [`(struct (,ident . ,spec) ...)
+     (match-let*
+         ([`((,body . ,deps) ...) (map ((curry body-deps) sym-table) spec)]
+          [all-deps (apply set-union deps)]
+          [struct-name #'TODO] ; TODO we need the name of the struct!
+          [b #`(#,struct-name #,@body)])
+       `(,b . ,all-deps))]))
 
 ; a few tests
-(body-deps '(fixed-length-array (opaque-fixed-length-array . 32) . 3) '#hash())
-(body-deps '(fixed-length-array "some-type" . 3) '#hash())
-(body-deps '(enum ("A" . 1) ("B" . 2)) '#hash())
-(body-deps '(union ("tag" . "my-other-type") #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")))) '#hash(("V1" . 1) ("V2" . 2)))
+(body-deps '#hash() '(fixed-length-array (opaque-fixed-length-array . 32) . 3))
+(body-deps  '#hash() '(fixed-length-array "some-type" . 3))
+(body-deps  '#hash() '(enum ("A" . 1) ("B" . 2)))
+(body-deps '#hash(("V1" . 1) ("V2" . 2) ("V3" . 3)) '(union ("tag" . "my-other-type") #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")) ("V3" . "void"))))
+(body-deps  '#hash() '(struct ("A" . "my-type") ("B" . "my-int")))
 
 (define (xdr-types->grammar sym-table type) null)
 
