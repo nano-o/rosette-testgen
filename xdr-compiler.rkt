@@ -4,7 +4,7 @@
 ; This module provides macros that turn such an AST into a more useful, symbol-table-like data structure.
 
 ; Note that we do not handle the all possible guile-rpc ASTs, but only a super-set of those that appear in Stellar's XDR files.
-; Notable, this does not support recursive XDR types.
+; Notably, this does not support recursive XDR types.
 
 (provide parse-ast)
 
@@ -17,14 +17,6 @@
 (module+ test
   (require rackunit)
   (provide ks-v-assoc->hash/test parse-ast/test))
-
-; First pass: a recursive syntax class, defs, that builds a symbol table where symbols are strings.
-; Each symbol is a type name or constant name and maps to a representation of the type or constant.
-; The symbol for a types t1 that is a direct child of t2 is "t1:t2"
-; This should be okay as per RFC45906, which states that the only special character allowed in XDR identifiers is "_".
-; See https://datatracker.ietf.org/doc/html/rfc4506#section-6.2
-
-; TODO Think about what we want in the type representations. We'll use this to generate Rosette grammars, but also to generate infrastructure to make it convenient to write a spec of the transaction-processing code.
 
 (define (ks-v->alist ks-v)
   (define (flatten-ks-v ks v)
@@ -51,11 +43,9 @@
 (define (base-type? t)
   (member t base-types))
 
-; Another try.
 ; We assume that only top-level type and constant definition can subsequently be reffered to, except when an enum is defined inside the specification of a tagged union.
 ; We also assume that there are no constant-name clashes even if we merge all scopes.
 ; First pass just puts all top-level declarations into a hash map and does some minor processing.
-; TODO Second pass that resolves everything
 (define (syntax->symbol stx)
   (syntax-parse stx
     [s:string (syntax-e #'s)]))
@@ -86,13 +76,13 @@
 ; fixed-length array
 (define-syntax-class fixed-length-array
   #:description "a fixed-length array"
-  [pattern ((~datum fixed-length-array) (~or* elem-type:identifier elem-type:base-type) (~var n constant)) ; TODO elem-type could be a nested type specification
+  [pattern ((~datum fixed-length-array) (~or* elem-type:identifier elem-type:base-type) (~var n constant)) ; nested type specification in elem-type not supported
            #:fail-when (equal? (syntax-e #'elem-type) "opaque") "should be non-opaque"
            #:attr repr `(fixed-length-array ,(attribute elem-type.repr) . ,(syntax-e #'n))])
 ; variable-length array
 (define-syntax-class variable-length-array
   #:description "a variable-length array"
-  [pattern ((~datum variable-length-array) (~or* elem-type:identifier elem-type:base-type) constant)  ; TODO elem-type could be a nested type specification
+  [pattern ((~datum variable-length-array) (~or* elem-type:identifier elem-type:base-type) constant)  ; nested type specification in elem-type not supported
            #:fail-when (equal? (syntax-e #'elem-type) "opaque")  "should be non-opaque"
            #:attr repr `(variable-length-array ,(attribute elem-type.repr) . ,(syntax-e #'nbytes))])
 ; all arrays
@@ -107,7 +97,7 @@
 ; one variant of a union:
 (define-syntax-class case-spec
   #:description "a case specification inside a union-type specification"
-  [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) (~or* d:type-decl d:void)) ; NOTE here we must support inline type declarations which occur in Stellar XDR (enum doesn't)
+  [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) (~or* d:type-decl d:void)) ; NOTE here we must support inline type declarations which occur in Stellar XDR (except enum, which doesn't occur in Stellar)
            #:fail-when (and (not (string? (attribute d.repr))) (eq? (car (attribute d.repr)) 'enum)) "inline enum-type declaration not supported"
            ; #:fail-when (and (attribute tag-val) (ormap number? (map syntax-e (syntax->list #'(tag-val ...))))) "xx"
            #:attr repr (let ([vals (if (attribute tag-val) (attribute tag-val.repr) '(else))])
@@ -122,7 +112,7 @@
   [pattern ((~datum union)
             ((~datum case) (~var tag-decl type-decl)
                            (~var v case-spec) ...))
-           #:fail-when (not (string? (attribute tag-decl.repr))) "inline type specification in union tag-type is not supported"; TODO: in theory the tag type could be an inline type specification but we exclude this case for now
+           #:fail-when (not (string? (attribute tag-decl.repr))) "inline type specification in union tag-type is not supported"; NOTE: in theory the tag type could be an inline type specification but we exclude this case for now
            #:fail-when (and (base-type? (attribute tag-decl.repr)) (member '(else) (map car (attribute v.repr)))) "int or unsigned int as tag type not supported when there is an else variant"
            #:attr repr `(union (,(attribute tag-decl.symbol) . ,(attribute tag-decl.repr)) ,(ks-v->alist (attribute v.repr)))])
 ; struct
@@ -133,12 +123,12 @@
 ; enum
 (define-syntax-class enum-spec
   #:description "an enum-type specification"
-  [pattern ((~datum enum) (ident:identifier v:number) ...) ; TODO v0 could be any constant
+  [pattern ((~datum enum) (ident:identifier v:number) ...) ; NOTE the only supported enum values are literal constants
            #:attr repr `(enum ,@(zip (attribute ident.repr) (map syntax-e (syntax->list #'(v ...)))))])
 ; arbitrary type declaration:
 (define-splicing-syntax-class splicing-type-decl
   #:description "a spliced type declaration"
-  [pattern (~commit (~seq s:string #;(~fail #:when (equal? (syntax-e #'s) "void")) ; void thing needed?
+  [pattern (~commit (~seq s:string ;(~fail #:when (equal? (syntax-e #'s) "void")) ; void thing needed?
                  (~or* t:base-type
                        t:identifier
                        t:array

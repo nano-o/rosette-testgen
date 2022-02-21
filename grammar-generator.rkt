@@ -51,39 +51,7 @@
   (define test-sym-table
     (parse-ast test-ast)))
 
-(define (hash-merge h . rest)
-  (apply hash-union h rest
-         #:combine (λ (v1 v2)
-                     (if (not (equal? v1 v2))
-                         (error "cannot merge hash maps with conflicting keys")
-                         v1))))
-
-(module+ test
-  (provide hash-merge/test)
-  (define-test-suite hash-merge/test
-    (test-case
-     "successful merge"
-     (check-equal?
-      (let ([h1 '#hash(('a . 'b) ('e . 'f))]
-            [h2 '#hash(('a . 'b) ('c . 'd))])
-        (hash-merge h1 h2))
-      '#hash(('a . 'b) ('c . 'd) ('e . 'f))))
-    (test-case
-     "successful multiple merges"
-     (check-equal?
-      (let ([h1 '#hash(('a . 'b) ('e . 'f))]
-            [h2 '#hash(('a . 'b) ('c . 'd))]
-            [h3 '#hash(('c . 'd) ('g . 'h))])
-        (hash-merge h1 h2 h3))
-      '#hash(('a . 'b) ('c . 'd) ('e . 'f) ('g . 'h))))
-    (test-case
-     "failed merge"
-     (check-exn exn:fail?
-                (λ () 
-                  (let ([h1 '#hash(('a . 'b))]
-                        [h2 '#hash(('a . 'c))])
-                    (hash-merge h1 h2)))))))
-
+; generate an identifier for a grammar rule:
 (define (rule-id str)
   ; generate unique indices
   (define get-index! (generator ()
@@ -138,11 +106,11 @@
              ("my-array" . (fixed-length-array "uint256" . 2))
              ("uint256" . (opaque-fixed-length-array . 32)))))))
 
-; replace else variants in unions
+; replace else variants in unions by enumerating all tag values covered by the else case.
 (define (replace-else sym-table)
   (define (replace-else-in t) ; t is a type representation
     (match t
-      [`(union (,tag . ,tag-type) ,variants) ; we assume tag-type is an enum type and all tag values are given by id (not literal values); TODO check
+      [`(union (,tag . ,tag-type) ,variants) ; we assume tag-type is an enum type and all tag values are given by id (not literal values)
        (begin
          (dict-for-each variants (λ (k v) (if (number? k) (error "literal tag values not supported") (void))))
          (let ([has-else? (ormap (λ (kv) (eq? 'else (car kv))) variants)])
@@ -178,7 +146,7 @@
                 (λ () (replace-else (parse-ast test-ast-literal-tag-value)))))))
 
 ; body-deps returns a rule body for the type t and a list of types whose rules the body depends on.
-(define (body-deps t sym-table) ; TODO: here we assume all 'else have been removed from unions
+(define (body-deps t sym-table) ; NOTE here we assume all 'else cases have been removed from unions
   (match t
     ["void" (list #'null)]
     ["int" (list #'(?? (bitvector 32)))]
@@ -227,7 +195,7 @@
 (body-deps '(fixed-length-array (opaque-fixed-length-array . 32) . 3) '#hash())
 (body-deps '(fixed-length-array "some-type" . 3) '#hash())
 (body-deps '(enum ("A" . 1) ("B" . 2)) '#hash())
-(body-deps '(union ("tag" . "my-other-type") #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")))) '#hash(("V1" . 1) ("V2" . 2)))  ; TODO: the tag values should be bitvectors
+(body-deps '(union ("tag" . "my-other-type") #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")))) '#hash(("V1" . 1) ("V2" . 2)))
 
 (define (xdr-types->grammar sym-table type) null)
 
