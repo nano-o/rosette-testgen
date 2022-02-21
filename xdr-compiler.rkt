@@ -97,10 +97,11 @@
 ; one variant of a union:
 (define-syntax-class case-spec
   #:description "a case specification inside a union-type specification"
-  [pattern ((~or* ((~var tag-val constant) ...) (~datum else)) (~or* d:type-decl d:void)) ; NOTE here we must support inline type declarations which occur in Stellar XDR (except enum, which doesn't occur in Stellar)
+  [pattern ((~or* ((~var tag-val* constant) ...) (~datum else)) (~or* d:type-decl d:void-decl)) ; NOTE here we must support inline type declarations which occur in Stellar XDR (except enum, which doesn't occur in Stellar)
            #:fail-when (and (not (string? (attribute d.repr))) (eq? (car (attribute d.repr)) 'enum)) "inline enum-type declaration not supported"
+           ; #:do ((if (and (not (string? (attribute d.repr))) (eq? (car (attribute d.repr)) 'struct)) (println (format "nested struct: ~a" (attribute d.repr))) (void)))
            ; #:fail-when (and (attribute tag-val) (ormap number? (map syntax-e (syntax->list #'(tag-val ...))))) "xx"
-           #:attr repr (let ([vals (if (attribute tag-val) (attribute tag-val.repr) '(else))])
+           #:attr repr (let ([vals (if (attribute tag-val*) (attribute tag-val*.repr) '(else))])
                          (if (equal? (syntax-e #'d) "void")
                              `(,vals . "void")
                              (let ([accessor (if (attribute d.symbol) (attribute d.symbol) 'void)]
@@ -111,20 +112,20 @@
   #:description "a union-type specification"
   [pattern ((~datum union)
             ((~datum case) (~var tag-decl type-decl)
-                           (~var v case-spec) ...))
+                           (~var v* case-spec) ...))
            #:fail-when (not (string? (attribute tag-decl.repr))) "inline type specification in union tag-type is not supported"; NOTE: in theory the tag type could be an inline type specification but we exclude this case for now
-           #:fail-when (and (base-type? (attribute tag-decl.repr)) (member '(else) (map car (attribute v.repr)))) "int or unsigned int as tag type not supported when there is an else variant"
-           #:attr repr `(union (,(attribute tag-decl.symbol) . ,(attribute tag-decl.repr)) ,(ks-v->alist (attribute v.repr)))])
+           #:fail-when (and (base-type? (attribute tag-decl.repr)) (member '(else) (map car (attribute v*.repr)))) "int or unsigned int as tag type not supported when there is an else variant"
+           #:attr repr `(union (,(attribute tag-decl.symbol) . ,(attribute tag-decl.repr)) ,(ks-v->alist (attribute v*.repr)))])
 ; struct
 (define-syntax-class struct-spec
   #:description "a struct-type specification"
-  [pattern ((~datum struct) (~var d type-decl) ...)
-           #:attr repr `(struct ,(zip (attribute d.symbol) (attribute d.repr)))]) ; this is a list because we need to preserve the order
+  [pattern ((~datum struct) (~var d* type-decl) ...)
+           #:attr repr `(struct ,(zip (attribute d*.symbol) (attribute d*.repr)))]) ; this is a list because we need to preserve the order
 ; enum
 (define-syntax-class enum-spec
   #:description "an enum-type specification"
-  [pattern ((~datum enum) (ident:identifier v:number) ...) ; NOTE the only supported enum values are literal constants
-           #:attr repr `(enum ,@(zip (attribute ident.repr) (map syntax-e (syntax->list #'(v ...)))))])
+  [pattern ((~datum enum) (ident*:identifier v*:number) ...) ; NOTE the only supported enum values are literal constants
+           #:attr repr `(enum ,@(zip (attribute ident*.repr) (map syntax-e (syntax->list #'(v* ...)))))])
 ; arbitrary type declaration:
 (define-splicing-syntax-class splicing-type-decl
   #:description "a spliced type declaration"
@@ -138,7 +139,7 @@
                        t:enum-spec)))
            #:attr symbol (syntax->symbol #'s)
            #:attr repr  (attribute t.repr)])
-(define-syntax-class void
+(define-syntax-class void-decl
   [pattern "void"
            #:attr repr "void"])
 (define-syntax-class type-decl
@@ -159,8 +160,8 @@
 ; a sequence of definitions:
 (define-syntax-class defs
   #:description "a sequence of definitions of types and constants"
-  [pattern ((~or* d:type-def d:const-def) ...)
-           #:attr h (hash-union bool (make-immutable-hash (attribute d.kv)))])
+  [pattern ((~or* d*:type-def d*:const-def) ...)
+           #:attr h (hash-union bool (make-immutable-hash (attribute d*.kv)))])
 (define bool ; bool is pre-defined
   (hash "bool"  '(enum ("TRUE" . 1) ("FALSE" . 0))))
 

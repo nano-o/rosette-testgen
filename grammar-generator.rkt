@@ -78,7 +78,7 @@
           (hash-map sym-table
                     (λ (k v)
                       (match v
-                        [`(enum ,id-val ...) id-val]
+                        [`(enum ,id-val* ...) id-val*]
                         [_ null]))))])
     (hash-union sym-table (make-immutable-hash enum-consts))))
 
@@ -115,9 +115,9 @@
          (dict-for-each variants (λ (k v) (if (number? k) (error "literal tag values not supported") (void))))
          (let ([has-else? (ormap (λ (kv) (eq? 'else (car kv))) variants)])
            (if has-else?
-               (match-let ([`(enum (,id . ,_) ...) (hash-ref sym-table tag-type)] ; all enum values (no 'else here)
-                           [`((,tag-id . ,_) ...) variants]) ; tags appearing in the union (may contain 'else)
-                 (let* ([missing-ids (set-subtract id (set-subtract tag-id '(else)))]
+               (match-let ([`(enum (,id* . ,_) ...) (hash-ref sym-table tag-type)] ; all enum values (no 'else here)
+                           [`((,tag-id* . ,_) ...) variants]) ; tags appearing in the union (may contain 'else)
+                 (let* ([missing-ids (set-subtract id* (set-subtract tag-id* '(else)))]
                         [else-decl (dict-ref variants 'else)]
                         [old-variants (dict-remove variants 'else)]; without else
                         [new-variants (map (λ (m) `(,m . ,else-decl)) missing-ids)])
@@ -154,8 +154,8 @@
 
 ; body-deps returns a rule body for the type t and a list of types whose rules the body depends on.
 (define (body-deps sym-table t)
-  ; NOTE here we assume all 'else cases have been removed from unions
-  ; NOTE we need the sym-table to look up the values of constants
+  ; NOTE Here we assume all 'else cases have been removed from unions
+  ; NOTE We need the sym-table to look up the values of constants. TODO If we had defined symbols for them instead, then we wouldn't need that.
   (match t
     ["void" (list #'null)]
     ["int" (list #'(?? (bitvector 32)))]
@@ -174,11 +174,11 @@
                   [body #`(vector
                            #,@(for/list ([i (in-range size)]) elem-body))])
        (cons body deps))]
-    [`(enum (,_ . ,v) ...)
-     (let* ([bvs (map (λ (w) #`(bv #,w (bitvector 32))) v)])
+    [`(enum (,_ . ,v*) ...)
+     (let* ([bvs (map (λ (w) #`(bv #,w (bitvector 32))) v*)])
        (list #`(choose #,@bvs)))]
     [`(union (,tag . ,tag-type) ,variants)
-     ; Variants can in principle refer to enum constants defined inline in tag-type, but we don't support inline tag-types.
+     ; Variants can in principle refer to enum constants defined inline in the tag type, but we don't support inline tag types.
      ; The type of a variant can however be an inline type specification.
      (begin
        (if (not (string? tag-type)) (error "we do not support inline tag types") (void))
@@ -198,12 +198,16 @@
          `(,body . ,deps)))]
     ; struct TODO
     ; Here we need to generate a Racket struct type too; we'll do that in another pass
-    [`(struct (,ident . ,spec) ...)
+    [`(struct (,_ . ,spec*) ...)
      (match-let*
-         ([`((,body . ,deps) ...) (map ((curry body-deps) sym-table) spec)]
-          [all-deps (apply set-union deps)]
-          [struct-name #'TODO] ; TODO we need the name of the struct!
-          [b #`(#,struct-name #,@body)])
+         ([`((,body* . ,deps*) ...) (map ((curry body-deps) sym-table) spec*)]
+          [all-deps (apply set-union deps*)]
+          [struct-name #'TODO]
+          ; TODO we need the name of the struct! Doesn't really fit in the current architecture...
+          ; We could create names for anonymous structs and add those names to the struct repr (in a previous pass).
+          ; That seems like the easiest short-term soluation.
+          ; But then we might want to do similar stuff for enums and unions.
+          [b #`(#,struct-name #,@body*)])
        `(,b . ,all-deps))]))
 
 ; a few tests
