@@ -2,7 +2,7 @@
 
 (require
   rosette/lib/synthax syntax/parse/define
-  (for-syntax "xdr-compiler.rkt" "grammar-generator.rkt")
+  ;(for-syntax "xdr-compiler.rkt" "grammar-generator.rkt")
   macro-debugger/stepper
   rackunit)
   
@@ -23,8 +23,19 @@
                 (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array"))
                 (("ANOTHER_PUBLIC_KEY_TYPE") ("my-int" "int")))))))
 
+(struct posn (x y) #:transparent) ; NOTE: has to be transparent for what follows
+
+(define-grammar (g)
+  (rule-1 (posn (?? (bitvector 32)) (?? (bitvector 32)))))
+
+(define sol
+  (synthesize
+   #:forall '()
+   #:guarantee (assert (equal? (g #:depth 3) (posn (bv 2 32) (bv 1 32))))))
+
+#|
 (define-for-syntax (ast->grammar type)
-  (let ([sym-table (parse-asts test-ast)])
+  (let ([sym-table (parse-ast test-ast)])
     (xdr-types->grammar sym-table type)))
   
 (define-syntax-parser make-grammar
@@ -63,3 +74,4 @@
 
 (check-true (sat? sol4))
 ;(generate-forms sol2)
+|#
