@@ -196,10 +196,10 @@
                   [body #`(vector
                            #,@(for/list ([i (in-range size)]) elem-body))])
        (cons body deps))]
-    [`(enum (,_ . ,v*) ...)
+    [(struct* enum-type ([values (hash-table (_ v*) ...)]))
      (let* ([bvs (map (λ (w) #`(bv #,w (bitvector 32))) v*)])
        (list #`(choose #,@bvs)))]
-    [`(union (,tag . ,tag-type) ,variants)
+    [(union-type tag tag-type variants)
      ; Variants can in principle refer to enum constants defined inline in the tag type, but we don't support inline tag types.
      ; The type of a variant can however be an inline type specification.
      (begin
@@ -220,7 +220,7 @@
          `(,body . ,deps)))]
     ; struct TODO
     ; Here we need to generate a Racket struct type too; we'll do that in another pass
-    [`(struct (,_ . ,spec*) ...)
+    [(struct* struct-type ([fields `((,_ . ,spec*) ...)]))
      (match-let*
          ([`((,body* . ,deps*) ...) (map ((curry body-deps) sym-table) spec*)]
           [all-deps (apply set-union deps*)]
@@ -234,13 +234,13 @@
        `(,b . ,all-deps))]))
 
 ; a few tests
-#|
+
 (body-deps '#hash() (fixed-length-array-type (opaque-fixed-length-array-type 32) 3))
 (body-deps  '#hash() (fixed-length-array-type "some-type" 3))
-(body-deps  '#hash() '(enum #hash(("A" . 1) ("B" . 2))))
-(body-deps '#hash(("V1" . 1) ("V2" . 2) ("V3" . 3)) '(union ("tag" . "my-other-type") #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")) ("V3" . "void"))))
-(body-deps  '#hash() '(struct ("A" . "my-type") ("B" . "my-int")))
-|#
+(body-deps  '#hash() (enum-type #hash(("A" . 1) ("B" . 2))))
+(body-deps '#hash(("V1" . 1) ("V2" . 2) ("V3" . 3)) (union-type "tag" "my-other-type" #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")) ("V3" . "void"))))
+(body-deps  '#hash() (struct-type "my-struct" '(("A" . "my-type") ("B" . "my-int"))))
+
 (define (xdr-types->grammar sym-table type) null)
 
 (module+ test

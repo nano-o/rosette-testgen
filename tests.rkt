@@ -28,6 +28,6 @@
 ; run all tests
 (run-all "xdr-compiler.rkt")
 (run-all "generators.rkt")
-;(run-all "grammar-generator.rkt")
+(run-all "grammar-generator.rkt")
 (run-all "util.rkt")
 (run-all "guile-ast-example.rkt")
