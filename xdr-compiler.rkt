@@ -43,21 +43,34 @@
 (define (base-type? t)
   (member t base-types))
 
-; We assume that only top-level type and constant definition can subsequently be reffered to, except when an enum is defined inside the specification of a tagged union.
+; struct types to represent XDR types
+(struct opaque-fixed-length-array-type (length)  #:prefab)
+(struct opaque-variable-length-array-type (max-length)  #:prefab)
+(struct fixed-length-array-type (type length)  #:prefab)
+(struct variable-length-array-type (type max-length)  #:prefab)
+(struct string-type (length) #:prefab)
+(struct enum-type (values) #:prefab)
+(struct struct-type (name fields) #:prefab)
+(struct union-type (tag-name tag-type variants) #:prefab)
+
+; We assume that only top-level type and constant definition can subsequently be reffered to.
 ; We also assume that there are no constant-name clashes even if we merge all scopes.
 ; First pass just puts all top-level declarations into a hash map and does some minor processing.
-(define (syntax->symbol stx)
+(define (ns-name->string ns name)
+  (let ([strs (append ns (list name))])
+    (string-join strs "::")))
+(define (syntax->string stx)
   (syntax-parse stx
     [s:string (syntax-e #'s)]))
 (define-syntax-class base-type
   #:description "a base type"
   [pattern t:string
            #:fail-when (not (base-type? (syntax-e #'t))) (format "not a base type: ~a" (syntax-e #'t))
-           #:attr repr (syntax->symbol #'t)])
+           #:attr repr (syntax->string #'t)])
 (define-syntax-class identifier
   #:description "an identifier"
   [pattern i:string
-           #:attr repr (syntax->symbol #'i)])
+           #:attr repr (syntax->string #'i)])
 (define-syntax-class constant
   #:description "a constant"
   [pattern (~or*
@@ -67,26 +80,25 @@
 (define-syntax-class opaque-fixed-length-array
   #:description "an opaque fixed-length array"
   [pattern ((~datum fixed-length-array) "opaque" (~var nbytes constant))
-           #:attr repr `(opaque-fixed-length-array . ,(syntax-e #'nbytes))])
+           #:attr repr (opaque-fixed-length-array-type (syntax-e #'nbytes))])
 (define max-array-len 4294967295)
 ; opaque variable-length array
 (define-syntax-class opaque-variable-length-array
   #:description "an opaque variable-length array"
   [pattern ((~datum variable-length-array) "opaque" (~or* (~var nbytes constant) #f))
-           #:attr repr `(opaque-variable-length-array . ,(if (attribute nbytes) (syntax-e #'nbytes) max-array-len))])
+           #:attr repr (opaque-variable-length-array-type (if (attribute nbytes) (syntax-e #'nbytes) max-array-len))])
 ; fixed-length array
 (define-syntax-class fixed-length-array
   #:description "a fixed-length array"
-  [pattern ((~datum fixed-length-array) (~or* elem-type:identifier elem-type:base-type) (~var n constant)) ; nested type specification in elem-type not supported
+  [pattern ((~datum fixed-length-array) (~or* elem-type:identifier elem-type:base-type) n:constant) ; nested type specification in elem-type not supported
            #:fail-when (equal? (syntax-e #'elem-type) "opaque") "should be non-opaque"
-           #:attr repr `(fixed-length-array ,(attribute elem-type.repr) . ,(syntax-e #'n))])
+           #:attr repr (fixed-length-array-type (attribute elem-type.repr) (syntax-e #'n))])
 ; variable-length array
-(define max-array-len 4294967295)
 (define-syntax-class variable-length-array
   #:description "a variable-length array"
   [pattern ((~datum variable-length-array) (~or* elem-type:identifier elem-type:base-type) (~or* (~var n constant) #f))  ; nested type specification in elem-type not supported
            #:fail-when (equal? (syntax-e #'elem-type) "opaque")  "should be non-opaque"
-           #:attr repr `(variable-length-array ,(attribute elem-type.repr) . ,(if (attribute n) (syntax-e #'n) max-array-len))])
+           #:attr repr (variable-length-array-type (attribute elem-type.repr) (if (attribute n) (syntax-e #'n) max-array-len))])
 ; all arrays
 (define-syntax-class array
   #:description "an array"
@@ -95,13 +107,13 @@
 ; string
 (define-syntax-class xdr-string
   [pattern ((~datum string) (~var nbytes constant))
-           #:attr repr (list 'string (syntax-e #'nbytes))])
+           #:attr repr (string-type (syntax-e #'nbytes))])
 ; one variant of a union:
-(define-syntax-class case-spec
+(define-syntax-class (case-spec namespace)
   #:description "a case specification inside a union-type specification"
-  [pattern ((~or* ((~var tag-val* constant) ...) (~datum else)) (~or* d:type-decl d:void-decl)) ; NOTE here we must support inline type declarations which occur in Stellar XDR (except enum, which doesn't occur in Stellar)
-           #:fail-when (and (not (string? (attribute d.repr))) (eq? (car (attribute d.repr)) 'enum)) "inline enum-type declaration not supported"
-           ; #:do ((if (and (not (string? (attribute d.repr))) (eq? (car (attribute d.repr)) 'struct)) (println (format "nested struct: ~a" (attribute d.repr))) (void)))
+  [pattern ((~or* ((~var tag-val* constant) ...) (~datum else)) (~or* (~var d (type-decl namespace)) d:void-decl)) ; NOTE here we must support inline type declarations which occur in Stellar XDR (except enum, which doesn't occur in Stellar)
+           #:fail-when (and (not (string? (attribute d.repr))) (enum-type? (attribute d.repr))) "inline enum-type declaration not supported"
+           ; #:do ((if (and (not (string? (attribute d.repr))) (eq? (car (attribute d.repr)) 'struct)) (println (format " struct: ~a" (attribute d.repr))) (void)))
            ; #:fail-when (and (attribute tag-val) (ormap number? (map syntax-e (syntax->list #'(tag-val ...))))) "xx"
            #:attr repr (let ([vals (if (attribute tag-val*) (attribute tag-val*.repr) '(else))])
                          (if (equal? (syntax-e #'d) "void")
@@ -110,49 +122,49 @@
                                    [type-repr (attribute d.repr)])
                                `(,vals ,accessor . ,type-repr))))])
 ; a union specification:
-(define-syntax-class union-spec
+(define-syntax-class (union-spec namespace)
   #:description "a union-type specification"
   [pattern ((~datum union)
-            ((~datum case) (~var tag-decl type-decl)
-                           (~var v* case-spec) ...))
+            ((~datum case) (~var tag-decl (type-decl namespace))
+                           (~var v* (case-spec namespace)) ...))
            #:fail-when (not (string? (attribute tag-decl.repr))) "inline type specification in union tag-type is not supported"; NOTE: in theory the tag type could be an inline type specification but we exclude this case for now
            #:fail-when (and (base-type? (attribute tag-decl.repr)) (member '(else) (map car (attribute v*.repr)))) "int or unsigned int as tag type not supported when there is an else variant"
-           #:attr repr `(union (,(attribute tag-decl.symbol) . ,(attribute tag-decl.repr)) ,(ks-v->alist (attribute v*.repr)))])
+           #:attr repr (union-type (attribute tag-decl.symbol) (attribute tag-decl.repr) (ks-v->alist (attribute v*.repr)))])
 ; struct
-(define-syntax-class struct-spec
+(define-syntax-class (struct-spec namespace name)
   #:description "a struct-type specification"
-  [pattern ((~datum struct) (~var d* type-decl) ...)
-           #:attr repr `(struct ,(zip (attribute d*.symbol) (attribute d*.repr)))]) ; this is a list because we need to preserve the order
+  [pattern ((~datum struct) (~var d* (type-decl namespace)) ...)
+           #:attr repr (struct-type name (zip (attribute d*.symbol) (attribute d*.repr)))]) ; NOTE the order is important
 ; enum
-(define-syntax-class enum-spec
+(define-syntax-class (enum-spec namespace)
   #:description "an enum-type specification"
   [pattern ((~datum enum) (ident*:identifier v*:number) ...) ; NOTE the only supported enum values are literal constants
-           #:attr repr `(enum ,@(zip (attribute ident*.repr) (map syntax-e (syntax->list #'(v* ...)))))])
+           #:attr repr (enum-type (zip (attribute ident*.repr) (map syntax-e (syntax->list #'(v* ...)))))])
 ; arbitrary type declaration:
-(define-splicing-syntax-class splicing-type-decl
+(define-splicing-syntax-class (splicing-type-decl namespace)
   #:description "a spliced type declaration"
-  [pattern (~commit (~seq s:string ;(~fail #:when (equal? (syntax-e #'s) "void")) ; void thing needed?
+  [pattern (~commit (~seq (~and s:string (~bind [new-namespace (cons (syntax-e #'s) namespace)]))
                  (~or* t:base-type
                        t:identifier
                        t:array
                        t:xdr-string
-                       t:union-spec
-                       t:struct-spec
-                       t:enum-spec)))
-           #:attr symbol (syntax->symbol #'s)
+                       (~var t (union-spec (attribute new-namespace)))
+                       (~var t (struct-spec (attribute new-namespace) (ns-name->string namespace (syntax-e #'s))))
+                       (~var t (enum-spec (attribute new-namespace))))))
+           #:attr symbol (syntax->string #'s)
            #:attr repr  (attribute t.repr)])
 (define-syntax-class void-decl
   [pattern "void"
            #:attr repr "void"])
-(define-syntax-class type-decl
+(define-syntax-class (type-decl namespace)
   #:description "a type declaration"
-  [pattern (d:splicing-type-decl)
+  [pattern ((~var d (splicing-type-decl namespace)))
            #:attr repr (attribute d.repr)
            #:attr symbol (attribute d.symbol)])
 ; define-type:
 (define-syntax-class type-def
   #:description "the definition of a type"
-  [pattern (~commit ((~datum define-type) d:splicing-type-decl))
+  [pattern (~commit ((~datum define-type) (~var d (splicing-type-decl null))))
            #:attr kv `(,(attribute d.symbol) . ,(attribute d.repr))])
 ; define-constant:
 (define-syntax-class const-def
@@ -165,7 +177,7 @@
   [pattern ((~or* d*:type-def d*:const-def) ...)
            #:attr h (hash-union bool (make-immutable-hash (attribute d*.kv)))])
 (define bool ; bool is pre-defined
-  (hash "bool"  '(enum ("TRUE" . 1) ("FALSE" . 0))))
+  (hash "bool"  (enum-type '(("TRUE" . 1) ("FALSE" . 0)))))
 
 (define (parse-ast stx)
   (syntax-parse stx
@@ -184,7 +196,9 @@
           (define-type
             "my-array"
             (fixed-length-array "uint256" 2))))
-      '#hash(("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))) ("my-array" . (fixed-length-array "uint256" . 2)) ("uint256" . (opaque-fixed-length-array . 32)))))
+      '#hash(("bool" . #s(enum-type (("TRUE" . 1) ("FALSE" . 0))))
+             ("my-array" . #s(fixed-length-array-type "uint256" 2))
+       ("uint256" . #s(opaque-fixed-length-array-type 32)))))
 
     (test-case
      "XDR union"
@@ -206,17 +220,23 @@
                      (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array"))
                      (("TAG") "void")
                      (else ("my-int" "int")))))))
-      '#hash(("PublicKey" . (union
-                             ("type" . "PublicKeyType")
-                             (("PUBLIC_KEY_TYPE_ED25519" "ed25519" . "uint256")
-                              ("SOMETHING" "ed25519" . "uint256")
-                              ("OTHER_PUBLIC_KEY_TYPE" "array2" . "my-array")
-                              ("TAG" . "void")
-                              (else "my-int" . "int"))))
-             ("PublicKeyType" . (enum ("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1)))
-             ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0)))
-             ("my-array" . (fixed-length-array "uint256" . 2))
-             ("uint256" . (opaque-fixed-length-array . 32)))))
+      '#hash(("PublicKey"
+              .
+              #s(union-type
+                 "type"
+                 "PublicKeyType"
+                 (("PUBLIC_KEY_TYPE_ED25519" "ed25519" . "uint256")
+                  ("SOMETHING" "ed25519" . "uint256")
+                  ("OTHER_PUBLIC_KEY_TYPE" "array2" . "my-array")
+                  ("TAG" . "void")
+                  (else "my-int" . "int"))))
+             ("PublicKeyType"
+              .
+              #s(enum-type
+                 (("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1))))
+             ("bool" . #s(enum-type (("TRUE" . 1) ("FALSE" . 0))))
+             ("my-array" . #s(fixed-length-array-type "uint256" 2))
+             ("uint256" . #s(opaque-fixed-length-array-type 32)))))
    
     (test-case
      "XDR union, int tag, and else variant"
@@ -244,7 +264,7 @@
       (parse-ast
        #'((define-type
             "my-int" "int")))
-      '#hash(("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))) ("my-int" . "int"))))
+      '#hash(("bool" . #s(enum-type (("TRUE" . 1) ("FALSE" . 0)))) ("my-int" . "int"))))
    
     (test-case
      "bool"
@@ -254,7 +274,7 @@
             "my-bool" "bool")
           (define-type
             "my-bool-again" "bool")))
-      '#hash(("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))) ("my-bool" . "bool") ("my-bool-again" . "bool"))))
+      '#hash(("bool" . #s(enum-type (("TRUE" . 1) ("FALSE" . 0)))) ("my-bool" . "bool") ("my-bool-again" . "bool"))))
       
     (test-case
      "struct"
@@ -266,11 +286,14 @@
               ("assetCode" "AssetCode4")
               ("issuer" "AccountID")
               ("array" (fixed-length-array "opaque" 32))))))
-      '#hash(("AlphaNum4" . (struct (
-                                     ("assetCode" . "AssetCode4")
-                                     ("issuer" . "AccountID")
-                                     ("array" opaque-fixed-length-array . 32))))
-             ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0))))))
+      '#hash(("AlphaNum4"
+              .
+              #s(struct-type
+                 "AlphaNum4"
+                 (("assetCode" . "AssetCode4")
+                  ("issuer" . "AccountID")
+                  ("array" . #s(opaque-fixed-length-array-type 32)))))
+             ("bool" . #s(enum-type (("TRUE" . 1) ("FALSE" . 0)))))))
            
     (test-case
      "Check that no exceptions are thrown"
