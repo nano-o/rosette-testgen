@@ -68,11 +68,12 @@
   #:description "an opaque fixed-length array"
   [pattern ((~datum fixed-length-array) "opaque" (~var nbytes constant))
            #:attr repr `(opaque-fixed-length-array . ,(syntax-e #'nbytes))])
+(define max-array-len 4294967295)
 ; opaque variable-length array
 (define-syntax-class opaque-variable-length-array
   #:description "an opaque variable-length array"
-  [pattern ((~datum variable-length-array) "opaque" (~var nbytes constant))
-           #:attr repr `(opaque-variable-length-array . ,(syntax-e #'nbytes))])
+  [pattern ((~datum variable-length-array) "opaque" (~or* (~var nbytes constant) #f))
+           #:attr repr `(opaque-variable-length-array . ,(if (attribute nbytes) (syntax-e #'nbytes) max-array-len))])
 ; fixed-length array
 (define-syntax-class fixed-length-array
   #:description "a fixed-length array"
@@ -80,11 +81,12 @@
            #:fail-when (equal? (syntax-e #'elem-type) "opaque") "should be non-opaque"
            #:attr repr `(fixed-length-array ,(attribute elem-type.repr) . ,(syntax-e #'n))])
 ; variable-length array
+(define max-array-len 4294967295)
 (define-syntax-class variable-length-array
   #:description "a variable-length array"
-  [pattern ((~datum variable-length-array) (~or* elem-type:identifier elem-type:base-type) constant)  ; nested type specification in elem-type not supported
+  [pattern ((~datum variable-length-array) (~or* elem-type:identifier elem-type:base-type) (~or* (~var n constant) #f))  ; nested type specification in elem-type not supported
            #:fail-when (equal? (syntax-e #'elem-type) "opaque")  "should be non-opaque"
-           #:attr repr `(variable-length-array ,(attribute elem-type.repr) . ,(syntax-e #'nbytes))])
+           #:attr repr `(variable-length-array ,(attribute elem-type.repr) . ,(if (attribute n) (syntax-e #'n) max-array-len))])
 ; all arrays
 (define-syntax-class array
   #:description "an array"
