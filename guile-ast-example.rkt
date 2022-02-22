@@ -1,7 +1,7 @@
 #lang racket
 
 (require "xdr-compiler.rkt" rackunit)
-(provide stellar-symbol-table parse-stellar-xdr/test)
+(provide stellar-symbol-table)
 
 (define (stellar-symbol-table)
   (parse-ast
@@ -1359,9 +1359,11 @@
           ("ext" (union (case ("v" "int") ((0) "void"))))))
       )))
 
-(define-test-suite parse-stellar-xdr/test
-  (test-case
-   "Parsing Stellar AST does not throw exceptions"
-   (check-not-exn
-    (λ ()
-      (stellar-symbol-table)))))
+(module+ test
+  (provide parse-stellar-xdr/test)
+  (define-test-suite parse-stellar-xdr/test
+    (test-case
+     "Parsing Stellar AST does not throw exceptions"
+     (check-not-exn
+      (λ ()
+        (stellar-symbol-table))))))

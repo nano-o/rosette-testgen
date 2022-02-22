@@ -2,7 +2,7 @@
 
 (require
   (submod "xdr-compiler.rkt" test)
-  "guile-ast-example.rkt"
+  (submod "guile-ast-example.rkt" test)
   (submod "generators.rkt" test)
   (submod "grammar-generator.rkt" test)
   (submod "util.rkt" test)
@@ -28,6 +28,6 @@
 ; run all tests
 (run-all "xdr-compiler.rkt")
 (run-all "generators.rkt")
-(run-all "grammar-generator.rkt")
+;(run-all "grammar-generator.rkt")
 (run-all "util.rkt")
-(run-tests parse-stellar-xdr/test)
+(run-all "guile-ast-example.rkt")
