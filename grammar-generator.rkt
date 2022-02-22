@@ -75,14 +75,14 @@
     [else (error "c should be a string or number")]))
 
 ; adds enum constants to symbol table
-; TODO What about nested enums? Not used in Stellar
+; NOTE What about nested enums? Not used in Stellar
 (define (with-enum-consts sym-table)
   (let ([enum-consts
          (apply hash-union
           (hash-map sym-table
                     (λ (k v)
                       (match v
-                        [(struct* enum-type ([values vs])) vs]
+                        [(enum-type vs) vs]
                         [_ '#hash()]))))])
     (hash-union sym-table enum-consts)))
 
@@ -125,7 +125,7 @@
 (define (replace-else sym-table)
   (define (replace-else-in t) ; t is a type representation
     (match t
-      [(struct* union-type ([tag-name tag] [tag-type tag-type] [variants variants])) ; we assume tag-type is an enum type and all tag values are given by id (not literal values)
+      [(union-type tag tag-type variants) ; we assume tag-type is an enum type and all tag values are given by id (not literal values)
        (begin
          (dict-for-each variants (λ (k v) (if (number? k) (error "literal tag values not supported") (void))))
          (let ([has-else? (ormap (λ (kv) (eq? 'else (car kv))) (dict->list variants))])
@@ -187,11 +187,11 @@
     [s #:when (string? s)
        (cons (rule-hole s) (list s))]
     ; Opaque fixed-length array. Represented by a bitvector.
-    [`(opaque-fixed-length-array . ,nbytes)
+    [(opaque-fixed-length-array-type nbytes)
      (list #`(?? (bitvector #,(* nbytes 8))))]
     ; Fixed length array. Represented by a vector.
     ; TODO would it be better to create a rule for the element type if it's an inline type?
-    [`(fixed-length-array ,elem-type . ,size)
+    [(fixed-length-array-type elem-type size)
      (match-let* ([`(,elem-body . ,deps) (body-deps sym-table elem-type)]
                   [body #`(vector
                            #,@(for/list ([i (in-range size)]) elem-body))])
@@ -234,12 +234,13 @@
        `(,b . ,all-deps))]))
 
 ; a few tests
-(body-deps '#hash() '(fixed-length-array (opaque-fixed-length-array . 32) . 3))
-(body-deps  '#hash() '(fixed-length-array "some-type" . 3))
-(body-deps  '#hash() '(enum ("A" . 1) ("B" . 2)))
+#|
+(body-deps '#hash() (fixed-length-array-type (opaque-fixed-length-array-type 32) 3))
+(body-deps  '#hash() (fixed-length-array-type "some-type" 3))
+(body-deps  '#hash() '(enum #hash(("A" . 1) ("B" . 2))))
 (body-deps '#hash(("V1" . 1) ("V2" . 2) ("V3" . 3)) '(union ("tag" . "my-other-type") #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")) ("V3" . "void"))))
 (body-deps  '#hash() '(struct ("A" . "my-type") ("B" . "my-int")))
-
+|#
 (define (xdr-types->grammar sym-table type) null)
 
 (module+ test
