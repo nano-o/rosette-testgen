@@ -5,11 +5,11 @@
   "xdr-compiler.rkt" ;"guile-ast-example.rkt"
   "util.rkt"
   #;(for-template rosette rosette/lib/synthax))
-(provide xdr-types->grammar)
+;(provide xdr-types->grammar)
 
 (module+ test
   (require rackunit)
-  (provide test-sym-table test-grammar test-sym-table-2))
+  (provide test-sym-table test-sym-table-2))
 
 ; TODO generate a Rosette grammar for this:
 #; (hash-ref
@@ -27,13 +27,14 @@
          (fixed-length-array "uint256" 2))
        (define-type
          "PublicKeyType"
-         (enum ("PUBLIC_KEY_TYPE_ED25519" 0) ("OTHER_PUBLIC_KEY_TYPE" 1) ("ANOTHER_PUBLIC_KEY_TYPE" 2) ("THREE" 3) ("FOUR" 4)))
+         (enum ("PUBLIC_KEY_TYPE_ED25519" 0) ("OTHER_PUBLIC_KEY_TYPE" 1) ("ANOTHER_PUBLIC_KEY_TYPE" 2) ("THREE" 3) ("FOUR" 4) ("FIVE" 5)))
        (define-type
          "PublicKey"
          (union (case ("type" "PublicKeyType")
                   (("PUBLIC_KEY_TYPE_ED25519") ("ed25519" "uint256"))
                   (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array"))
                   (("ANOTHER_PUBLIC_KEY_TYPE") ("myint" "int"))
+                  (("FIVE") ("myunion" (union (case ("tagtype" "PublicKeyType") (("THREE") ("myint" "int")) (else "void")))))
                   (else "void"))))))
   
   (define test-ast-literal-tag-value
@@ -97,6 +98,7 @@
       (with-enum-consts test-sym-table)
       '#hash(("ANOTHER_PUBLIC_KEY_TYPE" . 2)
              ("FALSE" . 0)
+             ("FIVE" . 5)
              ("FOUR" . 4)
              ("OTHER_PUBLIC_KEY_TYPE" . 1)
              ("PUBLIC_KEY_TYPE_ED25519" . 0)
@@ -105,25 +107,35 @@
               #s(union-type
                  "type"
                  "PublicKeyType"
-                 #hash(("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256"))
-                       ("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
+                 #hash((else . "void")
                        ("ANOTHER_PUBLIC_KEY_TYPE" . ("myint" . "int"))
-                       (else . "void"))))
+                       ("FIVE"
+                        .
+                        ("myunion"
+                         .
+                         #s(union-type
+                            "tagtype"
+                            "PublicKeyType"
+                            #hash((else . "void") ("THREE" . ("myint" . "int"))))))
+                       ("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
+                       ("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256")))))
              ("PublicKeyType"
               .
               #s(enum-type
-                 #hash(("PUBLIC_KEY_TYPE_ED25519" . 0)
+                 #hash(("ANOTHER_PUBLIC_KEY_TYPE" . 2)
+                       ("FIVE" . 5)
+                       ("FOUR" . 4)
                        ("OTHER_PUBLIC_KEY_TYPE" . 1)
-                       ("ANOTHER_PUBLIC_KEY_TYPE" . 2)
-                       ("THREE" . 3)
-                       ("FOUR" . 4))))
+                       ("PUBLIC_KEY_TYPE_ED25519" . 0)
+                       ("THREE" . 3))))
              ("THREE" . 3)
              ("TRUE" . 1)
-             ("bool" . #s(enum-type #hash(("TRUE" . 1) ("FALSE" . 0))))
+             ("bool" . #s(enum-type #hash(("FALSE" . 0) ("TRUE" . 1))))
              ("my-array" . #s(fixed-length-array-type "uint256" 2))
              ("uint256" . #s(opaque-fixed-length-array-type 32)))))))
 
 ; replace else variants in unions by enumerating all tag values covered by the else case.
+; TODO do it recursively. Would it be easier to flatten the type hierarchy once and for all in a previous pass?
 (define (replace-else sym-table)
   (define (replace-else-in t) ; t is a type representation
     (match t
@@ -135,12 +147,21 @@
                (match-let* ([(struct* enum-type ([values (hash-table (id* _) ...)])) (hash-ref sym-table tag-type)] ; all enum values (no 'else here)
                             [(hash-table (tag-id* _) ...) variants]) ; tags appearing in the union (may contain 'else)
                  (let* ([missing-ids (set-subtract id* (set-subtract tag-id* '(else)))]
-                        [else-decl (dict-ref variants 'else)]
-                        [old-variants (dict-remove variants 'else)]; without else
+                        [else-decl (replace-else-in (dict-ref variants 'else))]
+                        [old-variants (make-immutable-hash
+                                       (dict-map (dict-remove variants 'else)
+                                                 (λ (k v)
+                                                   (match-let ([`(,acc . ,tp) v])
+                                                     `(,k ,acc . ,(replace-else-in tp))))))]; without else
                         [new-variants (make-immutable-hash (map (λ (m) `(,m . ,else-decl)) missing-ids))])
                    (union-type tag tag-type (hash-union old-variants new-variants))))
                t)))]
-      [_ t]))
+      [(struct-type name fields)
+       (let ([new-fields (for/list ([f fields])
+                           `(,(car f) . ,(replace-else-in cdr f)))])
+       (struct-type name new-fields))]
+      ; TODO non-opaque arrays
+      [_ (begin (println t) t)]))
   (for/hash ([kv (hash->list sym-table)])
     (values (car kv) (replace-else-in (cdr kv)))))
 
@@ -155,10 +176,23 @@
       '#s(union-type
           "type"
           "PublicKeyType"
-          #hash(("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256"))
-                ("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
-                ("ANOTHER_PUBLIC_KEY_TYPE" . ("myint" . "int"))
+          #hash(("ANOTHER_PUBLIC_KEY_TYPE" . ("myint" . "int"))
+                ("FIVE"
+                 .
+                 ("myunion"
+                  .
+                  #s(union-type
+                     "tagtype"
+                     "PublicKeyType"
+                     #hash(("ANOTHER_PUBLIC_KEY_TYPE" . "void")
+                           ("FIVE" . "void")
+                           ("FOUR" . "void")
+                           ("OTHER_PUBLIC_KEY_TYPE" . "void")
+                           ("PUBLIC_KEY_TYPE_ED25519" . "void")
+                           ("THREE" . ("myint" . "int"))))))
                 ("FOUR" . "void")
+                ("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
+                ("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256"))
                 ("THREE" . "void")))))
     
     (test-case
@@ -226,22 +260,27 @@
      (match-let*
          ([`((,body* . ,deps*) ...) (map (((curry body-deps) sym-table) stx-context) spec*)]
           [all-deps (apply set-union deps*)]
-          [struct-name (format-id #'() "~a" name)]
-          ; TODO we need the right syntax context for the struct name.
+          [struct-name (format-id stx-context "~a" name)]
           [b #`(#,struct-name #,@body*)])
        `(,b . ,all-deps))]))
 
 ; a few tests
-
+; TODO to write unit tests we need a way to compare grammars...
+; See equal?/recur or something like that.
 (body-deps '#hash() #'() (fixed-length-array-type (opaque-fixed-length-array-type 32) 3))
 (body-deps  '#hash() #'() (fixed-length-array-type "some-type" 3))
 (body-deps  '#hash() #'() (enum-type #hash(("A" . 1) ("B" . 2))))
 (body-deps '#hash(("V1" . 1) ("V2" . 2) ("V3" . 3)) #'() (union-type "tag" "my-other-type" #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")) ("V3" . "void"))))
 (body-deps  '#hash() #'() (struct-type "my-struct" '(("A" . "my-type") ("B" . "my-int"))))
 
-(define (xdr-types->grammar sym-table type) null)
+#;(define (xdr-types->grammar sym-table stx-context type)
+  (let ([sym-table-2 (replace-else (with-enum-consts sym-table))])
+    (let gen-grammar ([t type])
+      (match-let ([`(,body . ,deps) (body-deps sym-table-2 stx-context t)])
+        (let b)))))
+    
 
-(module+ test
+#;(module+ test
   (define (test-grammar)
     (xdr-types->grammar test-sym-table "PublicKey")))
 
