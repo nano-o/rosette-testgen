@@ -6,7 +6,16 @@
 ; Note that we do not handle the all possible guile-rpc ASTs, but only a super-set of those that appear in Stellar's XDR files.
 ; Notably, this does not support recursive XDR types.
 
-(provide parse-ast)
+(provide parse-ast
+         ; TODO is there a better way to export those structs?
+         (struct-out opaque-fixed-length-array-type)
+         (struct-out opaque-variable-length-array-type)
+         (struct-out fixed-length-array-type)
+         (struct-out variable-length-array-type)
+         (struct-out string-type)
+         (struct-out enum-type)
+         (struct-out struct-type)
+         (struct-out union-type))
 
 (require
   syntax/parse
@@ -52,6 +61,7 @@
 (struct enum-type (values) #:prefab)
 (struct struct-type (name fields) #:prefab)
 (struct union-type (tag-name tag-type variants) #:prefab)
+
 
 ; We assume that only top-level type and constant definition can subsequently be reffered to.
 ; We also assume that there are no constant-name clashes even if we merge all scopes.
@@ -159,6 +169,7 @@
 (define-syntax-class (type-decl namespace)
   #:description "a type declaration"
   [pattern ((~var d (splicing-type-decl namespace)))
+           #:fail-when (enum-type? (attribute d.repr)) "nested enum type not supported"
            #:attr repr (attribute d.repr)
            #:attr symbol (attribute d.symbol)])
 ; define-type:

@@ -72,13 +72,14 @@
     [else (error "c should be a string or number")]))
 
 ; adds enum constants to symbol table
+; TODO What about nested enums? Not used in Stellar
 (define (with-enum-consts sym-table)
   (let ([enum-consts
-         (flatten-one-level
+         (flatten-one-level ; could also convert to hash-map a take unions
           (hash-map sym-table
                     (λ (k v)
                       (match v
-                        [`(enum ,id-val* ...) id-val*]
+                        [(struct* enum-type ([values vs])) vs]
                         [_ null]))))])
     (hash-union sym-table (make-immutable-hash enum-consts))))
 
@@ -145,6 +146,9 @@
      (check-exn exn:fail?
                 (λ () (replace-else (parse-ast test-ast-literal-tag-value)))))))
 
+; TODO make definitions for constants (including enum values) and struct types
+
+; extract type from enum variant spec
 (define (variant-type v)
   (match v
     [`(,_ . ,t) t]
@@ -205,8 +209,9 @@
           [struct-name #'TODO]
           ; TODO we need the name of the struct! Doesn't really fit in the current architecture...
           ; We could create names for anonymous structs and add those names to the struct repr (in a previous pass).
-          ; That seems like the easiest short-term soluation.
+          ; That seems like the easiest short-term solution.
           ; But then we might want to do similar stuff for enums and unions.
+          ; TODO we need the right syntax context for the struct name.
           [b #`(#,struct-name #,@body*)])
        `(,b . ,all-deps))]))
 
