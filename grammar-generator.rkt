@@ -77,14 +77,16 @@
 ; adds enum constants to symbol table
 ; NOTE What about nested enums? Not used in Stellar
 (define (with-enum-consts sym-table)
-  (let ([enum-consts
-         (apply hash-union
-          (hash-map sym-table
-                    (λ (k v)
-                      (match v
-                        [(enum-type vs) vs]
-                        [_ '#hash()]))))])
-    (hash-union sym-table enum-consts)))
+  (if (hash-empty? sym-table)
+      sym-table
+      (let ([enum-consts
+             (apply hash-union
+                    (hash-map sym-table
+                              (λ (k v)
+                                (match v
+                                  [(enum-type vs) vs]
+                                  [_ '#hash()]))))])
+        (hash-union sym-table enum-consts))))
 
 (module+ test
   (provide with-enum-consts/test)
