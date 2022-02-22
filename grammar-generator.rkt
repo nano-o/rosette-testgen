@@ -175,7 +175,7 @@
   ))
 
 ; body-deps returns a rule body for the type t and a list of types whose rules the body depends on.
-(define (body-deps sym-table t)
+(define (body-deps sym-table stx-context t)
   ; NOTE Here we assume all 'else cases have been removed from unions
   ; NOTE We need the sym-table to look up the values of constants. TODO If we had defined symbols for them instead, then we wouldn't need that.
   (match t
@@ -192,7 +192,7 @@
     ; Fixed length array. Represented by a vector.
     ; TODO would it be better to create a rule for the element type if it's an inline type?
     [(fixed-length-array-type elem-type size)
-     (match-let* ([`(,elem-body . ,deps) (body-deps sym-table elem-type)]
+     (match-let* ([`(,elem-body . ,deps) (body-deps sym-table stx-context elem-type)]
                   [body #`(vector
                            #,@(for/list ([i (in-range size)]) elem-body))])
        (cons body deps))]
@@ -206,7 +206,7 @@
        (if (not (string? tag-type)) (error "we do not support inline tag types") (void))
        (let* ([vs-body-deps ; a dict mapping tag-identifier to '(body . deps)
                (dict-map variants ;'(tag-value accessor . type) where type is not void, or '(tag-value . void)
-                         (λ (k v) (cons k (body-deps sym-table (variant-type v)))))]
+                         (λ (k v) (cons k (body-deps sym-table stx-context (variant-type v)))))]
               [tag-type-dep 
                (if (member tag-type '("int" "unsigned int"))
                    '()
@@ -218,28 +218,24 @@
                           (dict->list vs-body-deps))]
               [body #`(choose #,@bodys)])
          `(,body . ,deps)))]
-    ; struct TODO
     ; Here we need to generate a Racket struct type too; we'll do that in another pass
-    [(struct* struct-type ([fields `((,_ . ,spec*) ...)]))
+    [(struct* struct-type ([fields `((,_ . ,spec*) ...)]
+                           [name name]))
      (match-let*
-         ([`((,body* . ,deps*) ...) (map ((curry body-deps) sym-table) spec*)]
+         ([`((,body* . ,deps*) ...) (map (((curry body-deps) sym-table) stx-context) spec*)]
           [all-deps (apply set-union deps*)]
-          [struct-name #'TODO]
-          ; TODO we need the name of the struct! Doesn't really fit in the current architecture...
-          ; We could create names for anonymous structs and add those names to the struct repr (in a previous pass).
-          ; That seems like the easiest short-term solution.
-          ; But then we might want to do similar stuff for enums and unions.
+          [struct-name (format-id #'() "~a" name)]
           ; TODO we need the right syntax context for the struct name.
           [b #`(#,struct-name #,@body*)])
        `(,b . ,all-deps))]))
 
 ; a few tests
 
-(body-deps '#hash() (fixed-length-array-type (opaque-fixed-length-array-type 32) 3))
-(body-deps  '#hash() (fixed-length-array-type "some-type" 3))
-(body-deps  '#hash() (enum-type #hash(("A" . 1) ("B" . 2))))
-(body-deps '#hash(("V1" . 1) ("V2" . 2) ("V3" . 3)) (union-type "tag" "my-other-type" #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")) ("V3" . "void"))))
-(body-deps  '#hash() (struct-type "my-struct" '(("A" . "my-type") ("B" . "my-int"))))
+(body-deps '#hash() #'() (fixed-length-array-type (opaque-fixed-length-array-type 32) 3))
+(body-deps  '#hash() #'() (fixed-length-array-type "some-type" 3))
+(body-deps  '#hash() #'() (enum-type #hash(("A" . 1) ("B" . 2))))
+(body-deps '#hash(("V1" . 1) ("V2" . 2) ("V3" . 3)) #'() (union-type "tag" "my-other-type" #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")) ("V3" . "void"))))
+(body-deps  '#hash() #'() (struct-type "my-struct" '(("A" . "my-type") ("B" . "my-int"))))
 
 (define (xdr-types->grammar sym-table type) null)
 
