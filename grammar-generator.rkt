@@ -4,12 +4,12 @@
   racket/match racket/syntax racket/generator racket/hash
   "xdr-compiler.rkt" ;"guile-ast-example.rkt"
   "util.rkt"
-  (for-template rosette rosette/lib/synthax))
+  #;(for-template rosette rosette/lib/synthax))
 (provide xdr-types->grammar)
 
 (module+ test
   (require rackunit)
-  (provide test-sym-table test-grammar))
+  (provide test-sym-table test-grammar test-sym-table-2))
 
 ; TODO generate a Rosette grammar for this:
 #; (hash-ref
@@ -49,7 +49,10 @@
                   (else "void"))))))
 
   (define test-sym-table
-    (parse-ast test-ast)))
+    (parse-ast test-ast))
+
+  (define test-sym-table-2
+    (parse-ast test-ast-literal-tag-value)))
 
 ; generate an identifier for a grammar rule:
 (define (rule-id str)
@@ -75,13 +78,13 @@
 ; TODO What about nested enums? Not used in Stellar
 (define (with-enum-consts sym-table)
   (let ([enum-consts
-         (flatten-one-level ; could also convert to hash-map a take unions
+         (apply hash-union
           (hash-map sym-table
                     (λ (k v)
                       (match v
                         [(struct* enum-type ([values vs])) vs]
-                        [_ null]))))])
-    (hash-union sym-table (make-immutable-hash enum-consts))))
+                        [_ '#hash()]))))])
+    (hash-union sym-table enum-consts)))
 
 (module+ test
   (provide with-enum-consts/test)
@@ -92,37 +95,48 @@
       (with-enum-consts test-sym-table)
       '#hash(("ANOTHER_PUBLIC_KEY_TYPE" . 2)
              ("FALSE" . 0)
+             ("FOUR" . 4)
              ("OTHER_PUBLIC_KEY_TYPE" . 1)
              ("PUBLIC_KEY_TYPE_ED25519" . 0)
-             ("PublicKey" . (union ("type" . "PublicKeyType")
-                                   (("PUBLIC_KEY_TYPE_ED25519" "ed25519" . "uint256")
-                                    ("OTHER_PUBLIC_KEY_TYPE" "array2" . "my-array")
-                                    ("ANOTHER_PUBLIC_KEY_TYPE" "myint" . "int")
-                                    (else . "void"))))
-             ("PublicKeyType" . (enum ("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1) ("ANOTHER_PUBLIC_KEY_TYPE" . 2) ("THREE" . 3) ("FOUR" . 4)))
-             ("TRUE" . 1)
+             ("PublicKey"
+              .
+              #s(union-type
+                 "type"
+                 "PublicKeyType"
+                 #hash(("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256"))
+                       ("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
+                       ("ANOTHER_PUBLIC_KEY_TYPE" . ("myint" . "int"))
+                       (else . "void"))))
+             ("PublicKeyType"
+              .
+              #s(enum-type
+                 #hash(("PUBLIC_KEY_TYPE_ED25519" . 0)
+                       ("OTHER_PUBLIC_KEY_TYPE" . 1)
+                       ("ANOTHER_PUBLIC_KEY_TYPE" . 2)
+                       ("THREE" . 3)
+                       ("FOUR" . 4))))
              ("THREE" . 3)
-             ("FOUR" . 4)
-             ("bool" . (enum ("TRUE" . 1) ("FALSE" . 0)))
-             ("my-array" . (fixed-length-array "uint256" . 2))
-             ("uint256" . (opaque-fixed-length-array . 32)))))))
+             ("TRUE" . 1)
+             ("bool" . #s(enum-type #hash(("TRUE" . 1) ("FALSE" . 0))))
+             ("my-array" . #s(fixed-length-array-type "uint256" 2))
+             ("uint256" . #s(opaque-fixed-length-array-type 32)))))))
 
 ; replace else variants in unions by enumerating all tag values covered by the else case.
 (define (replace-else sym-table)
   (define (replace-else-in t) ; t is a type representation
     (match t
-      [`(union (,tag . ,tag-type) ,variants) ; we assume tag-type is an enum type and all tag values are given by id (not literal values)
+      [(struct* union-type ([tag-name tag] [tag-type tag-type] [variants variants])) ; we assume tag-type is an enum type and all tag values are given by id (not literal values)
        (begin
          (dict-for-each variants (λ (k v) (if (number? k) (error "literal tag values not supported") (void))))
-         (let ([has-else? (ormap (λ (kv) (eq? 'else (car kv))) variants)])
+         (let ([has-else? (ormap (λ (kv) (eq? 'else (car kv))) (dict->list variants))])
            (if has-else?
-               (match-let ([`(enum (,id* . ,_) ...) (hash-ref sym-table tag-type)] ; all enum values (no 'else here)
-                           [`((,tag-id* . ,_) ...) variants]) ; tags appearing in the union (may contain 'else)
+               (match-let* ([(struct* enum-type ([values (hash-table (id* _) ...)])) (hash-ref sym-table tag-type)] ; all enum values (no 'else here)
+                            [(hash-table (tag-id* _) ...) variants]) ; tags appearing in the union (may contain 'else)
                  (let* ([missing-ids (set-subtract id* (set-subtract tag-id* '(else)))]
                         [else-decl (dict-ref variants 'else)]
                         [old-variants (dict-remove variants 'else)]; without else
-                        [new-variants (map (λ (m) `(,m . ,else-decl)) missing-ids)])
-                   `(union (,tag . ,tag-type) ,(append old-variants new-variants))))
+                        [new-variants (make-immutable-hash (map (λ (m) `(,m . ,else-decl)) missing-ids))])
+                   (union-type tag tag-type (hash-union old-variants new-variants))))
                t)))]
       [_ t]))
   (for/hash ([kv (hash->list sym-table)])
@@ -131,16 +145,20 @@
 (module+ test
   (provide replace-else/test)
   (define-test-suite replace-else/test
+    
     (test-case
      "replace-else"
      (check-equal?
       (hash-ref (replace-else test-sym-table) "PublicKey")
-      '(union ("type" . "PublicKeyType")
-             (("PUBLIC_KEY_TYPE_ED25519" "ed25519" . "uint256")
-              ("OTHER_PUBLIC_KEY_TYPE" "array2" . "my-array")
-              ("ANOTHER_PUBLIC_KEY_TYPE" "myint" . "int")
-              ("FOUR" . "void")
-              ("THREE" . "void")))))
+      '#s(union-type
+          "type"
+          "PublicKeyType"
+          #hash(("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256"))
+                ("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
+                ("ANOTHER_PUBLIC_KEY_TYPE" . ("myint" . "int"))
+                ("FOUR" . "void")
+                ("THREE" . "void")))))
+    
     (test-case
      "literal tag value"
      (check-exn exn:fail?

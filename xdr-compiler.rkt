@@ -139,7 +139,7 @@
                            (~var v* (case-spec namespace)) ...))
            #:fail-when (not (string? (attribute tag-decl.repr))) "inline type specification in union tag-type is not supported"; NOTE: in theory the tag type could be an inline type specification but we exclude this case for now
            #:fail-when (and (base-type? (attribute tag-decl.repr)) (member '(else) (map car (attribute v*.repr)))) "int or unsigned int as tag type not supported when there is an else variant"
-           #:attr repr (union-type (attribute tag-decl.symbol) (attribute tag-decl.repr) (ks-v->alist (attribute v*.repr)))])
+           #:attr repr (union-type (attribute tag-decl.symbol) (attribute tag-decl.repr) (make-immutable-hash (ks-v->alist (attribute v*.repr))))])
 ; struct
 (define-syntax-class (struct-spec namespace name)
   #:description "a struct-type specification"
@@ -149,7 +149,8 @@
 (define-syntax-class (enum-spec namespace)
   #:description "an enum-type specification"
   [pattern ((~datum enum) (ident*:identifier v*:number) ...) ; NOTE the only supported enum values are literal constants
-           #:attr repr (enum-type (zip (attribute ident*.repr) (map syntax-e (syntax->list #'(v* ...)))))])
+           #:attr repr (let ([assocs (zip (attribute ident*.repr) (map syntax-e (syntax->list #'(v* ...))))])
+                         (enum-type (make-immutable-hash assocs)))])
 ; arbitrary type declaration:
 (define-splicing-syntax-class (splicing-type-decl namespace)
   #:description "a spliced type declaration"
@@ -188,7 +189,7 @@
   [pattern ((~or* d*:type-def d*:const-def) ...)
            #:attr h (hash-union bool (make-immutable-hash (attribute d*.kv)))])
 (define bool ; bool is pre-defined
-  (hash "bool"  (enum-type '(("TRUE" . 1) ("FALSE" . 0)))))
+  (hash "bool"  (enum-type '#hash(("TRUE" . 1) ("FALSE" . 0)))))
 
 (define (parse-ast stx)
   (syntax-parse stx
@@ -207,9 +208,9 @@
           (define-type
             "my-array"
             (fixed-length-array "uint256" 2))))
-      '#hash(("bool" . #s(enum-type (("TRUE" . 1) ("FALSE" . 0))))
+      '#hash(("bool" . #s(enum-type #hash(("TRUE" . 1) ("FALSE" . 0))))
              ("my-array" . #s(fixed-length-array-type "uint256" 2))
-       ("uint256" . #s(opaque-fixed-length-array-type 32)))))
+             ("uint256" . #s(opaque-fixed-length-array-type 32)))))
 
     (test-case
      "XDR union"
@@ -236,16 +237,16 @@
               #s(union-type
                  "type"
                  "PublicKeyType"
-                 (("PUBLIC_KEY_TYPE_ED25519" "ed25519" . "uint256")
-                  ("SOMETHING" "ed25519" . "uint256")
-                  ("OTHER_PUBLIC_KEY_TYPE" "array2" . "my-array")
-                  ("TAG" . "void")
-                  (else "my-int" . "int"))))
+                 #hash(("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256"))
+                       ("SOMETHING" . ("ed25519" . "uint256"))
+                       ("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
+                       ("TAG" . "void")
+                       (else . ("my-int" . "int")))))
              ("PublicKeyType"
               .
               #s(enum-type
-                 (("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1))))
-             ("bool" . #s(enum-type (("TRUE" . 1) ("FALSE" . 0))))
+                 #hash(("PUBLIC_KEY_TYPE_ED25519" . 0) ("OTHER_PUBLIC_KEY_TYPE" . 1))))
+             ("bool" . #s(enum-type #hash(("TRUE" . 1) ("FALSE" . 0))))
              ("my-array" . #s(fixed-length-array-type "uint256" 2))
              ("uint256" . #s(opaque-fixed-length-array-type 32)))))
    
@@ -275,7 +276,7 @@
       (parse-ast
        #'((define-type
             "my-int" "int")))
-      '#hash(("bool" . #s(enum-type (("TRUE" . 1) ("FALSE" . 0)))) ("my-int" . "int"))))
+      '#hash(("bool" . #s(enum-type #hash(("TRUE" . 1) ("FALSE" . 0)))) ("my-int" . "int"))))
    
     (test-case
      "bool"
@@ -285,7 +286,7 @@
             "my-bool" "bool")
           (define-type
             "my-bool-again" "bool")))
-      '#hash(("bool" . #s(enum-type (("TRUE" . 1) ("FALSE" . 0)))) ("my-bool" . "bool") ("my-bool-again" . "bool"))))
+      '#hash(("bool" . #s(enum-type #hash(("TRUE" . 1) ("FALSE" . 0)))) ("my-bool" . "bool") ("my-bool-again" . "bool"))))
       
     (test-case
      "struct"
@@ -304,7 +305,7 @@
                  (("assetCode" . "AssetCode4")
                   ("issuer" . "AccountID")
                   ("array" . #s(opaque-fixed-length-array-type 32)))))
-             ("bool" . #s(enum-type (("TRUE" . 1) ("FALSE" . 0)))))))
+             ("bool" . #s(enum-type #hash(("TRUE" . 1) ("FALSE" . 0)))))))
            
     (test-case
      "Check that no exceptions are thrown"
