@@ -6,7 +6,7 @@
 ; Note that we do not handle the all possible guile-rpc ASTs, but only a super-set of those that appear in Stellar's XDR files.
 ; Notably, this does not support recursive XDR types.
 
-(provide parse-ast
+(provide parse-ast base-types base-type?
          ; TODO is there a better way to export those structs?
          (struct-out opaque-fixed-length-array-type)
          (struct-out opaque-variable-length-array-type)
