@@ -135,7 +135,7 @@
              ("uint256" . #s(opaque-fixed-length-array-type 32)))))))
 
 ; replace else variants in unions by enumerating all tag values covered by the else case.
-; TODO do it recursively. Would it be easier to flatten the type hierarchy once and for all in a previous pass?
+; TODO Would it be easier to flatten the type hierarchy once and for all in a previous pass?
 (define (replace-else sym-table)
   (define (replace-else-in t) ; t is a type representation
     (match t
@@ -161,7 +161,7 @@
                            `(,(car f) . ,(replace-else-in cdr f)))])
        (struct-type name new-fields))]
       ; TODO non-opaque arrays
-      [_ (begin (println t) t)]))
+      [_ t]))
   (for/hash ([kv (hash->list sym-table)])
     (values (car kv) (replace-else-in (cdr kv)))))
 
@@ -210,68 +210,102 @@
     [_ (error "v should be a pair or \"void\"")]
   ))
 
-; body-deps returns a rule body for the type t and a list of types whose rules the body depends on.
-(define (body-deps sym-table stx-context t)
+; rule-body returns a rule body for the type t
+(define (rule-body sym-table stx-context t)
   ; NOTE Here we assume all 'else cases have been removed from unions
   ; NOTE We need the sym-table to look up the values of constants. TODO If we had defined symbols for them instead, then we wouldn't need that.
   (match t
-    ["void" (list #'null)]
-    ["int" (list #'(?? (bitvector 32)))]
-    ["unsigned-int" (list #'(?? (bitvector 32)))]
-    ["hyper" (list #'(?? (bitvector 64)))]
-    ["unsigned-hyper" (list #'(?? (bitvector 64)))]
+    ["void" #'null]
+    ["int" #'(?? (bitvector 32))]
+    ["unsigned-int" #'(?? (bitvector 32))]
+    ["hyper" #'(?? (bitvector 64))]
+    ["unsigned-hyper" #'(?? (bitvector 64))]
     [s #:when (string? s)
-       (cons (rule-hole s) (list s))]
+       (rule-hole s)]
     ; Opaque fixed-length array. Represented by a bitvector.
     [(opaque-fixed-length-array-type nbytes)
-     (list #`(?? (bitvector #,(* nbytes 8))))]
+     #`(?? (bitvector #,(* nbytes 8)))]
     ; Fixed length array. Represented by a vector.
     ; TODO would it be better to create a rule for the element type if it's an inline type?
     [(fixed-length-array-type elem-type size)
-     (match-let* ([`(,elem-body . ,deps) (body-deps sym-table stx-context elem-type)]
-                  [body #`(vector
-                           #,@(for/list ([i (in-range size)]) elem-body))])
-       (cons body deps))]
+     (let* ([elem-body (rule-body sym-table stx-context elem-type)]
+            [body #`(vector
+                     #,@(for/list ([i (in-range size)]) elem-body))])
+       body)]
     [(struct* enum-type ([values (hash-table (_ v*) ...)]))
      (let* ([bvs (map (λ (w) #`(bv #,w (bitvector 32))) v*)])
-       (list #`(choose #,@bvs)))]
+       #`(choose #,@bvs))]
     [(union-type tag tag-type variants)
      ; Variants can in principle refer to enum constants defined inline in the tag type, but we don't support inline tag types.
      ; The type of a variant can however be an inline type specification.
      (begin
        (if (not (string? tag-type)) (error "we do not support inline tag types") (void))
-       (let* ([vs-body-deps ; a dict mapping tag-identifier to '(body . deps)
+       (let* ([bodys ; a dict mapping tag-identifier to body
                (dict-map variants ;'(tag-value accessor . type) where type is not void, or '(tag-value . void)
-                         (λ (k v) (cons k (body-deps sym-table stx-context (variant-type v)))))]
-              [tag-type-dep 
-               (if (member tag-type '("int" "unsigned int"))
-                   '()
-                   (list tag-type))]
-              [recursive-deps (apply set-union (dict-map vs-body-deps (λ (k v) (cdr v))))]
-              [deps (set-union tag-type-dep recursive-deps)]
-              [bodys (map (match-lambda [`(,k ,b . ,d)
-                                         #`(cons (bv #,(hash-ref sym-table k) (bitvector 32)) #,b)])
-                          (dict->list vs-body-deps))]
+                         (λ (k v) (cons k (rule-body sym-table stx-context (variant-type v)))))]
+              [bodys
+               (dict-map bodys
+                         (λ (k b)
+                           #`(cons (bv #,(hash-ref sym-table k) (bitvector 32)) #,b)))]
               [body #`(choose #,@bodys)])
-         `(,body . ,deps)))]
+         body))]
     ; Here we need to generate a Racket struct type too; we'll do that in another pass
     [(struct* struct-type ([fields `((,_ . ,spec*) ...)]
                            [name name]))
      (match-let*
-         ([`((,body* . ,deps*) ...) (map (((curry body-deps) sym-table) stx-context) spec*)]
-          [all-deps (apply set-union deps*)]
+         ([`(,body* ...) (map (((curry rule-body) sym-table) stx-context) spec*)]
           [struct-name (format-id stx-context "~a" name)]
           [b #`(#,struct-name #,@body*)])
-       `(,b . ,all-deps))]))
+       b)]
+    [_ (error "unhandled type; this is a bug")]))
 
 ; a few tests
 ; TODO to write unit tests we need a way to compare grammars...
 ; See equal?/recur or something like that.
-(body-deps '#hash() #'() (fixed-length-array-type (opaque-fixed-length-array-type 32) 3))
-(body-deps  '#hash() #'() (fixed-length-array-type "some-type" 3))
-(body-deps  '#hash() #'() (enum-type #hash(("A" . 1) ("B" . 2))))
-(body-deps '#hash(("V1" . 1) ("V2" . 2) ("V3" . 3)) #'() (union-type "tag" "my-other-type" #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")) ("V3" . "void"))))
-(body-deps  '#hash() #'() (struct-type "my-struct" '(("A" . "my-type") ("B" . "my-int"))))
+(rule-body '#hash() #'() (fixed-length-array-type (opaque-fixed-length-array-type 32) 3))
+(rule-body  '#hash() #'() (fixed-length-array-type "some-type" 3))
+(rule-body  '#hash() #'() (enum-type #hash(("A" . 1) ("B" . 2))))
+(rule-body '#hash(("V1" . 1) ("V2" . 2) ("V3" . 3)) #'() (union-type "tag" "my-other-type" #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")) ("V3" . "void"))))
+(rule-body  '#hash() #'() (struct-type "my-struct" '(("A" . "my-type") ("B" . "my-int"))))
+
+; deps returns the dependencies used in the rule body for type t
+(define (deps t)
+  ; NOTE Here we assume all 'else cases have been removed from unions
+  ; NOTE We need the sym-table to look up the values of constants. TODO If we had defined symbols for them instead, then we wouldn't need that.
+  (match t
+    ["void" null]
+    ["int" null]
+    ["unsigned-int" null]
+    ["hyper" null]
+    ["unsigned-hyper" null]
+    [s #:when (string? s)
+       (list s)]
+    ; Opaque fixed-length array. Represented by a bitvector.
+    [(opaque-fixed-length-array-type nbytes) null]
+    ; Fixed length array. Represented by a vector.
+    [(fixed-length-array-type elem-type size) (deps elem-type)]
+    [(enum-type values) null]
+    [(fixed-length-array-type type length) (deps type)]
+    [(variable-length-array-type type max-length) (deps type)]
+    [(union-type tag tag-type variants)
+     ; Variants can in principle refer to enum constants defined inline in the tag type, but we don't support inline tag types.
+     ; The type of a variant can however be an inline type specification.
+     (begin
+       (if (not (string? tag-type)) (error "we do not support inline tag types") (void))
+       (let* ([rec-deps
+               (apply set-union
+                      (dict-map variants
+                                (λ (k v) (deps (variant-type v)))))]
+              [tag-type-dep
+               (if (member tag-type '("int" "unsigned int"))
+                   '()
+                   (list tag-type))]
+              [all-deps (set-union tag-type-dep rec-deps)])
+         all-deps))]
+    [(struct* struct-type ([fields `((,_ . ,spec*) ...)]))
+       (let ([all-deps (apply set-union (map deps spec*))])
+         all-deps)]
+    [_ null]))
 
 #;(define (xdr-types->grammar sym-table stx-context type)
   (let ([sym-table-2 (replace-else (with-enum-consts sym-table))])
