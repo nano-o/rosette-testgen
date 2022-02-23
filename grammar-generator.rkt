@@ -4,8 +4,8 @@
   racket/match racket/syntax racket/generator racket/hash
   "xdr-compiler.rkt" ;"guile-ast-example.rkt"
   "util.rkt"
-  #;(for-template rosette rosette/lib/synthax))
-;(provide xdr-types->grammar)
+  #;(for-template rosette rosette/lib/synthax)) ; struct-type? clashes
+(provide xdr-types->grammar)
 
 (module+ test
   (require rackunit)
@@ -309,7 +309,7 @@
       (hash-ref sym-table t)))
 
 (define (xdr-types->grammar sym-table stx-context type)
-  (let* ([sym-table-2 (replace-else (with-enum-consts sym-table))]
+  (let* ([sym-table (replace-else (with-enum-consts sym-table))]
         [type-deps
          (let deps/rec ([t type])
            (let* ([t-deps (filter (λ (t) (not (base-type? t))) (deps t))]
@@ -319,14 +319,19 @@
         [bodys (cons (rule "head" type) (set-map type-deps (λ (t) (rule t (type-rep sym-table t)))))])
     #`(define-grammar (#,(format-id stx-context "~a" "the-grammar")) #,@bodys)))
 
-(xdr-types->grammar '#hash() #'() (fixed-length-array-type (opaque-fixed-length-array-type 32) 3))
-(xdr-types->grammar  '#hash(("some-type" . "int")) #'() (fixed-length-array-type "some-type" 3))
-(xdr-types->grammar  '#hash() #'() (enum-type #hash(("A" . 1) ("B" . 2))))
+;(xdr-types->grammar '#hash() #'() (fixed-length-array-type (opaque-fixed-length-array-type 32) 3))
+;(xdr-types->grammar  '#hash(("some-type" . "int")) #'() (fixed-length-array-type "some-type" 3))
+;(xdr-types->grammar  '#hash() #'() (enum-type #hash(("A" . 1) ("B" . 2))))
 ;(xdr-types->grammar '#hash(("V1" . 1) ("V2" . 2) ("V3" . 3)) #'() (union-type "tag" "my-other-type" #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")) ("V3" . "void"))))
 ;(xdr-types->grammar  '#hash() #'() (struct-type "my-struct" '(("A" . "my-type") ("B" . "my-int"))))
 
-#;(module+ test
-  (define (test-grammar)
-    (xdr-types->grammar test-sym-table "PublicKey")))
+(module+ test
+  (provide xdr-types->grammar/test)
+  (define-test-suite xdr-types->grammar/test
+    (test-case
+     "xdr-types->grammar does not throw exceptions"
+     (check-not-exn
+      (λ ()
+        (xdr-types->grammar test-sym-table #'() "PublicKey"))))))
 
 ;(test-grammar)

@@ -1,6 +1,6 @@
 #lang racket
 
-(require rackunit  racket/hash)
+(require rackunit racket/hash)
 (provide flatten-one-level hash-merge)
 
 (define (flatten-one-level ll)

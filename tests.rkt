@@ -22,12 +22,14 @@
 (define (run-all m)
   (for ([test (get-test-exports m)])
     (if (regexp-match (regexp ".*/test$") (symbol->string test))
-        (run-tests (eval test ns))
+        (begin
+          (println (format "running test: ~a" (symbol->string test)))
+          (run-tests (eval test ns)))
         (void))))
 
 ; run all tests
-(run-all "xdr-compiler.rkt")
-(run-all "generators.rkt")
+;(run-all "xdr-compiler.rkt")
+;(run-all "generators.rkt")
 (run-all "grammar-generator.rkt")
-(run-all "util.rkt")
-(run-all "guile-ast-example.rkt")
+;(run-all "util.rkt")
+;(run-all "guile-ast-example.rkt")
