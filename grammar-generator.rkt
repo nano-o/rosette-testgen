@@ -238,10 +238,15 @@
     ; Opaque fixed-length array. Represented by a bitvector.
     [(opaque-fixed-length-array-type nbytes)
      #`(?? (bitvector #,(* nbytes 8)))]
-    [(opaque-variable-length-array-type nbytes) ; TODO
-     #`(?? (bitvector #,(* nbytes 8)))]
+    [(opaque-variable-length-array-type max-length) ; a pair (length . data) where data is a bitvector
+     ; TODO we will need a constraint saying that the first 4 bytes is the length...
+     #`(cons #,max-length (?? (bitvector #,(* max-length 8))))]
     [(string-type nbytes)
-     #`(?? (bitvector #,(* nbytes 8)))] ; TODO 4 bytes for the length, then data
+     ; a pair (length . data) where data is a bitvector
+     ; TODO should it be a sequence of bytes?
+     ; TODO we will need a constraint saying that the first 4 bytes is the length...
+     ; For now the length will be 2
+     #`(cons (bv 2 32) (?? (bitvector 64)))]
     ; Fixed length array. Represented by a vector.
     ; TODO would it be better to create a rule for the element type if it's an inline type?
     [(fixed-length-array-type elem-type size)
@@ -249,10 +254,11 @@
             [body #`(vector
                      #,@(for/list ([i (in-range (get-const-value sym-table size))]) elem-body))])
        body)]
-    [(variable-length-array-type elem-type max-size) ; TODO: here we need a length followed by the elements
+    [(variable-length-array-type elem-type max-size) ; a pair (length . data) where data is a vector
+     ; TODO we will need a constraint saying that the first 4 bytes is the length...
+     ; In the meantime, let's just have 1 element
      (let* ([elem-body (rule-body sym-table stx-context elem-type)]
-            [body #`(vector
-                     #,@(for/list ([i (in-range (get-const-value sym-table max-size))]) elem-body))])
+            [body #`(cons 1 (vector elem-body))])
        body)]
     [(struct* enum-type ([values (hash-table (_ v*) ...)]))
      (let* ([bvs (map (λ (w) #`(bv #,w (bitvector 32))) v*)])
