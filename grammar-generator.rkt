@@ -2,19 +2,15 @@
 
 (require
   racket/match racket/syntax racket/generator racket/hash
-  "xdr-compiler.rkt" ;"guile-ast-example.rkt"
+  "xdr-compiler.rkt" "guile-ast-example.rkt"
   "util.rkt"
-  #;(for-template rosette rosette/lib/synthax)) ; struct-type? clashes
+  #;(for-template rosette rosette/lib/synthax)) ; struct-type? clashes. Must be renamed.
 (provide xdr-types->grammar)
 
 (module+ test
   (require rackunit)
   (provide test-sym-table test-sym-table-2))
 
-; TODO generate a Rosette grammar for this:
-#; (hash-ref
- (stellar-symbol-table)
- "TransactionEnvelope")
 
 (module+ test
   ; a simpler example:
@@ -138,10 +134,11 @@
 ; TODO Would it be easier to flatten the type hierarchy once and for all in a previous pass?
 (define (replace-else sym-table)
   (define (replace-else-in t) ; t is a type representation
-    (match t
+    (match t ; NOTE inline type spec in tag-type not supported
       [(union-type tag tag-type variants) ; we assume tag-type is an enum type and all tag values are given by id (not literal values)
+       #:when (not (base-type? tag-type))
        (begin
-         (dict-for-each variants (λ (k v) (if (number? k) (error "literal tag values not supported") (void))))
+         (dict-for-each variants (λ (k v) (if (number? k) (error (format "literal tag values not supported in union-variant \"~a ~a\"" k v)) (void))))
          (let ([has-else? (ormap (λ (kv) (eq? 'else (car kv))) (dict->list variants))])
            (if has-else?
                (match-let* ([(struct* enum-type ([values (hash-table (id* _) ...)])) (hash-ref sym-table tag-type)] ; all enum values (no 'else here)
@@ -151,14 +148,27 @@
                         [old-variants (make-immutable-hash
                                        (dict-map (dict-remove variants 'else)
                                                  (λ (k v)
-                                                   (match-let ([`(,acc . ,tp) v])
-                                                     `(,k ,acc . ,(replace-else-in tp))))))]; without else
+                                                   (match v
+                                                     [`(,acc . ,tp) `(,k ,acc . ,(replace-else-in tp))]
+                                                     ["void" `(,k . "void")]))))]
                         [new-variants (make-immutable-hash (map (λ (m) `(,m . ,else-decl)) missing-ids))])
                    (union-type tag tag-type (hash-union old-variants new-variants))))
                t)))]
-      [(struct-type name fields)
-       (let ([new-fields (for/list ([f fields])
-                           `(,(car f) . ,(replace-else-in cdr f)))])
+      [(union-type tag tag-type variants) ; this whole case is just to recurse in variants...
+       #:when (base-type? tag-type)
+       (let ([new-variants
+              (make-immutable-hash
+               (dict-map
+                variants
+                (λ (k v)
+                  (match v
+                    [`(,acc . ,tp) `(,k ,acc . ,(replace-else-in tp))]
+                    ["void" `(,k . "void")]))))])
+         (union-type tag tag-type variants))]
+[(struct-type name fields)
+       (let ([new-fields (for/list ([f fields]) ; TODO: can a struct member be void?
+                           (match-let ([`(,acc . ,tp) f])
+                             `(,acc . ,(replace-else-in tp))))])
        (struct-type name new-fields))]
       ; TODO non-opaque arrays
       [_ t]))
@@ -210,6 +220,9 @@
     [_ (error "v should be a pair or \"void\"")]
   ))
 
+(define (get-const-value sym-table k)
+  (if (number? k) k (hash-ref sym-table k)))
+
 ; rule-body returns a rule body for the type t
 (define (rule-body sym-table stx-context t)
   ; NOTE Here we assume all 'else cases have been removed from unions
@@ -225,12 +238,21 @@
     ; Opaque fixed-length array. Represented by a bitvector.
     [(opaque-fixed-length-array-type nbytes)
      #`(?? (bitvector #,(* nbytes 8)))]
+    [(opaque-variable-length-array-type nbytes) ; TODO
+     #`(?? (bitvector #,(* nbytes 8)))]
+    [(string-type nbytes)
+     #`(?? (bitvector #,(* nbytes 8)))] ; TODO 4 bytes for the length, then data
     ; Fixed length array. Represented by a vector.
     ; TODO would it be better to create a rule for the element type if it's an inline type?
     [(fixed-length-array-type elem-type size)
      (let* ([elem-body (rule-body sym-table stx-context elem-type)]
             [body #`(vector
-                     #,@(for/list ([i (in-range size)]) elem-body))])
+                     #,@(for/list ([i (in-range (get-const-value sym-table size))]) elem-body))])
+       body)]
+    [(variable-length-array-type elem-type max-size) ; TODO: here we need a length followed by the elements
+     (let* ([elem-body (rule-body sym-table stx-context elem-type)]
+            [body #`(vector
+                     #,@(for/list ([i (in-range (get-const-value sym-table max-size))]) elem-body))])
        body)]
     [(struct* enum-type ([values (hash-table (_ v*) ...)]))
      (let* ([bvs (map (λ (w) #`(bv #,w (bitvector 32))) v*)])
@@ -246,32 +268,36 @@
               [bodys
                (dict-map bodys
                          (λ (k b)
-                           #`(cons (bv #,(hash-ref sym-table k) (bitvector 32)) #,b)))]
+                           (let ([tag-val (get-const-value sym-table k)])
+                             #`(cons (bv #,tag-val (bitvector 32)) #,b))))]
               [body #`(choose #,@bodys)])
          body))]
     ; Here we need to generate a Racket struct type too; we'll do that in another pass
     [(struct* struct-type ([fields `((,_ . ,spec*) ...)]
                            [name name]))
      (match-let*
-         ([`(,body* ...) (map (((curry rule-body) sym-table) stx-context) spec*)]
+         ([_ (if (equal? name "FeeBumpTransaction") (void) (void))]
+          [`(,body* ...) (map (((curry rule-body) sym-table) stx-context) spec*)]
           [struct-name (format-id stx-context "~a" name)]
           [b #`(#,struct-name #,@body*)])
        b)]
-    [_ (error "unhandled type; this is a bug")]))
+    [else (error (format "unhandled type: ~a; this is a bug" else))]))
 
 ; a few tests
 ; TODO to write unit tests we need a way to compare grammars...
 ; See equal?/recur or something like that.
+#|
 (rule-body '#hash() #'() (fixed-length-array-type (opaque-fixed-length-array-type 32) 3))
 (rule-body  '#hash() #'() (fixed-length-array-type "some-type" 3))
 (rule-body  '#hash() #'() (enum-type #hash(("A" . 1) ("B" . 2))))
 (rule-body '#hash(("V1" . 1) ("V2" . 2) ("V3" . 3)) #'() (union-type "tag" "my-other-type" #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")) ("V3" . "void"))))
 (rule-body  '#hash() #'() (struct-type "my-struct" '(("A" . "my-type") ("B" . "my-int"))))
-
+|#
 ; deps returns the dependencies used in the rule body for type t
 (define (deps t)
   ; NOTE Here we assume all 'else cases have been removed from unions
   ; NOTE We need the sym-table to look up the values of constants. TODO If we had defined symbols for them instead, then we wouldn't need that.
+  (let ([res
   (match t
     ["void" null]
     [s #:when (string? s)
@@ -299,9 +325,9 @@
               [all-deps (set-union tag-type-dep rec-deps)])
          all-deps))]
     [(struct* struct-type ([fields `((,_ . ,spec*) ...)]))
-       (let ([all-deps (apply set-union (map deps spec*))])
-         all-deps)]
-    [_ null]))
+     (let ([all-deps (apply set-union (map deps spec*))])
+       all-deps)]
+    [_ null])]) res))
 
 (define (type-rep sym-table t)
   (if (base-type? t)
@@ -310,13 +336,17 @@
 
 (define (xdr-types->grammar sym-table stx-context type)
   (let* ([sym-table (replace-else (with-enum-consts sym-table))]
-        [type-deps
-         (let deps/rec ([t type])
-           (let* ([t-deps (filter (λ (t) (not (base-type? t))) (deps t))]
-                  [deps-deps (map (λ (t) (deps/rec (hash-ref sym-table t))) t-deps)])
-             (apply set-union (set-add deps-deps t-deps))))]
-        [rule (λ (name t) #`(#,(rule-id name) #,(rule-body sym-table stx-context t)))]
-        [bodys (cons (rule "head" type) (set-map type-deps (λ (t) (rule t (type-rep sym-table t)))))])
+         [type-deps
+          (let deps/rec ([t (hash-ref sym-table type)])
+            (let* ([t-deps (filter (λ (t) (not (base-type? t))) (deps t))]
+                   [deps-deps
+                    (map (λ (u)
+                           (if (equal? (hash-ref sym-table u) t)
+                               null
+                               (deps/rec (hash-ref sym-table u)))) t-deps)])
+              (apply set-union (set-add deps-deps t-deps))))]
+         [rule (λ (name t) #`(#,(rule-id name) #,(rule-body sym-table stx-context t)))]
+         [bodys (cons (rule "head" type) (set-map type-deps (λ (t) (rule t (type-rep sym-table t)))))])
     #`(define-grammar (#,(format-id stx-context "~a" "the-grammar")) #,@bodys)))
 
 ;(xdr-types->grammar '#hash() #'() (fixed-length-array-type (opaque-fixed-length-array-type 32) 3))
@@ -333,5 +363,11 @@
      (check-not-exn
       (λ ()
         (xdr-types->grammar test-sym-table #'() "PublicKey"))))))
+
+; TODO generate a Rosette grammar for this:
+#;(xdr-types->grammar
+ (stellar-symbol-table)
+ #'()
+ "TransactionEnvelope")
 
 ;(test-grammar)

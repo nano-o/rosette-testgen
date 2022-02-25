@@ -115,7 +115,7 @@
   [pattern (~or* a:opaque-fixed-length-array a:opaque-variable-length-array a:fixed-length-array a:variable-length-array)
            #:attr repr (attribute a.repr)])
 ; string
-(define-syntax-class xdr-string
+(define-syntax-class xdr-string ; TODO nbytes could be absent
   [pattern ((~datum string) (~var nbytes constant))
            #:attr repr (string-type (syntax-e #'nbytes))])
 ; one variant of a union:
