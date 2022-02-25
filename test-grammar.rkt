@@ -11,10 +11,19 @@
   (syntax-parse stx
     [(_ xdr-defs) 
      (let* ([sym-table (parse-ast #'xdr-defs)]
+            [const-defs (define-consts stx sym-table)]
             [grammar (xdr-types->grammar sym-table stx "PublicKey")])
        grammar)]))
 
-(define-the-grammar
+(define-syntax (define-consts stx)
+  (syntax-parse stx
+    [(_ xdr-defs) 
+     (let* ([sym-table (parse-ast #'xdr-defs)]
+            [_ (println sym-table)]
+            [const-defs (define-consts stx sym-table)])
+       const-defs)]))
+
+#;(define-the-grammar
   ((define-type
      "uint256"
      (fixed-length-array "opaque" 32))
@@ -31,12 +40,30 @@
               (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array"))
               (("ANOTHER_PUBLIC_KEY_TYPE") ("my-int" "int")))))))
 
-(define sol
+(define-consts
+  ((define-constant "A" 42)
+   (define-type
+     "uint256"
+     (fixed-length-array "opaque" 32))
+   (define-type
+     "my-array"
+     (fixed-length-array "uint256" 2))
+   (define-type
+     "PublicKeyType"
+     (enum ("PUBLIC_KEY_TYPE_ED25519" 0) ("OTHER_PUBLIC_KEY_TYPE" 1) ("ANOTHER_PUBLIC_KEY_TYPE" 2)))
+   (define-type
+     "PublicKey"
+     (union (case ("type" "PublicKeyType")
+              (("PUBLIC_KEY_TYPE_ED25519") ("ed25519" "uint256"))
+              (("OTHER_PUBLIC_KEY_TYPE") ("array2" "my-array"))
+              (("ANOTHER_PUBLIC_KEY_TYPE") ("my-int" "int")))))))
+
+#;(define sol
   (synthesize
    #:forall '()
    #:guarantee (assert (equal? (the-grammar #:depth 3) (cons (bv 0 32) (bv 1 256))))))
 
-(generate-forms sol)
+#;(generate-forms sol)
 
 (define-for-syntax test-ast
   #'((define-type

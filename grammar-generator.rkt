@@ -1,13 +1,11 @@
 #lang racket
 
-; TODO is xdr-types->grammar was a real macro we might get useful source location errors
-
 (require
   racket/match racket/syntax racket/generator racket/hash
   "xdr-compiler.rkt" "guile-ast-example.rkt"
   "util.rkt"
   (for-template rosette rosette/lib/synthax))
-(provide xdr-types->grammar)
+(provide xdr-types->grammar const-definitions)
 
 (module+ test
   (require rackunit)
@@ -74,7 +72,8 @@
 
 ; adds enum constants to symbol table
 ; NOTE What about nested enums? Not used in Stellar
-(define (with-enum-consts sym-table)
+; TODO this is not needed if defining enum consts
+#;(define (with-enum-consts sym-table)
   (if (hash-empty? sym-table)
       sym-table
       (let ([enum-consts
@@ -86,7 +85,28 @@
                                   [_ '#hash()]))))])
         (hash-union sym-table enum-consts))))
 
-(module+ test
+; returns a list of definitions (as syntax objects)
+(define (const-definitions stx sym-table)
+  (if (hash-empty? sym-table)
+      #'(void)
+      (let* ([enum-consts
+              (apply hash-union
+                     (hash-map sym-table
+                               (λ (k v)
+                                 (match v
+                                   [(enum-type vs) vs]
+                                   [_ '#hash()]))))] ; TODO use for/hash
+             [top-level-consts
+              (for/hash ([(k v) (in-hash sym-table)] #:when (number? v)) (values k v))]
+             [all-consts (hash-union enum-consts top-level-consts)]
+             [defs (hash-map all-consts
+                             (λ (k v)
+                               (begin
+                                 (if (not (number? v)) (error "only literal numbers are supported in enums") (void))
+                                 #`(define #,(format-id stx k) #,v))))])
+        defs)))
+
+#;(module+ test
   (provide with-enum-consts/test)
   (define-test-suite with-enum-consts/test
     (test-case
@@ -166,11 +186,11 @@
                     [`(,acc . ,tp) `(,k ,acc . ,(replace-else-in tp))]
                     ["void" `(,k . "void")]))))])
          (union-type tag tag-type variants))]
-[(xdr-struct-type name fields)
+      [(xdr-struct-type name fields)
        (let ([new-fields (for/list ([f fields]) ; TODO: can a struct member be void?
                            (match-let ([`(,acc . ,tp) f])
                              `(,acc . ,(replace-else-in tp))))])
-       (xdr-struct-type name new-fields))]
+         (xdr-struct-type name new-fields))]
       ; TODO non-opaque arrays
       [_ t]))
   (for/hash ([kv (hash->list sym-table)])
@@ -211,7 +231,7 @@
      (check-exn exn:fail?
                 (λ () (replace-else (parse-ast test-ast-literal-tag-value)))))))
 
-; TODO make definitions for constants (including enum values) and struct types
+; TODO make definitions struct types
 
 ; extract type from enum variant spec
 (define (variant-type v)
@@ -221,20 +241,19 @@
     [_ (error "v should be a pair or \"void\"")]
   ))
 
-(define (get-const-value sym-table k)
-  (if (number? k) k (hash-ref sym-table k)))
+(define (get-const-value stx k) ; TODO use defined consts
+  (if (number? k) k (format-id stx "~a" k)))
 
 ; rule-body returns a rule body for the type t
-(define (rule-body sym-table stx-context t)
+(define (rule-body stx-context t)
   ; NOTE Here we assume all 'else cases have been removed from unions
-  ; NOTE We need the sym-table to look up the values of constants. TODO If we had defined symbols for them instead, then we wouldn't need that.
   (match t
     ["void" #'null]
     ["int" #'(?? (bitvector 32))]
     ["unsigned-int" #'(?? (bitvector 32))]
     ["hyper" #'(?? (bitvector 64))]
     ["unsigned-hyper" #'(?? (bitvector 64))]
-    [s #:when (string? s)
+    [s #:when (string? s) ; A type symbol: call its rule
        (rule-hole s)]
     ; Opaque fixed-length array. Represented by a bitvector.
     [(opaque-fixed-length-array-type nbytes)
@@ -251,14 +270,14 @@
     ; Fixed length array. Represented by a vector.
     ; TODO would it be better to create a rule for the element type if it's an inline type?
     [(fixed-length-array-type elem-type size)
-     (let* ([elem-body (rule-body sym-table stx-context elem-type)]
+     (let* ([elem-body (rule-body  stx-context elem-type)]
             [body #`(vector
-                     #,@(for/list ([i (in-range (get-const-value sym-table size))]) elem-body))])
+                     #,@(for/list ([i (in-range (get-const-value stx-context size))]) elem-body))])
        body)]
     [(variable-length-array-type elem-type max-size) ; a pair (length . data) where data is a vector
      ; TODO we will need a constraint saying that the first 4 bytes is the length...
      ; In the meantime, let's just have 1 element
-     (let* ([elem-body (rule-body sym-table stx-context elem-type)]
+     (let* ([elem-body (rule-body  stx-context elem-type)]
             [body #`(cons 1 (vector elem-body))])
        body)]
     [(struct* enum-type ([values (hash-table (_ v*) ...)]))
@@ -271,20 +290,20 @@
        (if (not (string? tag-type)) (error "we do not support inline tag types") (void))
        (let* ([bodys ; a dict mapping tag-identifier to body
                (dict-map variants ;'(tag-value accessor . type) where type is not void, or '(tag-value . void)
-                         (λ (k v) (cons k (rule-body sym-table stx-context (variant-type v)))))]
+                         (λ (k v) (cons k (rule-body  stx-context (variant-type v)))))]
               [bodys
                (dict-map bodys
                          (λ (k b)
-                           (let ([tag-val (get-const-value sym-table k)])
+                           (let ([tag-val (get-const-value stx-context k)])
                              #`(cons (bv #,tag-val (bitvector 32)) #,b))))]
               [body #`(choose #,@bodys)])
          body))]
     ; Here we need to generate a Racket struct type too; we'll do that in another pass
-    [(struct* xdr-struct-type ([fields `((,_ . ,spec*) ...)]
-                           [name name]))
+    [(struct* xdr-struct-type
+              ([fields `((,_ . ,spec*) ...)]
+               [name name]))
      (match-let*
-         ([_ (if (equal? name "FeeBumpTransaction") (void) (void))]
-          [`(,body* ...) (map (((curry rule-body) sym-table) stx-context) spec*)]
+         ([`(,body* ...) (map ((curry rule-body) stx-context) spec*)]
           [struct-name (format-id stx-context "~a" name)]
           [b #`(#,struct-name #,@body*)])
        b)]
@@ -342,7 +361,7 @@
       (hash-ref sym-table t)))
 
 (define (xdr-types->grammar sym-table stx-context type)
-  (let* ([sym-table (replace-else (with-enum-consts sym-table))]
+  (let* ([sym-table (replace-else sym-table)]
          [type-deps
           (let deps/rec ([t (hash-ref sym-table type)])
             (let* ([t-deps (filter (λ (t) (not (base-type? t))) (deps t))]
@@ -352,7 +371,7 @@
                                null ; don't recurse if we have a recursive type
                                (deps/rec (hash-ref sym-table u)))) t-deps)])
               (apply set-union (set-add deps-deps t-deps))))]
-         [rule (λ (name t) #`(#,(rule-id name) #,(rule-body sym-table stx-context t)))]
+         [rule (λ (name t) #`(#,(rule-id name) #,(rule-body stx-context t)))]
          [bodys (cons (rule type (type-rep sym-table type)) (set-map type-deps (λ (t) (rule t (type-rep sym-table t)))))])
     #`(define-grammar (#,(format-id stx-context "~a" "the-grammar")) #,@bodys)))
 
