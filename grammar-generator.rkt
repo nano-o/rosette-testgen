@@ -1,16 +1,17 @@
 #lang racket
 
+; TODO is xdr-types->grammar was a real macro we might get useful source location errors
+
 (require
   racket/match racket/syntax racket/generator racket/hash
   "xdr-compiler.rkt" "guile-ast-example.rkt"
   "util.rkt"
-  #;(for-template rosette rosette/lib/synthax)) ; struct-type? clashes. Must be renamed.
+  (for-template rosette rosette/lib/synthax))
 (provide xdr-types->grammar)
 
 (module+ test
   (require rackunit)
   (provide test-sym-table test-sym-table-2))
-
 
 (module+ test
   ; a simpler example:
@@ -165,11 +166,11 @@
                     [`(,acc . ,tp) `(,k ,acc . ,(replace-else-in tp))]
                     ["void" `(,k . "void")]))))])
          (union-type tag tag-type variants))]
-[(struct-type name fields)
+[(xdr-struct-type name fields)
        (let ([new-fields (for/list ([f fields]) ; TODO: can a struct member be void?
                            (match-let ([`(,acc . ,tp) f])
                              `(,acc . ,(replace-else-in tp))))])
-       (struct-type name new-fields))]
+       (xdr-struct-type name new-fields))]
       ; TODO non-opaque arrays
       [_ t]))
   (for/hash ([kv (hash->list sym-table)])
@@ -279,7 +280,7 @@
               [body #`(choose #,@bodys)])
          body))]
     ; Here we need to generate a Racket struct type too; we'll do that in another pass
-    [(struct* struct-type ([fields `((,_ . ,spec*) ...)]
+    [(struct* xdr-struct-type ([fields `((,_ . ,spec*) ...)]
                            [name name]))
      (match-let*
          ([_ (if (equal? name "FeeBumpTransaction") (void) (void))]
@@ -297,7 +298,7 @@
 (rule-body  '#hash() #'() (fixed-length-array-type "some-type" 3))
 (rule-body  '#hash() #'() (enum-type #hash(("A" . 1) ("B" . 2))))
 (rule-body '#hash(("V1" . 1) ("V2" . 2) ("V3" . 3)) #'() (union-type "tag" "my-other-type" #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")) ("V3" . "void"))))
-(rule-body  '#hash() #'() (struct-type "my-struct" '(("A" . "my-type") ("B" . "my-int"))))
+(rule-body  '#hash() #'() (xdr-struct-type "my-struct" '(("A" . "my-type") ("B" . "my-int"))))
 |#
 ; deps returns the dependencies used in the rule body for type t
 (define (deps t)
@@ -330,7 +331,7 @@
                    (list tag-type))]
               [all-deps (set-union tag-type-dep rec-deps)])
          all-deps))]
-    [(struct* struct-type ([fields `((,_ . ,spec*) ...)]))
+    [(struct* xdr-struct-type ([fields `((,_ . ,spec*) ...)]))
      (let ([all-deps (apply set-union (map deps spec*))])
        all-deps)]
     [_ null])]) res))
@@ -348,18 +349,18 @@
                    [deps-deps
                     (map (λ (u)
                            (if (equal? (hash-ref sym-table u) t)
-                               null
+                               null ; don't recurse if we have a recursive type
                                (deps/rec (hash-ref sym-table u)))) t-deps)])
               (apply set-union (set-add deps-deps t-deps))))]
          [rule (λ (name t) #`(#,(rule-id name) #,(rule-body sym-table stx-context t)))]
-         [bodys (cons (rule "head" type) (set-map type-deps (λ (t) (rule t (type-rep sym-table t)))))])
+         [bodys (cons (rule type (type-rep sym-table type)) (set-map type-deps (λ (t) (rule t (type-rep sym-table t)))))])
     #`(define-grammar (#,(format-id stx-context "~a" "the-grammar")) #,@bodys)))
 
 ;(xdr-types->grammar '#hash() #'() (fixed-length-array-type (opaque-fixed-length-array-type 32) 3))
 ;(xdr-types->grammar  '#hash(("some-type" . "int")) #'() (fixed-length-array-type "some-type" 3))
 ;(xdr-types->grammar  '#hash() #'() (enum-type #hash(("A" . 1) ("B" . 2))))
 ;(xdr-types->grammar '#hash(("V1" . 1) ("V2" . 2) ("V3" . 3)) #'() (union-type "tag" "my-other-type" #hash(("V1" . ("acc" . "my-type")) ("V2" . ("acc2" . "my-type-2")) ("V3" . "void"))))
-;(xdr-types->grammar  '#hash() #'() (struct-type "my-struct" '(("A" . "my-type") ("B" . "my-int"))))
+;(xdr-types->grammar  '#hash() #'() (xdr-struct-type "my-struct" '(("A" . "my-type") ("B" . "my-int"))))
 
 (module+ test
   (provide xdr-types->grammar/test)

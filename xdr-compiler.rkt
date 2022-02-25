@@ -14,7 +14,7 @@
          (struct-out variable-length-array-type)
          (struct-out string-type)
          (struct-out enum-type)
-         (struct-out struct-type)
+         (struct-out xdr-struct-type)
          (struct-out union-type))
 
 (require
@@ -59,7 +59,7 @@
 (struct variable-length-array-type (type max-length)  #:prefab)
 (struct string-type (length) #:prefab)
 (struct enum-type (values) #:prefab)
-(struct struct-type (name fields) #:prefab)
+(struct xdr-struct-type (name fields) #:prefab)
 (struct union-type (tag-name tag-type variants) #:prefab)
 
 
@@ -142,9 +142,9 @@
            #:attr repr (union-type (attribute tag-decl.symbol) (attribute tag-decl.repr) (make-immutable-hash (ks-v->alist (attribute v*.repr))))])
 ; struct
 (define-syntax-class (struct-spec namespace name)
-  #:description "a struct-type specification"
+  #:description "a xdr-struct-type specification"
   [pattern ((~datum struct) (~var d* (type-decl namespace)) ...)
-           #:attr repr (struct-type name (zip (attribute d*.symbol) (attribute d*.repr)))]) ; NOTE the order is important
+           #:attr repr (xdr-struct-type name (zip (attribute d*.symbol) (attribute d*.repr)))]) ; NOTE the order is important
 ; enum
 (define-syntax-class (enum-spec namespace)
   #:description "an enum-type specification"
@@ -300,7 +300,7 @@
               ("array" (fixed-length-array "opaque" 32))))))
       '#hash(("AlphaNum4"
               .
-              #s(struct-type
+              #s(xdr-xdr-struct-type
                  "AlphaNum4"
                  (("assetCode" . "AssetCode4")
                   ("issuer" . "AccountID")
