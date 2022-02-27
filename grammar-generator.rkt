@@ -5,7 +5,7 @@
   "xdr-compiler.rkt" "guile-ast-example.rkt"
   "util.rkt"
   (for-template rosette rosette/lib/synthax))
-(provide xdr-types->grammar const-definitions)
+(provide xdr-types->grammar const-definitions struct-type-definitions)
 
 (module+ test
   (require rackunit)
@@ -70,32 +70,16 @@
     [(number? c) #`(bv ,c (bitvector 32))]
     [else (error "c should be a string or number")]))
 
-; adds enum constants to symbol table
-; NOTE What about nested enums? Not used in Stellar
-; TODO this is not needed if defining enum consts
-#;(define (with-enum-consts sym-table)
-  (if (hash-empty? sym-table)
-      sym-table
-      (let ([enum-consts
-             (apply hash-union
-                    (hash-map sym-table
-                              (λ (k v)
-                                (match v
-                                  [(enum-type vs) vs]
-                                  [_ '#hash()]))))])
-        (hash-union sym-table enum-consts))))
-
-; returns a list of definitions (as syntax objects)
+; Returns a list of definitions (as syntax objects).
+; We assume that all constants and enum types are defined at the top level.
 (define (const-definitions stx sym-table)
   (if (hash-empty? sym-table)
       #'(void)
       (let* ([enum-consts
               (apply hash-union
-                     (hash-map sym-table
-                               (λ (k v)
-                                 (match v
-                                   [(enum-type vs) vs]
-                                   [_ '#hash()]))))] ; TODO use for/hash
+                     (for/list
+                         ([(k v) (in-hash sym-table)] #:when (enum-type? v))
+                       (enum-type-values v)))]
              [top-level-consts
               (for/hash ([(k v) (in-hash sym-table)] #:when (number? v)) (values k v))]
              [all-consts (hash-union enum-consts top-level-consts)]
@@ -106,53 +90,41 @@
                                  #`(define #,(format-id stx k) #,v))))])
         defs)))
 
-#;(module+ test
-  (provide with-enum-consts/test)
-  (define-test-suite with-enum-consts/test
-    (test-case
-     "with-enum-consts"
-     (check-equal?
-      (with-enum-consts test-sym-table)
-      '#hash(("ANOTHER_PUBLIC_KEY_TYPE" . 2)
-             ("FALSE" . 0)
-             ("FIVE" . 5)
-             ("FOUR" . 4)
-             ("OTHER_PUBLIC_KEY_TYPE" . 1)
-             ("PUBLIC_KEY_TYPE_ED25519" . 0)
-             ("PublicKey"
-              .
-              #s(union-type
-                 "type"
-                 "PublicKeyType"
-                 #hash((else . "void")
-                       ("ANOTHER_PUBLIC_KEY_TYPE" . ("myint" . "int"))
-                       ("FIVE"
-                        .
-                        ("myunion"
-                         .
-                         #s(union-type
-                            "tagtype"
-                            "PublicKeyType"
-                            #hash((else . "void") ("THREE" . ("myint" . "int"))))))
-                       ("OTHER_PUBLIC_KEY_TYPE" . ("array2" . "my-array"))
-                       ("PUBLIC_KEY_TYPE_ED25519" . ("ed25519" . "uint256")))))
-             ("PublicKeyType"
-              .
-              #s(enum-type
-                 #hash(("ANOTHER_PUBLIC_KEY_TYPE" . 2)
-                       ("FIVE" . 5)
-                       ("FOUR" . 4)
-                       ("OTHER_PUBLIC_KEY_TYPE" . 1)
-                       ("PUBLIC_KEY_TYPE_ED25519" . 0)
-                       ("THREE" . 3))))
-             ("THREE" . 3)
-             ("TRUE" . 1)
-             ("bool" . #s(enum-type #hash(("FALSE" . 0) ("TRUE" . 1))))
-             ("my-array" . #s(fixed-length-array-type "uint256" 2))
-             ("uint256" . #s(opaque-fixed-length-array-type 32)))))))
+; TODO
+(define (struct-type-definitions stx sym-table t)
+  (define (apply-to-rep f type) ; applies f to the representation, if any is present in sym-table, of the type
+    (if (hash-has-key? sym-table type)
+        (f (hash-ref sym-table type))
+        (f type)))
+  (define (make-struct-type type)
+    (match type
+      [(xdr-struct-type name fields)
+       (let ([field-names (map (λ (f) (format-id stx "~a" (car f))) fields)])
+         (hash name #`(struct #,(format-id stx "~a" name) #,field-names #:transparent)))]
+      [_ (error "BUG")]))
+  (let ([struct-defs
+         (let struct-defs/rec ([type (hash-ref sym-table t)])
+           (match type
+             ; NOTE inline type spec in tag-type not supported
+             [(union-type tag tag-type variants)
+              (let ([rec-struct-defs
+                     (for/list ([(tag type-spec) (in-hash variants)])
+                       (if (not (equal? type-spec "void"))
+                           (let ([variant-type (cdr type-spec)])
+                             (apply-to-rep struct-defs/rec variant-type))
+                           (hash)))])
+                (apply hash-union rec-struct-defs #:combine (λ (a b) a)))]
+             [(xdr-struct-type _ fields)
+              (let ([rec-defs
+                     (apply hash-union
+                            (for/list ([f fields])
+                              (apply-to-rep struct-defs/rec (cdr f))) #:combine (λ (a b) a))])
+                (hash-union (make-struct-type type) rec-defs))]
+             [_ (hash)]))]) ; TODO other useful cases?
+        (map cdr (hash->list struct-defs))))
+ 
 
 ; replace else variants in unions by enumerating all tag values covered by the else case.
-; TODO Would it be easier to flatten the type hierarchy once and for all in a previous pass?
 (define (replace-else sym-table)
   (define (replace-else-in t) ; t is a type representation
     (match t ; NOTE inline type spec in tag-type not supported
