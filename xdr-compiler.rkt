@@ -6,6 +6,8 @@
 ; Note that we do not handle the all possible guile-rpc ASTs, but only a super-set of those that appear in Stellar's XDR files.
 ; Notably, this does not support recursive XDR types.
 
+; TODO: rewrite everything using the nanopass framework to avoid all the boilerplate...
+
 (provide parse-ast base-types base-type?
          ; TODO is there a better way to export those structs?
          (struct-out opaque-fixed-length-array-type)
@@ -300,7 +302,7 @@
               ("array" (fixed-length-array "opaque" 32))))))
       '#hash(("AlphaNum4"
               .
-              #s(xdr-xdr-struct-type
+              #s(xdr-struct-type
                  "AlphaNum4"
                  (("assetCode" . "AssetCode4")
                   ("issuer" . "AccountID")

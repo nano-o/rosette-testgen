@@ -120,7 +120,7 @@
                             (for/list ([f fields])
                               (apply-to-rep struct-defs/rec (cdr f))) #:combine (λ (a b) a))])
                 (hash-union (make-struct-type type) rec-defs))]
-             [_ (hash)]))]) ; TODO other useful cases?
+             [_ (hash)]))]) ; TODO recurse in arrays
         (map cdr (hash->list struct-defs))))
  
 
@@ -213,7 +213,7 @@
     [_ (error "v should be a pair or \"void\"")]
   ))
 
-(define (get-const-value stx k) ; TODO use defined consts
+(define (get-const-value stx k)
   (if (number? k) k (format-id stx "~a" k)))
 
 ; rule-body returns a rule body for the type t
@@ -222,9 +222,9 @@
   (match t
     ["void" #'null]
     ["int" #'(?? (bitvector 32))]
-    ["unsigned-int" #'(?? (bitvector 32))]
+    ["unsigned int" #'(?? (bitvector 32))]
     ["hyper" #'(?? (bitvector 64))]
-    ["unsigned-hyper" #'(?? (bitvector 64))]
+    ["unsigned hyper" #'(?? (bitvector 64))]
     [s #:when (string? s) ; A type symbol: call its rule
        (rule-hole s)]
     ; Opaque fixed-length array. Represented by a bitvector.
@@ -260,14 +260,10 @@
      ; The type of a variant can however be an inline type specification.
      (begin
        (if (not (string? tag-type)) (error "we do not support inline tag types") (void))
-       (let* ([bodys ; a dict mapping tag-identifier to body
-               (dict-map variants ;'(tag-value accessor . type) where type is not void, or '(tag-value . void)
-                         (λ (k v) (cons k (rule-body  stx-context (variant-type v)))))]
-              [bodys
-               (dict-map bodys
-                         (λ (k b)
-                           (let ([tag-val (get-const-value stx-context k)])
-                             #`(cons (bv #,tag-val (bitvector 32)) #,b))))]
+       (let* ([bodys
+               (for/list ([(k v) (in-hash variants)]) ;'(tag-value accessor . type) where type is not void, or '(tag-value . void)
+                 (let ([tag-val (get-const-value stx-context k)])
+                   #`(cons (bv #,tag-val (bitvector 32)) #,(rule-body stx-context (variant-type v)))))]
               [body #`(choose #,@bodys)])
          body))]
     ; Here we need to generate a Racket struct type too; we'll do that in another pass
@@ -333,19 +329,24 @@
       (hash-ref sym-table t)))
 
 (define (xdr-types->grammar sym-table stx-context type)
-  (let* ([sym-table (replace-else sym-table)]
+  (let* ([const-defs (const-definitions stx-context sym-table)]
+         [struct-defs (struct-type-definitions stx-context sym-table type)]
+         [sym-table-2 (replace-else sym-table)]
          [type-deps
-          (let deps/rec ([t (hash-ref sym-table type)])
+          (let deps/rec ([t (hash-ref sym-table-2 type)])
             (let* ([t-deps (filter (λ (t) (not (base-type? t))) (deps t))]
                    [deps-deps
                     (map (λ (u)
-                           (if (equal? (hash-ref sym-table u) t)
+                           (if (equal? (hash-ref sym-table-2 u) t)
                                null ; don't recurse if we have a recursive type
-                               (deps/rec (hash-ref sym-table u)))) t-deps)])
+                               (deps/rec (hash-ref sym-table-2 u)))) t-deps)])
               (apply set-union (set-add deps-deps t-deps))))]
          [rule (λ (name t) #`(#,(rule-id name) #,(rule-body stx-context t)))]
-         [bodys (cons (rule type (type-rep sym-table type)) (set-map type-deps (λ (t) (rule t (type-rep sym-table t)))))])
-    #`(define-grammar (#,(format-id stx-context "~a" "the-grammar")) #,@bodys)))
+         [bodys (cons (rule type (type-rep sym-table-2 type)) (set-map type-deps (λ (t) (rule t (type-rep sym-table-2 t)))))])
+    #`(begin
+        #,@const-defs
+        #,@struct-defs
+        (define-grammar (#,(format-id stx-context "~a" "the-grammar")) #,@bodys))))
 
 ;(xdr-types->grammar '#hash() #'() (fixed-length-array-type (opaque-fixed-length-array-type 32) 3))
 ;(xdr-types->grammar  '#hash(("some-type" . "int")) #'() (fixed-length-array-type "some-type" 3))
