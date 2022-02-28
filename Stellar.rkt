@@ -9,7 +9,7 @@
 
 (define-syntax (define-consts stx)
   (syntax-parse stx
-    [(_ xdr-defs) 
+    [(_ xdr-defs)
      (let* ([sym-table (parse-ast #'xdr-defs)]
             [const-defs (const-definitions stx sym-table)])
        #`(begin #,@const-defs))]))
@@ -18,7 +18,7 @@
   (syntax-parse stx
     [(_ xdr-defs)
      (let* ([sym-table (parse-ast #'xdr-defs)]
-            [struct-defs (struct-type-definitions stx sym-table "TransactionEnvelope")])
+            [struct-defs (all-struct-type-definitions stx sym-table "TransactionEnvelope")])
        #`(begin #,@struct-defs))]))
 
 (define-syntax (define-the-grammar stx)
@@ -27,8 +27,8 @@
      (let ([sym-table (parse-ast #'xdr-defs)])
        (xdr-types->grammar sym-table stx "Transaction"))]))
 
-;(expand/step
- (define-the-grammar
+#|(expand/step
+ #'|#(define-the-grammar
   ((define-type
      "Hash"
      (fixed-length-array "opaque" 32))

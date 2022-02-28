@@ -5,7 +5,7 @@
   "xdr-compiler.rkt" "guile-ast-example.rkt"
   "util.rkt"
   (for-template rosette rosette/lib/synthax))
-(provide xdr-types->grammar const-definitions struct-type-definitions)
+(provide xdr-types->grammar const-definitions all-struct-type-definitions)
 
 (module+ test
   (require rackunit)
@@ -88,41 +88,7 @@
                                (begin
                                  (if (not (number? v)) (error "only literal numbers are supported in enums") (void))
                                  #`(define #,(format-id stx k) #,v))))])
-        defs)))
-
-; TODO
-(define (struct-type-definitions stx sym-table t)
-  (define (apply-to-rep f type) ; applies f to the representation, if any is present in sym-table, of the type
-    (if (hash-has-key? sym-table type)
-        (f (hash-ref sym-table type))
-        (f type)))
-  (define (make-struct-type type)
-    (match type
-      [(xdr-struct-type name fields)
-       (let ([field-names (map (λ (f) (format-id stx "~a" (car f))) fields)])
-         (hash name #`(struct #,(format-id stx "~a" name) #,field-names #:transparent)))]
-      [_ (error "BUG")]))
-  (let ([struct-defs
-         (let struct-defs/rec ([type (hash-ref sym-table t)])
-           (match type
-             ; NOTE inline type spec in tag-type not supported
-             [(union-type tag tag-type variants)
-              (let ([rec-struct-defs
-                     (for/list ([(tag type-spec) (in-hash variants)])
-                       (if (not (equal? type-spec "void"))
-                           (let ([variant-type (cdr type-spec)])
-                             (apply-to-rep struct-defs/rec variant-type))
-                           (hash)))])
-                (apply hash-union rec-struct-defs #:combine (λ (a b) a)))]
-             [(xdr-struct-type _ fields)
-              (let ([rec-defs
-                     (apply hash-union
-                            (for/list ([f fields])
-                              (apply-to-rep struct-defs/rec (cdr f))) #:combine (λ (a b) a))])
-                (hash-union (make-struct-type type) rec-defs))]
-             [_ (hash)]))]) ; TODO recurse in arrays
-        (map cdr (hash->list struct-defs))))
- 
+        defs))) 
 
 ; replace else variants in unions by enumerating all tag values covered by the else case.
 (define (replace-else sym-table)
@@ -323,6 +289,60 @@
        all-deps)]
     [_ null])]) res))
 
+(define (all-deps sym-table t)
+  (let* ([t-deps (filter (λ (t) (not (base-type? t))) (deps t))]
+         [deps-deps
+          (map (λ (u)
+                 (if (equal? (hash-ref sym-table u) t)
+                     null ; don't recurse if we have a recursive type
+                     (all-deps sym-table (hash-ref sym-table u)))) t-deps)])
+    (apply set-union (set-add deps-deps t-deps))))
+
+; returns a hash of struct-type definitions
+; does not recurse on type identifiers
+(define (struct-type-definitions stx t)
+  (define (make-struct-type type)
+    (match type
+      [(xdr-struct-type name fields)
+       (let ([field-names (map (λ (f) (format-id stx "~a" (car f))) fields)])
+         (hash name #`(struct #,(format-id stx "~a" name) #,field-names #:transparent)))]
+      [_ (error "BUG")]))
+  (let ([struct-defs
+         (let struct-defs/rec ([type t])
+           (match type
+             ; NOTE inline type spec in tag-type not supported
+             [(union-type tag tag-type variants)
+              (let ([rec-struct-defs
+                     (for/list ([(tag type-spec) (in-hash variants)])
+                       (if (not (equal? type-spec "void"))
+                           (let ([variant-type (cdr type-spec)])
+                             (if (string? variant-type) (hash) (struct-defs/rec variant-type)))
+                           (hash)))])
+                (apply hash-union rec-struct-defs #:combine (λ (a b) a)))]
+             [(xdr-struct-type _ fields)
+              (let ([rec-defs
+                     (apply hash-union
+                            (for/list ([f fields])
+                              (if (string? (cdr f)) (hash) (struct-defs/rec (cdr f))))
+                            #:combine (λ (a b) a))])
+                (hash-union (make-struct-type type) rec-defs))]
+             [(variable-length-array-type type _)
+              (if (string? type) (hash) (struct-defs/rec type))]
+             [(fixed-length-array-type type _)
+              (if (string? type) (hash) (struct-defs/rec type))]
+             [_ (hash)]))])
+    struct-defs))
+
+(define (all-struct-type-definitions stx sym-table t)
+  (let* ([deps (all-deps sym-table t)]
+         [defs (for/list ([d deps])
+                 (struct-type-definitions stx (hash-ref sym-table d)))])
+    (map
+     cdr
+     (hash->list
+      (apply hash-union defs  #:combine (λ (a b) a))))))
+         
+
 (define (type-rep sym-table t)
   (if (base-type? t)
       t
@@ -330,19 +350,14 @@
 
 (define (xdr-types->grammar sym-table stx-context type)
   (let* ([const-defs (const-definitions stx-context sym-table)]
-         [struct-defs (struct-type-definitions stx-context sym-table type)]
+         #;[struct-defs (all-struct-type-definitions stx-context sym-table type)]
+         [type-deps (all-deps sym-table type)]
+         [struct-defs-hashes (for/list ([d type-deps])
+                             (struct-type-definitions stx-context (hash-ref sym-table d)))]
+         [struct-defs (map cdr (hash->list (apply hash-union struct-defs-hashes  #:combine (λ (a b) a))))]
          [sym-table-2 (replace-else sym-table)]
-         [type-deps
-          (let deps/rec ([t (hash-ref sym-table-2 type)])
-            (let* ([t-deps (filter (λ (t) (not (base-type? t))) (deps t))]
-                   [deps-deps
-                    (map (λ (u)
-                           (if (equal? (hash-ref sym-table-2 u) t)
-                               null ; don't recurse if we have a recursive type
-                               (deps/rec (hash-ref sym-table-2 u)))) t-deps)])
-              (apply set-union (set-add deps-deps t-deps))))]
          [rule (λ (name t) #`(#,(rule-id name) #,(rule-body stx-context t)))]
-         [bodys (cons (rule type (type-rep sym-table-2 type)) (set-map type-deps (λ (t) (rule t (type-rep sym-table-2 t)))))])
+         [bodys (reverse (map (λ (t) (rule t (type-rep sym-table-2 t))) type-deps))])
     #`(begin
         #,@const-defs
         #,@struct-defs
