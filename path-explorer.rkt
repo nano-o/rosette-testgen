@@ -27,7 +27,7 @@
 (define-syntax (define-with-path-explorer stx)
   (syntax-parse stx
     [(_ (name:id arg0:id ...) body:expr)
-     (if debug? (println (format "defining ~a" (syntax->datum #'name))) (values))
+     (if debug? (println (format "defining ~a" (syntax->datum #'name))) (void))
      #`(begin
          (define (#,(explorer-id #'name) gen arg0 ...)
            (syntax-parameterize ([g (make-rename-transformer #'gen)])
@@ -47,17 +47,17 @@
     (with-syntax ([c-string #`(quote #,(syntax->datum c))])
     (if debug?
         #`(print-branch #,b c-string)
-        #'(values)))) ; using (values) to do nothing
+        #'(void))))
   (define (print-debug-info i [str ""])
     (if debug?
         (println (format "~a ; ~a" i str))
-        (values)))
+        (void)))
   (define-syntax-class (has-path-explorer)
     (pattern x:id #:when (identifier-binding (explorer-id #'x))))
   ; TODO use a syntax class instead of a recursive macro?
   (syntax-parse stx
     #:track-literals ; per advice here:  https://school.racket-lang.org/2019/plan/tue-aft-lecture.html
-    [(_ ((~literal if) c then-branch else-branch)) ; TODO what about recursing in the condition?
+    [(_ ((~literal if) c then-branch else-branch))
      (print-debug-info "if" (syntax->datum stx))
      #`(let ([branch (g 2)] [cond (path-explorer c)])
          (if (equal? branch 0)
