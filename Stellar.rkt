@@ -1,11 +1,13 @@
-#lang racket
+#lang rosette
 
 (require
-  rosette/lib/synthax syntax/parse/define
   (for-syntax "xdr-compiler.rkt" racket/hash syntax/to-string)
   (for-syntax "grammar-generator.rkt")
+  ;rosette/lib/synthax
+  syntax/parse/define
   macro-debugger/stepper
-  rackunit)
+  ;rackunit
+  )
 
 (define-syntax (define-consts stx)
   (syntax-parse stx
@@ -27,8 +29,7 @@
      (let ([sym-table (parse-ast #'xdr-defs)])
        (xdr-types->grammar sym-table stx "Transaction"))]))
 
-#|(expand/step
- #'|#(define-the-grammar
+(define-the-grammar
   ((define-type
      "Hash"
      (fixed-length-array "opaque" 32))
@@ -1380,3 +1381,8 @@
                  (else "void"))))
        ("ext" (union (case ("v" "int") ((0) "void"))))))
    ))
+
+(define sol
+  (synthesize
+   #:forall '()
+   #:guarantee (assert (equal? (Transaction-fee (the-grammar #:depth 2)) (bv 0 32)))))

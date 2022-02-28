@@ -2,7 +2,7 @@
 
 (require
   racket/match racket/syntax racket/generator racket/hash
-  "xdr-compiler.rkt" "guile-ast-example.rkt"
+  "xdr-compiler.rkt" ;"guile-ast-example.rkt"
   "util.rkt"
   (for-template rosette rosette/lib/synthax))
 (provide xdr-types->grammar const-definitions all-struct-type-definitions)
@@ -216,7 +216,7 @@
      ; TODO we will need a constraint saying that the first 4 bytes is the length...
      ; In the meantime, let's just have 1 element
      (let* ([elem-body (rule-body  stx-context elem-type)]
-            [body #`(cons 1 (vector elem-body))])
+            [body #`(cons 1 (vector #,elem-body))])
        body)]
     [(struct* enum-type ([values (hash-table (_ v*) ...)]))
      (let* ([bvs (map (λ (w) #`(bv #,w (bitvector 32))) v*)])
