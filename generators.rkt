@@ -24,7 +24,7 @@
 (define (exhaustive-gen)
   (define (node-pos l i)
     (- (length l) i))
-  (check-equal? (list-ref '(1 2 3) (node-pos '(1 2 3) 1)) 3)
+  ;(check-equal? (list-ref '(1 2 3) (node-pos '(1 2 3) 1)) 3)
   (define (pop-complete path)
     (if (empty? path)
         '()
@@ -32,27 +32,29 @@
           (if (equal? (car last) (- (cdr last) 1))
               (pop-complete (cdr path))
               (cons (cons (+ 1 (caar path)) (cdar path)) (cdr path))))))
-  (check-equal? (pop-complete (list  (cons 2 3) (cons 1 2) (cons 0 2))) (list (cons 1 2)))
+  ;(check-equal? (pop-complete (list  (cons 2 3) (cons 1 2) (cons 0 2))) (list (cons 1 2)))
   (define (incr-node n)
     (cons (+ (car n) 1) (cdr n)))
   (generator (n) ; n = 0 signifies we reached the end of a path
              (let loop ([m n] [path '()] [pos 1])
                (cond
                  [(equal? m 0) ; we reached a leaf at the last call; pos is one after
-                  (let ([branch (caar path)] [max (- (cdar path) 1)])
-                    (cond
-                      [(< branch max) ; leaf is not fully explored
-                       (let ([new-m (yield 0)]) ; dummy 0, does not matter
-                         (loop
-                          new-m
-                          (list-set path (node-pos path (- pos 1)) `(,(+ 1 (caar path)) . ,(cdar path))) ; increment branch count of last node
-                          1))] ; set pos back to 1
-                      [else ; current branch is complete
-                       (let ([new-path (pop-complete path)])
-                         (if (empty? new-path)
-                             (begin (yield -1) (error "this exhaustive generator has already finished"))
-                             (let ([new-m (yield 0)])  ; dummy 0, does not matter
-                               (loop new-m new-path 1))))]))] ; pop completed nodes, increase previous by one, and set pos back to 1
+                  (if (null? path)
+                      (error "null path") ; TODO what to do here?
+                      (let ([branch (caar path)] [max (- (cdar path) 1)])
+                        (cond
+                          [(< branch max) ; leaf is not fully explored
+                           (let ([new-m (yield 0)]) ; dummy 0, does not matter
+                             (loop
+                              new-m
+                              (list-set path (node-pos path (- pos 1)) `(,(+ 1 (caar path)) . ,(cdar path))) ; increment branch count of last node
+                              1))] ; set pos back to 1
+                          [else ; current branch is complete
+                           (let ([new-path (pop-complete path)])
+                             (if (empty? new-path)
+                                 (begin (yield -1) (error "this exhaustive generator has already finished"))
+                                 (let ([new-m (yield 0)])  ; dummy 0, does not matter
+                                   (loop new-m new-path 1))))])))] ; pop completed nodes, increase previous by one, and set pos back to 1
                  [(< (length path) pos) ; never explored
                     (loop (yield 0) (cons (cons 0 m) path) (+ pos 1))]
                  [(<= pos (length path)) ; we have to explore further
