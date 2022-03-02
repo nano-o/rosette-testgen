@@ -40,7 +40,7 @@
                (cond
                  [(equal? m 0) ; we reached a leaf at the last call; pos is one after
                   (if (null? path)
-                      (error "null path") ; TODO what to do here?
+                      (begin (yield -1) (error "this exhaustive generator has already finished"))
                       (let ([branch (caar path)] [max (- (cdar path) 1)])
                         (cond
                           [(< branch max) ; leaf is not fully explored
