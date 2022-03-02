@@ -1,6 +1,5 @@
 #lang rosette
 
-; TODO detect symbols that have a path-explorer already and call that
 ; TODO support struct methods implementing generic interfaces (i.e. find out all possible targets and branch on that)
 ; TODO is it worth trying to prune infeasible paths?
 ; TODO what about definitions comming from libraries?
@@ -104,6 +103,8 @@
                ...))]))]
     [(_ ((~or (~literal lambda) (~literal λ)) (arg0:id ...) body:expr) (~do (print-debug-info "lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
     [(_ ((~literal quote) arg0:expr ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
+    [(_ ((~literal let) bindings body0 ...)) #'(let bindings (path-explorer body0) ...)]
+    [(_ ((~literal let*) bindings body0 ...)) #'(let bindings (path-explorer body0) ...)]
     [(_ (fn:has-path-explorer arg0:expr ...) (~do (print-debug-info "path-explorer application"))) #`(#,(explorer-id #'fn) g (path-explorer arg0) ...)]
     [(_ (fn:id arg0:expr ...) (~do (print-debug-info "application"))) #'(fn (path-explorer arg0) ...)]
     [(_ x (~do (print-debug-info "catch all case"))) #'x]))
