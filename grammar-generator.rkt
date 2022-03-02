@@ -129,7 +129,7 @@
                            (match-let ([`(,acc . ,tp) f])
                              `(,acc . ,(replace-else-in tp))))])
          (xdr-struct-type name new-fields))]
-      ; TODO non-opaque arrays
+      ; TODO recurse in non-opaque arrays
       [_ t]))
   (for/hash ([kv (hash->list sym-table)])
     (values (car kv) (replace-else-in (cdr kv)))))
@@ -184,6 +184,9 @@
 
 ; rule-body returns a rule body for the type t
 (define (rule-body stx-context t)
+  (define (make-vector elem-type-rule size)
+    #`(vector
+       #,@(for/list ([i (in-range (get-const-value stx-context size))]) elem-type-rule)))
   ; NOTE Here we assume all 'else cases have been removed from unions
   (match t
     ["void" #'null]
@@ -199,24 +202,19 @@
     [(opaque-variable-length-array-type max-length) ; a pair (length . data) where data is a bitvector
      ; TODO we will need a constraint saying that the first 4 bytes is the length...
      #`(cons #,max-length (?? (bitvector #,(* max-length 8))))]
-    [(string-type nbytes)
-     ; a pair (length . data) where data is a bitvector
-     ; TODO should it be a sequence of bytes?
-     ; TODO we will need a constraint saying that the first 4 bytes is the length...
-     ; For now the length will be 2
-     #`(cons (bv 2 32) (?? (bitvector 64)))]
+    [(string-type nbytes) ; just a vector of bytes for now
+     ; TODO if nothing actually depends on string values then this can be optimized
+     (make-vector #'(?? (bitvector 8)) nbytes)]
     ; Fixed length array. Represented by a vector.
-    ; TODO would it be better to create a rule for the element type if it's an inline type?
     [(fixed-length-array-type elem-type size)
-     (let* ([elem-body (rule-body  stx-context elem-type)]
-            [body #`(vector
-                     #,@(for/list ([i (in-range (get-const-value stx-context size))]) elem-body))])
+     (let* ([elem-body (rule-body stx-context elem-type)]
+            [body (make-vector
+                   #`(vector elem-body size))])
        body)]
-    [(variable-length-array-type elem-type max-size) ; a pair (length . data) where data is a vector
-     ; TODO we will need a constraint saying that the first 4 bytes is the length...
-     ; In the meantime, let's just have 1 element
+    [(variable-length-array-type elem-type max-size)
+     ; TODO: for now we'll assume this has length 1
      (let* ([elem-body (rule-body  stx-context elem-type)]
-            [body #`(cons 1 (vector #,elem-body))])
+            [body #`(vector #,elem-body)])
        body)]
     [(struct* enum-type ([values (hash-table (_ v*) ...)]))
      (let* ([bvs (map (λ (w) #`(bv #,w (bitvector 32))) v*)])
@@ -256,7 +254,6 @@
 ; deps returns the dependencies used in the rule body for type t
 (define (deps t)
   ; NOTE Here we assume all 'else cases have been removed from unions
-  ; NOTE We need the sym-table to look up the values of constants. TODO If we had defined symbols for them instead, then we wouldn't need that.
   (let ([res
   (match t
     ["void" null]
