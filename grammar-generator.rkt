@@ -213,11 +213,11 @@
        body)]
     [(variable-length-array-type elem-type max-size)
      ; TODO: for now we'll assume this has length 1
-     (let* ([elem-body (rule-body  stx-context elem-type)]
+     (let* ([elem-body (rule-body stx-context elem-type)]
             [body #`(vector #,elem-body)])
        body)]
-    [(struct* enum-type ([values (hash-table (_ v*) ...)]))
-     (let* ([bvs (map (λ (w) #`(bv #,w (bitvector 32))) v*)])
+    [(struct* enum-type ([values (hash-table (k* v*) ...)]))
+     (let* ([bvs (map (λ (w) #`(bv #,(format-id stx-context "~a" w) (bitvector 32))) k*)])
        #`(choose #,@bvs))]
     [(union-type tag tag-type variants)
      ; Variants can in principle refer to enum constants defined inline in the tag type, but we don't support inline tag types.
@@ -227,7 +227,7 @@
        (let* ([bodys
                (for/list ([(k v) (in-hash variants)]) ;'(tag-value accessor . type) where type is not void, or '(tag-value . void)
                  (let ([tag-val (get-const-value stx-context k)])
-                   #`(cons (bv #,tag-val (bitvector 32)) #,(rule-body stx-context (variant-type v)))))]
+                     #`(cons (bv #,tag-val (bitvector 32)) #,(rule-body stx-context (variant-type v)))))]
               [body #`(choose #,@bodys)])
          body))]
     ; Here we need to generate a Racket struct type too; we'll do that in another pass
