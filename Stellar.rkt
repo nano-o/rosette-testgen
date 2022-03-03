@@ -5,7 +5,8 @@
   (for-syntax "grammar-generator.rkt")
   ;rosette/lib/synthax
   syntax/parse/define
-  macro-debugger/stepper
+  ;macro-debugger/stepper
+  macro-debugger/expand
   ;rackunit
   )
 
@@ -27,9 +28,10 @@
   (syntax-parse stx
     [(_ xdr-defs)
      (let ([sym-table (parse-ast #'xdr-defs)])
-       (xdr-types->grammar sym-table stx "Transaction"))]))
+       (xdr-types->grammar sym-table stx "TransactionResult"))]))
 
-(define-the-grammar
+(pretty-display (syntax->datum
+(expand-only #'(define-the-grammar
   ((define-type
      "Hash"
      (fixed-length-array "opaque" 32))
@@ -1380,9 +1382,9 @@
                    (variable-length-array "OperationResult" #f)))
                  (else "void"))))
        ("ext" (union (case ("v" "int") ((0) "void"))))))
-   ))
+   )) (list #'define-the-grammar))))
 
-(define sol
+#;(define sol
   (synthesize
    #:forall '()
    #:guarantee (assert (equal? (Transaction-fee (the-grammar #:depth 2)) (bv 0 32)))))
