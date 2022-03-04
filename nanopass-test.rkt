@@ -1,6 +1,7 @@
 #lang nanopass
 
-(provide L0-parser pass-1)
+(require racket/hash)
+(provide L0-parser normalize-unions)
 
 ; TODO language L1 where union cases have a single tag
 
@@ -52,6 +53,44 @@
    (+ (o (i type-spec))
       (o void))))
 
+; returns a hashmap mapping enum symbols to values
+; enums defined inside other types are ignored (it's not recursive)
+(define-pass make-enum-hashmap : L0 (ir) -> * ()
+  (XDR-Spec : XDR-Spec (ir) -> * ()
+            ((,[Decl : -> h*] ...)  ; TODO why can Decl not be found automatically?
+             (apply hash-union h*)))
+  (Decl : Decl (ir) -> * ()
+        ((define-type ,i ,[Spec : -> h]) h) ; TODO why can Spec not be found automatically?
+        (else (hash)))
+  (Spec : Spec (ir) -> * ()
+        ((enum (,i* ,c*) ...)
+         (for/hash ([i i*] [c c*])
+           (values i c)))
+        (else (hash))))
+
+(define test-2
+  '((define-type "test-enum" (enum ("A" 1) ("B" 2)))))
+
+(make-enum-hashmap (L0-parser test-2))
+
+#|
+(println (make-enum-hashmap (L0-parser test-2)))
+(define-pass replace-else : L0 (ir enums) -> L0 ()
+  (Union-Spec : Union-Spec (ir) -> Union-Spec ()
+              ((case (,i1 ,i2)
+                 ((,o** ...) (,i* ,type-spec*)) ... (else (,i ,type-spec)))
+               (let* ([])
+                 `(case (,i1 ,i2) 
+                    ((,o** ...) (,i* ,type-spec*)) ...)))))
+
+(define test-3
+  '((define-type "test-union"
+      (union (case ("tagname" "tagtype")
+               (("A") ("x" "T")) (else ("y" "U")))))))
+
+(replace-else (L0-parser test-3) null)
+|#
+
 (define (multi-alist->alist m-alist)
   (let ([kvs
          (for/list ([k (caar m-alist)])
@@ -60,34 +99,29 @@
         kvs    
         `(,@kvs ,@(multi-alist->alist (cdr m-alist))))))
 
-(define-pass pass-1 : L0 (ir) -> L0 ()
+
+(define-pass normalize-unions : L0 (ir) -> L1 ()
   (Union-Spec : Union-Spec (ir) -> Union-Spec ()
-   ((case (,i1 ,i2) ,union-case-spec* ...)
-    (begin
-      (let* ([alist
-              (multi-alist->alist
-               (map (λ (ucs)
-                      (nanopass-case
-                       (L0 Union-Case-Spec)
-                       ucs
-                       [((,o* ...) (,i ,type-spec))
-                        (cons o* (cons i type-spec))]))
-                    union-case-spec*))]
-             [case-specs
-              (for/list ([a alist])
-                (in-context Union-Case-Spec `((,(car a)) (,(cadr a) ,(cddr a)))))])
-        `(case (,i1 ,i2) ,case-specs ...)))))
+              ((case (,i1 ,i2) ((,o** ...) (,i* ,[type-spec*])) ...)
+               (let* ([tags (flatten o**)]
+                      [malist
+                       (for/list ([o* o**]
+                                  [i i*]
+                                  [type-spec type-spec*])
+                         (cons o* (cons i type-spec)))]
+                      [alist (multi-alist->alist malist)]
+                      [tag* (map car alist)]
+                      [acc* (map cadr alist)]
+                      [t* (map cddr alist)])
+                 `(case (,i1 ,i2) (,tag* (,acc* ,t*)) ...))))
   (XDR-Spec : XDR-Spec (ir) -> XDR-Spec ()))
    
-(define test-union
+(define test-1
   '((define-type "test-union"
      (union (case ("tagname" "tagtype")
-              (("A") ("c" "int")) (("B" "C") ("d" "int")))))))
+              (("A") ("c" (union (case ("tagname-2" "tagtype-2") (("X" "Y") ("x" "T"))))))
+              (("B" "C") ("d" "int")))))
+    (define-type "test-struct"
+      (struct ("t1" (union (case ("tagname-3" "tagtype-3") (("F" "G") ("y" "T")))))))))
 
-;(L0-parser test-union)
-
-(pass-1 (L0-parser test-union))
-
-#;(define base-types
-  '("int" "unsigned int" "hyper" "unsigned hyper" "double" "quadruple" "float"))
-#;(define base-type? (λ (t) (member t base-types)))
+(normalize-unions (L0-parser test-1))
