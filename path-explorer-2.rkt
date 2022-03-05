@@ -20,6 +20,7 @@
   ; Now we define a syntax class that synthesize the path-explorer version of a function's body.
   ; The syntax class should match a subset of Racket expressions that we want to use in our specifications.
   ; TODO report an error if something's not supported
+  ; NOTE we need to be careful about evaluation order, essentially mimicking CPS
 
   ; synthesize debug printout
   (define (print-branch i c)
@@ -28,34 +29,37 @@
           #`((println #,(datum->syntax #'() str)))
           #'())))
 
-  
-  (define-syntax-class has-path-explorer
+  (define-syntax-class (has-path-explorer)
     (pattern x:id #:when (identifier-binding (explorer-id #'x))))
 
   (define-syntax-class ex
     #:description "an expression amenable to path-exploration"
     [pattern ((~or (~literal let) (~literal let*)) bindings body:ex)
+             ; TODO: recurse in the bindings
              #:attr res #`(let bindings body.res)]
     [pattern e:if-expr
              #:attr res #'e.res]
-    [pattern (fn:id arg0:expr ...)
+    [pattern (fn:has-path-explorer arg0:ex ...)
+             #:attr res #`(#,(explorer-id #'fn) the-generator arg0.res ...)]
+    [pattern (fn:id arg0:ex ...)
+             #:attr res #'(fn arg0.res ...)]
+    [pattern (~or _:id _:number)
              #:attr res this-syntax])
 
   (define-syntax-class if-expr
     #:description "an if expression"
     [pattern ((~literal if) cond:ex then:ex else:ex)
              #:attr res #`(let ([c cond.res] ; NOTE it's important to evaluate cond.expr first
-                                 [i (the-generator 2)])
-                             (if (equal? i 0)
-                                 (begin
-                                   #,@(print-branch 0 #'cond)
-                                   (assume c)
-                                   then.res)
-                                 (begin
-                                   #,@(print-branch 1 #'(not cond))
-                                   (assume (not c))
-                                   else.res)))]))
-  ; TODO deal with "cond" by transforming into nested ifs
+                                [i (the-generator 2)])
+                            (if (equal? i 0)
+                                (begin
+                                  #,@(print-branch 0 #'cond)
+                                  (assume c)
+                                  then.res)
+                                (begin
+                                  #,@(print-branch 1 #'(not cond))
+                                  (assume (not c))
+                                  else.res)))]))
 
 (define-syntax (define/path-explorer stx)
   (syntax-parse stx
@@ -71,8 +75,12 @@
 ;(pretty-display (syntax->datum
 ;(expand-only #'
 ;             (begin
+(define/path-explorer (test-2 x)
+  (if (< x 3)
+      (+ x 1)
+      (- x 1)))
 (define/path-explorer (test x)
-  (if (< x 0)
+  (if (< (test-2 x) 0)
       (void)
       (void)))
 ;) (list #'define-with-path-explorer #'path-explorer))))
