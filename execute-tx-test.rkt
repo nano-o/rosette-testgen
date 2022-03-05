@@ -2,10 +2,11 @@
 
 (require
   "Stellar-inline.rkt"
-  "path-explorer.rkt"
+  "path-explorer-2.rkt"
   rosette/lib/synthax
   syntax/to-string
-  macro-debugger/stepper)
+  macro-debugger/stepper
+  macro-debugger/expand)
 
 ; 10 millon stroop = 1 XLM
 (define (xlm->stroop x)
@@ -28,9 +29,24 @@
 ; TODO what's a valid address in Stellar?
 (define (valid-public-key? pk)
   #t)
-; Maybe it would be better to restrict ourselves to a few keys which are know to be valid/invalid
+; Maybe it would be better to restrict ourselves to a few keys which are known to be valid/invalid
 
-(define-with-path-explorer (execute-tx ledger time tx-envelope)
+(pretty-display (syntax->datum
+(expand-only #'
+             (begin
+(define/path-explorer (account-exists? ledger account-id)
+  (if (null? ledger)
+      #f
+      (or
+       (let* ([ledger-entry (car ledger)]
+              [type (car (LedgerEntry-data ledger-entry))])
+         (and (equal? type (bv ACCOUNT 32))
+              (let* ([account-entry (cdr (LedgerEntry-data ledger-entry))]
+                     [id (AccountEntry-accountID account-entry)])
+                (equal? (cdr id) (cdr account-id)))))
+       (account-exists? (cdr ledger) account-id)
+       )))
+(define/path-explorer (execute-tx ledger time tx-envelope)
   ; We must check that accounts still have enough reserve after execution
   ; How are sequence numbers used? Seems like a transaction must a a sequence number one above its source account
   ; What about time bounds?
@@ -44,26 +60,65 @@
            )
       (begin
         (assume (equal? op-type (bv CREATE_ACCOUNT (bitvector 32))))
-        ; check whether the account already exists
-        ))))
+        (if (account-exists? ledger account-id)
+            (list CREATE_ACCOUNT_ALREADY_EXIST)
+            (list CREATE_ACCOUNT_SUCCESS))))))
+) (list #'define/path-explorer))))
 
-#|(define-with-path-explorer (account-exists? ledger account-id)
-  ; account-id is an AccountID union
-  (if (null? ledger )
-      #f
-      (
-|#
+#;(begin
+  (begin
+    (define (account-exists?-path-explorer gen ledger account-id)
+       (let ((cond (null? ledger)) (branch (gen 2)))
+         (if (equal? branch 0)
+           (begin (println (format "assuming: ~a" cond)) (assume cond) #f)
+           (begin
+             (println (format "assuming: ~a" (! cond)))
+             (assume (! cond))
+             (or (let* ((ledger-entry (car ledger))
+                        (type (car (LedgerEntry-data ledger-entry))))
+                   (and (equal? type (bv ACCOUNT 32))
+                        (let* ((account-entry
+                                (cdr (LedgerEntry-data ledger-entry)))
+                               (id (AccountEntry-accountID account-entry)))
+                          (equal? (cdr id) (cdr account-id)))))
+                 (account-exists?-path-explorer gen (cdr ledger) account-id)))))))
+  (begin
+    (define (execute-tx-path-explorer gen ledger time tx-envelope)
+       (begin
+         #;(assume (equal? (car tx-envelope) (bv ENVELOPE_TYPE_TX 32)))
+         (let* ((tx (TransactionV1Envelope-tx (cdr tx-envelope)))
+                (op (vector-ref-bv (Transaction-operations tx) (bv 0 1)))
+                (op-type (car (Operation-body op)))
+                (account-id
+                 (CreateAccountOp-destination (cdr (Operation-body op)))))
+           (begin
+             (assume (equal? op-type (bv CREATE_ACCOUNT (bitvector 32))))
+             (let ((cond (account-exists?-path-explorer gen ledger account-id)) (branch (gen 2)))
+               (if (equal? branch 0)
+                 (begin
+                   #;(println (format "condition: ~a" cond))
+                   (assert cond)
+                   (list CREATE_ACCOUNT_ALREADY_EXIST))
+                 (begin
+                   #;(println (format "condition: ~a" (! cond)))
+                   (assert (! cond))
+                   (list CREATE_ACCOUNT_SUCCESS))))))
+         #;(parameterize ([error-print-width 250])
+           (println (format "VC: ~.s" (vector-ref (struct->vector (vc)) 1))))))))
+
 (define input-tx (TransactionEnvelope-grammar #:depth 8))
 ; TODO: what's an appropriate depth? Maybe compute the min depth needed when unfolding recursive types only once.
 
 ; A ledger is a list of ledger entries
 ; For now, let's start with a single entry
 (define input-ledger
-  `(,(LedgerEntry-grammar #:depth 6)))
+  `(,(LedgerEntry-grammar #:depth 8)))
 
-(define solution-list (stream->list (all-paths (λ (gen) (execute-tx-path-explorer gen input-ledger null input-tx)))))
+;(all-paths (λ (gen) (execute-tx-path-explorer gen input-ledger null input-tx)))
 
-(for ([s solution-list])
+;(define solution-list (stream->list (all-paths (λ (gen) (execute-tx/path-explorer gen input-ledger null input-tx)))))
+
+#;(for ([s solution-list])
   (if (sat? s)
       (let* ([syms (set-union (symbolics input-tx) (symbolics input-ledger))]
              [complete-sol (complete-solution s syms)])
