@@ -31,9 +31,9 @@
   #t)
 ; Maybe it would be better to restrict ourselves to a few keys which are known to be valid/invalid
 
-(pretty-display (syntax->datum
-(expand-only #'
-             (begin
+;(pretty-display (syntax->datum
+;(expand-only #'
+;             (begin
 (define/path-explorer (account-exists? ledger account-id)
   (if (null? ledger)
       #f
@@ -63,48 +63,7 @@
         (if (account-exists? ledger account-id)
             (list CREATE_ACCOUNT_ALREADY_EXIST)
             (list CREATE_ACCOUNT_SUCCESS))))))
-) (list #'define/path-explorer))))
-
-#;(begin
-  (begin
-    (define (account-exists?-path-explorer gen ledger account-id)
-       (let ((cond (null? ledger)) (branch (gen 2)))
-         (if (equal? branch 0)
-           (begin (println (format "assuming: ~a" cond)) (assume cond) #f)
-           (begin
-             (println (format "assuming: ~a" (! cond)))
-             (assume (! cond))
-             (or (let* ((ledger-entry (car ledger))
-                        (type (car (LedgerEntry-data ledger-entry))))
-                   (and (equal? type (bv ACCOUNT 32))
-                        (let* ((account-entry
-                                (cdr (LedgerEntry-data ledger-entry)))
-                               (id (AccountEntry-accountID account-entry)))
-                          (equal? (cdr id) (cdr account-id)))))
-                 (account-exists?-path-explorer gen (cdr ledger) account-id)))))))
-  (begin
-    (define (execute-tx-path-explorer gen ledger time tx-envelope)
-       (begin
-         #;(assume (equal? (car tx-envelope) (bv ENVELOPE_TYPE_TX 32)))
-         (let* ((tx (TransactionV1Envelope-tx (cdr tx-envelope)))
-                (op (vector-ref-bv (Transaction-operations tx) (bv 0 1)))
-                (op-type (car (Operation-body op)))
-                (account-id
-                 (CreateAccountOp-destination (cdr (Operation-body op)))))
-           (begin
-             (assume (equal? op-type (bv CREATE_ACCOUNT (bitvector 32))))
-             (let ((cond (account-exists?-path-explorer gen ledger account-id)) (branch (gen 2)))
-               (if (equal? branch 0)
-                 (begin
-                   #;(println (format "condition: ~a" cond))
-                   (assert cond)
-                   (list CREATE_ACCOUNT_ALREADY_EXIST))
-                 (begin
-                   #;(println (format "condition: ~a" (! cond)))
-                   (assert (! cond))
-                   (list CREATE_ACCOUNT_SUCCESS))))))
-         #;(parameterize ([error-print-width 250])
-           (println (format "VC: ~.s" (vector-ref (struct->vector (vc)) 1))))))))
+;) (list #'define/path-explorer))))
 
 (define input-tx (TransactionEnvelope-grammar #:depth 8))
 ; TODO: what's an appropriate depth? Maybe compute the min depth needed when unfolding recursive types only once.
@@ -112,13 +71,13 @@
 ; A ledger is a list of ledger entries
 ; For now, let's start with a single entry
 (define input-ledger
-  `(,(LedgerEntry-grammar #:depth 8)))
+  `(,(LedgerEntry-grammar #:depth 8) ,(LedgerEntry-grammar #:depth 8)))
 
 ;(all-paths (λ (gen) (execute-tx-path-explorer gen input-ledger null input-tx)))
 
-;(define solution-list (stream->list (all-paths (λ (gen) (execute-tx/path-explorer gen input-ledger null input-tx)))))
+(define solution-list (stream->list (all-paths (λ (gen) (execute-tx/path-explorer gen input-ledger null input-tx)))))
 
-#;(for ([s solution-list])
+(for ([s solution-list])
   (if (sat? s)
       (let* ([syms (set-union (symbolics input-tx) (symbolics input-ledger))]
              [complete-sol (complete-solution s syms)])
