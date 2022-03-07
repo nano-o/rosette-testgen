@@ -18,12 +18,12 @@
   ; First we rewrite "or", "and", "case" to "if" expressions
   (define-syntax-class l0
     #:description "the input language"
-    [pattern ((~literal let) ([x*:id e*:l0] ...) body:l0)
+    [pattern ((~literal let) ([x*:id e*:l0] ...) body*:l0 ...)
              ; TODO: recurse in the bindings
-             #:attr l1 #`(let ([x* e*.l1] ...) body.l1)]
-    [pattern ((~literal let*) ([x*:id e*:l0] ...) body:l0)
+             #:attr l1 #`(let ([x* e*.l1] ...) body*.l1 ...)]
+    [pattern ((~literal let*) ([x*:id e*:l0] ...) body*:l0 ...)
              ; TODO: recurse in the bindings
-             #:attr l1 #`(let* ([x* e*.l1] ...) body.l1)]
+             #:attr l1 #`(let* ([x* e*.l1] ...) body*.l1 ...)]
     [pattern ((~literal if) c:l0 then:l0 else:l0)
              #:attr l1 #'(if c.l1 then.l1 else.l1)]
     [pattern ((~literal or) e*:l0 ...)
