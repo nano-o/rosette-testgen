@@ -3,7 +3,7 @@
 (require
   (for-syntax syntax/parse racket/syntax pretty-format)
   macro-debugger/expand
-  racket/stxparam rackunit
+  racket/stxparam syntax/parse/define
   "./generators.rkt")
 
 (provide define/path-explorer all-paths (for-syntax debug?))
@@ -130,19 +130,18 @@
     [pattern (fn:id arg0:l1 ...)
              #:attr res #'(fn arg0.res ...)]))
 
-(define-syntax (define/path-explorer stx) ; TODO use define-simple-macro
-  (syntax-parse stx
-    [(_ (name:id arg0:id ...) body:l0)
-     (if debug? (println (format "synthesizing ~a/path-explorer" (syntax->datum #'name))) (void)) ; this runs at compile-time
-     (set-add! fn-with-explorer (syntax-e #'name))
-     (syntax-parse #'body.l1
-       [e:l1
-        #`(begin
-            (define (#,(explorer-id #'name) gen arg0 ...)
-              (syntax-parameterize ([the-generator (make-rename-transformer #'gen)])
-                e.res))
-            (define (name arg0 ...)
-              body))])]))
+(define-syntax-parser define/path-explorer
+  [(_ (name:id arg0:id ...) body:l0)
+   (if debug? (println (format "synthesizing ~a/path-explorer" (syntax->datum #'name))) (void)) ; this runs at compile-time
+   (set-add! fn-with-explorer (syntax-e #'name))
+   (syntax-parse #'body.l1
+     [e:l1
+      #`(begin
+          (define (#,(explorer-id #'name) gen arg0 ...)
+            (syntax-parameterize ([the-generator (make-rename-transformer #'gen)])
+              e.res))
+          (define (name arg0 ...)
+            body))])])
 
 ; all-paths return a stream of solutions
 (define (all-paths prog) ; prog must take a generator as argument
