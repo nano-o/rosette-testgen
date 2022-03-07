@@ -30,13 +30,15 @@
              #:attr l1 (or->ifs (syntax->list #'(e* ...)))]
     [pattern ((~literal and) e*:l0 ...)
              #:attr l1 (and->ifs (syntax->list #'(e* ...)))]
-    [pattern (fn:id arg0:l0 ...)
-             #:attr l1 #'(fn arg0.l1 ...)]
-    [pattern (~or _:id _:number _:boolean)
-             #:attr l1 this-syntax]
     [pattern ((~literal assume) e:expr)
              ; assume expressions are left untouched
-             #:attr l1 this-syntax])
+             #:attr l1 this-syntax]
+    [pattern ((~literal case) e:l0 [(d**:expr ...) body**:l0 ...] ...)
+             #:attr l1 #'(case e.l1 [(d** ...) body**.l1 ...] ...)]
+    [pattern (~or _:id _:number _:boolean)
+             #:attr l1 this-syntax]
+    [pattern (fn:id arg0:l0 ...)
+             #:attr l1 #'(fn arg0.l1 ...)])
   
   (define (or->ifs e*)
     (if (null? e*)
@@ -79,32 +81,16 @@
   (define-syntax-class (has-path-explorer)
     [pattern x:id
              #:when (set-member? fn-with-explorer (syntax-e #'x))])
-
+    
   (define-syntax-class l1
     ; TODO "and" and "or"
     #:description "an expression amenable to path-exploration"
-    [pattern ((~literal let*) bindings body:l1)
-             ; TODO: recurse in the bindings
-             #:attr res #`(let* bindings body.res)]
-    [pattern ((~literal let) bindings body:l1)
-             ; TODO: recurse in the bindings
-             #:attr res #`(let bindings body.res)]
-    [pattern e:if-expr
-             #:attr res #'e.res]
-    [pattern (fn:has-path-explorer arg0:l1 ...)
-             #:attr res #`(#,(explorer-id #'fn) the-generator arg0.res ...)]
-    [pattern (fn:id arg0:l1 ...)
-             #:attr res #'(fn arg0.res ...)]
-    [pattern (~or _:id _:number _:boolean)
-             #:attr res this-syntax]
-    [pattern ((~literal assume) e:expr)
-             ; assume expressions are left untouched
-             #:attr res this-syntax])
-    
-  (define-syntax-class if-expr
-    #:description "an if expression"
+    [pattern ((~literal let*) ([x*:id e*:l1] ...) body:l1)
+             #:attr res #`(let* ([x* e*.res] ...) body.res)]
+    [pattern ((~literal let) ([x*:id e*:l1] ...) body:l1)
+             #:attr res #`(let ([x* e*.res] ...) body.res)]
     [pattern ((~literal if) cond:l1 then:l1 else:l1)
-             #:attr res #`(let ([c cond.res]) ; NOTE it's important to evaluate cond.expr first
+             #:attr res #`(let ([c cond.res]) ; NOTE it's important to evaluate cond.res first
                             (if (equal? (the-generator 2) 0)
                                 (begin
                                   #,@(print-branch 0 #'cond)
@@ -113,7 +99,32 @@
                                 (begin
                                   #,@(print-branch 1 #'(not cond))
                                   (assume (not c))
-                                  else.res)))]))
+                                  else.res)))]
+    [pattern (fn:has-path-explorer arg0:l1 ...)
+             #:attr res #`(#,(explorer-id #'fn) the-generator arg0.res ...)]
+    [pattern ((~literal case) e:l1 [(d**:expr ...) body**:l1 ...] ...)
+             #:attr res (let* ([res** (reverse
+                                       (for/fold ([res null])
+                                                 ([body* (syntax->list #'((body**.res ...) ...))])
+                                         (let ([new-body*
+                                                (with-syntax
+                                                    ([(body ...) body*])
+                                                  ; TODO debug prints
+                                                  #`((assume (equal? #,(length res) i)) body ...))])
+                                           ; here it's interesting that "i" seems to be bound to the right thing (the i blow)
+                                           (cons new-body* res))))])
+                          (with-syntax
+                              ([((body.res** ...) ...) res**])
+                            #`(let ([val e.res]
+                                    [i (the-generator #,(length res**))])
+                                (case val [(d** ...) body.res** ...] ...))))]
+    [pattern ((~literal assume) e:expr)
+             ; assume expressions are left untouched
+             #:attr res this-syntax]
+    [pattern (~or _:id _:number _:boolean)
+             #:attr res this-syntax]
+    [pattern (fn:id arg0:l1 ...)
+             #:attr res #'(fn arg0.res ...)]))
 
 (define-syntax (define/path-explorer stx)
   (syntax-parse stx
@@ -140,19 +151,19 @@
         (if (equal? (gen 0) 0) (stream-cons solution (go)) (stream-cons solution empty-stream)))))
   (go))
 
+
 ;(pretty-display (syntax->datum
 ;(expand-only #'
 ;             (begin
 (define/path-explorer (test-2 x)
-  (if (< x 3)
-      (+ x 1)
-      (- x 1)))
+  (case (< x 3)
+    [(#t) (+ x 1)]
+    [(#f) (- x 1)]))
 (define/path-explorer (test x)
   (if (< (test-2 x) 0)
       (void)
       (void)))
-;) (list #'define-with-path-explorer #'path-explorer))))
-
+;) (list #'define/path-explorer))))
 
 (define-symbolic x integer?)
 (for ([m (stream->list (all-paths (λ (gen) (test/path-explorer gen x))))])
