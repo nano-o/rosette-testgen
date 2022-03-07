@@ -3,7 +3,8 @@
 (require
   (for-syntax syntax/parse racket/syntax pretty-format)
   macro-debugger/expand
-  racket/stxparam "./generators.rkt" syntax/parse)
+  racket/stxparam rackunit
+  "./generators.rkt")
 
 (provide define/path-explorer all-paths (for-syntax debug?))
 
@@ -13,34 +14,48 @@
 
 (begin-for-syntax
   (define debug? #t)
-
+  
+  ; First we rewrite "or", "and", "case" to "if" expressions
   (define-syntax-class l0
     #:description "the input language"
-    [pattern ((~literal let*) bindings body:l0)
+    [pattern ((~literal let) ([x*:id e*:l0] ...) body:l0)
              ; TODO: recurse in the bindings
-             #:attr l1 #`(let* bindings body.l1)]
-    [pattern ((~literal let) bindings body:l0)
+             #:attr l1 #`(let ([x* e*.l1] ...) body.l1)]
+    [pattern ((~literal let*) ([x*:id e*:l0] ...) body:l0)
              ; TODO: recurse in the bindings
-             #:attr l1 #`(let bindings body.l1)]
+             #:attr l1 #`(let* ([x* e*.l1] ...) body.l1)]
     [pattern ((~literal if) c:l0 then:l0 else:l0)
              #:attr l1 #'(if c.l1 then.l1 else.l1)]
     [pattern ((~literal or) e*:l0 ...)
              #:attr l1 (or->ifs (syntax->list #'(e* ...)))]
+    [pattern ((~literal and) e*:l0 ...)
+             #:attr l1 (and->ifs (syntax->list #'(e* ...)))]
     [pattern (fn:id arg0:l0 ...)
              #:attr l1 #'(fn arg0.l1 ...)]
     [pattern (~or _:id _:number _:boolean)
+             #:attr l1 this-syntax]
+    [pattern ((~literal assume) e:expr)
+             ; assume expressions are left untouched
              #:attr l1 this-syntax])
-    
-  ; First we rewrite "or", "and", "case" to "if" expressions
+  
   (define (or->ifs e*)
     (if (null? e*)
-        #f
+        #'#f
         (with-syntax
             ([rest (or->ifs (cdr e*))])
           #`(if #,(car e*)
                 #t
                 rest))))
 
+  (define (and->ifs e*)
+    (if (null? e*)
+        #'#t
+        (with-syntax
+            ([rest (and->ifs (cdr e*))])
+          #`(if #,(not (car e*))
+                #f
+                rest))))
+  
   ; Next we synthesize path-explorer expressions
 
   ; a set containing the function names that have a path explorer
@@ -51,8 +66,8 @@
 
   ; Now we define a syntax class that synthesize the path-explorer version of a function's body.
   ; The syntax class should match a subset of Racket expressions that we want to use in our specifications.
-  ; TODO report an error if something's not supported
-  ; NOTE we need to be careful about evaluation order, essentially mimicking CPS
+  ; TODO report an error if something's not supported.
+  ; NOTE we need to be careful about evaluation order, essentially mimicking CPS.
 
   ; synthesize debug printout
   (define (print-branch i c)
@@ -81,6 +96,9 @@
     [pattern (fn:id arg0:l1 ...)
              #:attr res #'(fn arg0.res ...)]
     [pattern (~or _:id _:number _:boolean)
+             #:attr res this-syntax]
+    [pattern ((~literal assume) e:expr)
+             ; assume expressions are left untouched
              #:attr res this-syntax])
     
   (define-syntax-class if-expr

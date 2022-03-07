@@ -51,6 +51,10 @@
   ; How are sequence numbers used? Seems like a transaction must a a sequence number one above its source account
   ; What about time bounds?
   (begin
+    ; Assume we only have account entries in the ledger
+    (assume (andmap
+              (λ (e) (equal? (car (LedgerEntry-data e)) (bv ACCOUNT 32)))
+            ledger))
     ; Assume we have a create-account transaction:
     (assume (equal? (car tx-envelope) (bv ENVELOPE_TYPE_TX 32)))
     (let* ([tx (TransactionV1Envelope-tx (cdr tx-envelope))]
