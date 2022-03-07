@@ -73,9 +73,11 @@
 
   ; synthesize debug printout
   (define (print-branch i c)
-    (let ([str (pretty-format "branch number ~a with condition ~a" i (syntax->datum c))])
+    (let*
+        ([i (if (not (syntax? i)) (datum->syntax #'() i) i)]
+         [c (pretty-format "~a" (syntax->datum c))])
       (if debug?
-          #`((displayln #,(datum->syntax #'() str)))
+          #`((displayln (format "branch number ~a with condition ~a" #,i #,(datum->syntax #'() c))))
           #'())))
 
   (define-syntax-class (has-path-explorer)
@@ -105,13 +107,15 @@
     [pattern ((~literal case) e:l1 [(d**:expr ...) body**:l1 ...] ...)
              #:attr res (let* ([res** (reverse
                                        (for/fold ([res null])
-                                                 ([body* (syntax->list #'((body**.res ...) ...))])
+                                                 ([body* (syntax->list #'((body**.res ...) ...))]
+                                                  [d* (syntax->list #'((d** ...) ...))])
                                          (let ([new-body*
                                                 (with-syntax
                                                     ([(body ...) body*])
-                                                  ; TODO debug prints
-                                                  #`((assume (equal? #,(length res) i)) body ...))])
-                                           ; here it's interesting that "i" seems to be bound to the right thing (the i blow)
+                                                  #`((assume (equal? #,(length res) i))
+                                                     #,@(print-branch #'i #`(case #,d*))
+                                                     body ...))])
+                                           ; here it's interesting that "i" seems to be bound to the right thing (the i below)
                                            (cons new-body* res))))])
                           (with-syntax
                               ([((body.res** ...) ...) res**])
@@ -126,7 +130,7 @@
     [pattern (fn:id arg0:l1 ...)
              #:attr res #'(fn arg0.res ...)]))
 
-(define-syntax (define/path-explorer stx)
+(define-syntax (define/path-explorer stx) ; TODO use define-simple-macro
   (syntax-parse stx
     [(_ (name:id arg0:id ...) body:l0)
      (if debug? (println (format "synthesizing ~a/path-explorer" (syntax->datum #'name))) (void)) ; this runs at compile-time
