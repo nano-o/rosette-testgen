@@ -1,6 +1,6 @@
 #lang racket
 
-(require syntax/parse)
+(require syntax/parse racket/syntax "Stellar-inline.rkt")
 
 ; We serialize synthesized transactions and ledger entries to the representation expected by the guile-rpc library
 
@@ -24,12 +24,11 @@
            (cons
             (bv CREATE_ACCOUNT (bitvector 32))
             (CreateAccountOp
-             (choose
-              (cons
-               (bv PUBLIC_KEY_TYPE_ED25519 (bitvector 32))
-               (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
+             (cons
+              (bv PUBLIC_KEY_TYPE_ED25519 (bitvector 32))
+              (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
              (bv #x0000000000000000 64)))))
-         (choose (cons (bv 0 (bitvector 32)) null)))
+         (cons (bv 0 (bitvector 32)) null))
         (vector
          (DecoratedSignature
           (bv #x00000000 32)
@@ -42,6 +41,11 @@
     [((~datum define) _ d:xdr-rep) #'d.out]))
 
 ; TODO we cannot tell integers from opaque arrays...
+; In guile-rpc, fixed-length types are represented with lists while variable-length ones are represented with vectors.
+; Enum values are also a problem. We could use Racket structs for those.
+; Another solution is to use the type description to guide the translation.
+(define-namespace-anchor a)
+(define ns (namespace-anchor->namespace a))
 
 (define-syntax-class xdr-rep
   #:datum-literals (cons bv vector null bitvector)
@@ -49,19 +53,28 @@
            #:attr out #`(cons 'i val.out)]
   [pattern (cons tag:xdr-rep val:xdr-rep)
            #:attr out #'(cons tag.out val.out)]
+  [pattern (bv v:number (~or 32 64)) ; TODO hack
+           #:attr out #'v]
   [pattern (bv v:number n:number)
-           #:attr out #''(bv v n)]
+           #:attr out #''(bv v n)] ; TODO vector of bytes
+  [pattern (bv v:number (bitvector (~or 32 64)))
+           #:attr out #'v]
   [pattern (bv v:number (bitvector n:number))
            #:attr out #''(bv v n)]
   [pattern (vector e*:xdr-rep ...)
            #:attr out #'`#(,e*.out ...)]
   [pattern (struct-name:id e*:xdr-rep ...)
+           #:when (let ([type-id (format-id #'() "struct:~a" #'struct-name)])
+                    (and
+                     (identifier-binding type-id)
+                     (struct-type? (eval-syntax type-id ns))))
            #:attr out #'`(,e*.out ...)]
-  [pattern null
-           #:attr out #''void]
   [pattern n:number
            #:attr out #'n]
-  [pattern (e*:xdr-rep ...)
+  [pattern null
+           #:attr out #''void]
+  #;[pattern (e*:xdr-rep ...)
+           #:do ((println (format "matched ~a" #'(e* ...))))
            #:attr out #'`(,e*.out ...)])
 
-(syntax->datum (racket->guile-rpc tx-1))
+(eval-syntax (racket->guile-rpc tx-1) ns)
