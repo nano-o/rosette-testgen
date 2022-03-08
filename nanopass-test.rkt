@@ -1,14 +1,14 @@
 #lang nanopass
 
 (require racket/hash)
-(provide L0-parser normalize-unions contains-nested-enums?)
+(provide (all-defined-out))
+ ;L0-parser normalize-unions has-nested-enum? make-consts-hashmap)
 
 (define-language L0
   (terminals
    (identifier (i))
    (constant (c))
    (value (v)) ; an identifier or a constant
-   (value-or-false (vf))
    (void (void)))
   (XDR-Spec ()
             (def* ...))
@@ -21,7 +21,7 @@
   (Spec (type-spec)
         i
         (string c)
-        (variable-length-array type-spec vf)
+        (variable-length-array type-spec (maybe v))
         (fixed-length-array type-spec v)
         (enum (i* c*) ...)
         (struct decl* ...)
@@ -40,6 +40,9 @@
 (define (void? x) (equal? x "void"))
 
 (define-parser L0-parser L0)
+
+(define test-0 '((define-type "t" (union (case ("tag" "type") (("X") ("x" "tx")) (else ("y" "Y")))))))
+(L0-parser test-0)
 
 (define test-1
   '((define-type "test-union"
@@ -72,9 +75,9 @@
 (eval-src (Lsrc-parser '(add 1 1)) 1)
 |#
 
-; check that we do not have any nested enums
+; throws an exception if there are any nested enums
 ; NOTE we produce L0 to allow the framework to synthesis most of the rules
-(define-pass contains-nested-enums? : L0 (ir) -> L0 ()
+(define-pass throw-if-nested-enum : L0 (ir) -> L0 ()
   (Def : Def (ir) -> Def ()
        ; a top-level enum: 
        ((define-type ,i (enum (,i* ,c*) ...)) ir))
@@ -82,7 +85,13 @@
         ((enum (,i* ,c*) ...)
          (error "enums defined inside other types are not supported"))))
 
-(println (contains-nested-enums? (L0-parser test-1)))
+(define (has-nested-enum? l0)
+  (with-handlers ([exn:fail? (λ (exn) #t)])
+    (begin
+      (throw-if-nested-enum l0)
+      #f)))
+
+(println (has-nested-enum? (L0-parser test-1)))
 
 (define test-2
   '((define-type "test-struct"
@@ -91,16 +100,9 @@
 (define test-3
   '((define-type "t1" (enum ("A" 1)))))
 
-(with-handlers ([exn:fail? (λ (exn) (println "ok"))])
-  (println (contains-nested-enums? (L0-parser test-2))))
-(println (contains-nested-enums? (L0-parser test-3)))
+(println (has-nested-enum? (L0-parser test-2)))
+(println (has-nested-enum? (L0-parser test-3)))
 
-(define-language L1
-  (extends L0)
-  (Union-Case-Spec (union-case-spec)
-   (- ((v* ...) decl)
-      (else decl))
-   (+ (v decl))))
 
 ; returns a hashmap mapping top-level enum symbols and constants to values
 (define-pass make-consts-hashmap : L0 (ir) -> * ()
@@ -116,47 +118,19 @@
            (values i c)))
         (else (hash))))
 
-#;(define-pass make-consts-hashmap-2 : L0 (ir) -> * (h)
-  (XDR-Spec : XDR-Spec (ir) -> * (h)
-            ((,[Def : def -> * h*] ...)  ; TODO why can Def not be found automatically?
-             (apply hash-union h*)))
-  (Def : Def (ir) -> * (h)
-        ((define-type ,i ,[Spec : type-spec -> * h]) h)
-        ((define-constant ,i ,c) (hash i c)))
-  (Decl : Decl (ir) -> * (h)
-        (else (hash)))
-  (Spec : Spec (ir) -> * (h)
-        ((enum (,i* ,c*) ...)
-         (for/hash ([i i*] [c c*])
-           (values i c)))
-        (else (hash)))
-  (Union-Spec : Union-Spec (ir) -> * (h)
-              (else (hash)))
-  (Union-Case-Spec : Union-Case-Spec (ir) -> * (h)
-                   (else (hash))))
-
 (define test-4
   '((define-type "test-enum" (enum ("A" 1) ("B" 2))) (define-constant "C" 3)))
 
 (make-consts-hashmap (L0-parser test-3))
 
-#|
-(println (make-enum-hashmap (L0-parser test-2)))
-(define-pass replace-else : L0 (ir enums) -> L0 ()
-  (Union-Spec : Union-Spec (ir) -> Union-Spec ()
-              ((case (,i1 ,i2)
-                 ((,o** ...) (,i* ,type-spec*)) ... (else (,i ,type-spec)))
-               (let* ([])
-                 `(case (,i1 ,i2) 
-                    ((,o** ...) (,i* ,type-spec*)) ...)))))
+; next we normalize union specs
 
-(define test-3
-  '((define-type "test-union"
-      (union (case ("tagname" "tagtype")
-               (("A") ("x" "T")) (else ("y" "U")))))))
-
-(replace-else (L0-parser test-3) null)
-|#
+(define-language L1
+  (extends L0)
+  (Union-Case-Spec (union-case-spec)
+                   (- ((v* ...) decl)
+                      (else decl))
+                   (+ (v decl))))
 
 (define (multi-alist->alist m-alist)
   (let ([kvs
@@ -167,20 +141,28 @@
         `(,@kvs ,@(multi-alist->alist (cdr m-alist))))))
 
 
+(define (replace-else tag-decl*)
+  (let* ([tags (dict-keys tag-decl*)]
+         [tag-decl2*
+          (if (set-member? tags 'else)
+              (let* ([other-tags (set-remove tags 'else)]
+                     [else-tags '("TODO")]
+                     [else-tag-decl* (for/list ([t else-tags])
+                                       `(,t . ,(dict-ref tag-decl* 'else)))])
+                (append (dict-remove tag-decl* 'else) else-tag-decl*))
+              tag-decl*)])
+    tag-decl2*))
+
 (define-pass normalize-unions : L0 (ir) -> L1 ()
+  (Union-Case-Spec : Union-Case-Spec (ir) -> * ()
+                   (((,v* ...) ,[decl]) (for/list ([v v*])
+                                        `(,v . ,decl)))
+                   ((else ,decl) `((else . ,decl))))
   (Union-Spec : Union-Spec (ir) -> Union-Spec ()
-              ((case (,i1 ,i2) ((,v** ...) (,i* ,[type-spec*])) ...)
-               (let* ([tags (flatten v**)]
-                      [malist
-                       (for/list ([v* v**]
-                                  [i i*]
-                                  [type-spec type-spec*])
-                         (cons v* (cons i type-spec)))]
-                      [alist (multi-alist->alist malist)]
-                      [tag* (map car alist)]
-                      [acc* (map cadr alist)]
-                      [t* (map cddr alist)])
-                 `(case (,i1 ,i2) (,tag* (,acc* ,t*)) ...))))
-  (XDR-Spec : XDR-Spec (ir) -> XDR-Spec ()))
+              ((case (,i1 ,i2) ,[Union-Case-Spec : -> * alist*] ...)
+               (let* ([tag-decl2* (replace-else (apply append alist*))]
+                      [tag* (map car tag-decl2*)]
+                      [decl* (map cdr tag-decl2*)])
+                 `(case (,i1 ,i2) (,tag* ,decl*) ...)))))
 
 (normalize-unions (L0-parser test-1))
