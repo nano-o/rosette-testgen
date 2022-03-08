@@ -1,5 +1,9 @@
 #lang racket
 
+; TODO we need a way to fix the length of variable-length types.
+; TODO we could also override some types, e.g. public keys, by providing a set of alternatives to choose from.
+; This could also be achived using additional constraints later down the pipeline.
+
 (require
   racket/match racket/syntax racket/generator racket/hash
   "xdr-compiler.rkt" ;"guile-ast-example.rkt"
@@ -184,9 +188,14 @@
 
 ; rule-body returns a rule body for the type t
 (define (rule-body stx-context t)
-  (define (make-vector elem-type-rule size)
-    #`(vector
+  (define (make-sequence seq-t elem-type-rule size)
+    #`(#,seq-t
+       ; TODO: here we need a numeric value for size...
        #,@(for/list ([i (in-range (get-const-value stx-context size))]) elem-type-rule)))
+  (define (make-vector elem-type-rule size)
+    (make-sequence "vector" elem-type-rule size))
+  (define (make-list elem-type-rule size)
+    (make-sequence "list" elem-type-rule size))
   ; NOTE Here we assume all 'else cases have been removed from unions
   (match t
     ["void" #'null]
@@ -196,25 +205,21 @@
     ["unsigned hyper" #'(?? (bitvector 64))]
     [s #:when (string? s) ; A type symbol: call its rule
        (rule-hole s)]
-    ; Opaque fixed-length array. Represented by a bitvector.
+    ; Opaque fixed-length array. Represented by a list of bytes.
     [(opaque-fixed-length-array-type nbytes)
-     #`(?? (bitvector #,(* nbytes 8)))]
-    [(opaque-variable-length-array-type max-length) ; a pair (length . data) where data is a bitvector
-     ; TODO we will need a constraint saying that the first 4 bytes is the length...
-     #`(cons #,max-length (?? (bitvector #,(* max-length 8))))]
-    [(string-type nbytes) ; just a vector of bytes for now
-     ; TODO if nothing actually depends on string values then this can be optimized
+     (make-list #'(?? (bitvector 8)) nbytes)]
+    [(opaque-variable-length-array-type max-length) ; a vector of bytes of size max-length. TODO this should be variable size.
+     (make-vector #'(?? (bitvector 8)) max-length)]
+    [(string-type nbytes) ; a vector of size nbytes. TODO this should be variable size.
      (make-vector #'(?? (bitvector 8)) nbytes)]
-    ; Fixed length array. Represented by a vector.
+    ; Fixed length array. Represented by a list.
     [(fixed-length-array-type elem-type size)
      (let* ([elem-body (rule-body stx-context elem-type)]
-            [body (make-vector
-                   #`(vector elem-body size))])
+            [body (make-list elem-body size)])
        body)]
-    [(variable-length-array-type elem-type max-size)
-     ; TODO: for now we'll assume this has length 1
+    [(variable-length-array-type elem-type max-size) ; vector of size max-size. TODO this should be variable
      (let* ([elem-body (rule-body stx-context elem-type)]
-            [body #`(vector #,elem-body)])
+            [body (make-vector elem-body max-size)])
        body)]
     [(struct* enum-type ([values (hash-table (k* v*) ...)]))
      (let* ([bvs (map (λ (w) #`(bv #,(format-id stx-context "~a" w) (bitvector 32))) k*)])
@@ -222,6 +227,7 @@
     [(union-type tag tag-type variants)
      ; Variants can in principle refer to enum constants defined inline in the tag type, but we don't support inline tag types.
      ; The type of a variant can however be an inline type specification.
+     ; TODO do not use choose when there's only one variant (see Rosette doc: it's (choose x ...+))
      (begin
        (if (not (string? tag-type)) (error "we do not support inline tag types") (void))
        (let* ([bodys
