@@ -8,7 +8,7 @@
   (syntax-parse stx
     [(_ defs)
      (begin
-       (pass-1 (L0-parser (syntax->datum #'defs)))
+       (displayln (L0-parser (syntax->datum #'defs)))
        #'(println "hello"))]))
 
 (test

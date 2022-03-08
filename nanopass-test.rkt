@@ -1,7 +1,7 @@
 #lang nanopass
 
 (require racket/hash)
-(provide L0-parser normalize-unions)
+(provide L0-parser normalize-unions contains-nested-enums?)
 
 (define-language L0
   (terminals
@@ -72,36 +72,15 @@
 (eval-src (Lsrc-parser '(add 1 1)) 1)
 |#
 
-(define (contains-true? l)
-  (not (null? (filter identity l))))
-
 ; check that we do not have any nested enums
-; TODO lot of boilerplate here
-; TODO maybe removing the output param allow synthesis?
-(define-pass contains-nested-enums? : L0 (ir) -> * (b)
-  (XDR-Spec : XDR-Spec (ir) -> * (b)
-            ((,[b*] ...) (contains-true? b*)))
-  (Def : Def (ir) -> * (b)
-        ((define-type ,i (enum (,i* ,c*) ...)) #f)
-        ((define-type ,i ,[b]) b)
-        (else #f))
-  (Decl : Decl (ir) -> * (b)
-        ((,i ,[b]) b)
-        (,void #f))
-  (Spec : Spec (ir) -> * (b)
-        ((variable-length-array ,[b] ,vf) b)
-        ((fixed-length-array ,[b] ,v) b)
-        ((enum (,i* ,c*) ...) #t)
-        ((struct ,[b*] ...) (contains-true? b*))
-        ((union ,[b]) b)
-        (else #f))
-  (Union-Spec : Union-Spec (ir) -> * (b)
-              ((case (,i1 ,i2)
-                ,[b*] ...) (contains-true? b*)))
-  (Union-Case-Spec : Union-Case-Spec (ir) -> * (b)
-                   (((,v* ...) ,[b]) b)
-                   ((else ,[b]) b))
-  (XDR-Spec ir))
+; NOTE we produce L0 to allow the framework to synthesis most of the rules
+(define-pass contains-nested-enums? : L0 (ir) -> L0 ()
+  (Def : Def (ir) -> Def ()
+       ; a top-level enum: 
+       ((define-type ,i (enum (,i* ,c*) ...)) ir))
+  (Spec : Spec (ir) -> Spec ()
+        ((enum (,i* ,c*) ...)
+         (error "enums defined inside other types are not supported"))))
 
 (println (contains-nested-enums? (L0-parser test-1)))
 
@@ -109,7 +88,12 @@
   '((define-type "test-struct"
       (struct ("t1" (enum ("A" 1)))))))
 
-(println (contains-nested-enums? (L0-parser test-2)))
+(define test-3
+  '((define-type "t1" (enum ("A" 1)))))
+
+(with-handlers ([exn:fail? (λ (exn) (println "ok"))])
+  (println (contains-nested-enums? (L0-parser test-2))))
+(println (contains-nested-enums? (L0-parser test-3)))
 
 (define-language L1
   (extends L0)
@@ -151,7 +135,7 @@
   (Union-Case-Spec : Union-Case-Spec (ir) -> * (h)
                    (else (hash))))
 
-(define test-3
+(define test-4
   '((define-type "test-enum" (enum ("A" 1) ("B" 2))) (define-constant "C" 3)))
 
 (make-consts-hashmap (L0-parser test-3))
