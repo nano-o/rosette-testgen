@@ -9,6 +9,8 @@
 (provide (all-defined-out))
  ;L0-parser normalize-unions has-nested-enum? make-consts-hashmap)
 
+; TODO there's pretty much no error checking
+
 (define-language L0
   (terminals
    (identifier (i))
@@ -115,24 +117,25 @@
 
 
 ; returns a hashmap mapping top-level enum symbols and constants to values
-(define-pass make-consts-hashmap : L0 (ir) -> * ()
-  (XDR-Spec : XDR-Spec (ir) -> * ()
-            ((,[Def : def -> h*] ...)
-             (apply hash-union h*)))
-  (Def : Def (ir) -> * ()
-        ((define-type ,i ,[Spec : type-spec -> h]) h)
+(define-pass make-consts-hashmap : L0 (ir) -> * (h)
+  (XDR-Spec : XDR-Spec (ir) -> * (h)
+            ((,[h*] ...) (apply hash-union h*)))
+  (Def : Def (ir) -> * (h)
+        ((define-type ,i ,[h]) h)
         ((define-constant ,i ,c) (hash i c)))
-  (Spec : Spec (ir) -> * ()
+  (Spec : Spec (ir) -> * (h)
         ((enum (,i* ,c*) ...)
          (for/hash ([i i*] [c c*])
            (values i c)))
-        (else (hash))))
+        (else (hash)))
+  (XDR-Spec ir))
 
 (define test-4
   '((define-type "test-enum" (enum ("A" 1) ("B" 2))) (define-constant "C" 3)))
 
 (make-consts-hashmap (L0-parser test-3))
-
+(make-consts-hashmap (L0-parser test-4))
+                     
 ; Make constant definitions:
 
 (define (constant-definitions stx h)
@@ -146,10 +149,10 @@
 
 ; Here we collect top-level enum definitions
 ; Returns an alist
-(define-pass enum-defs : L0 (ir) -> * ()
-  (XDR-Spec : XDR-Spec (ir) -> * ()
-            ((,[Def : -> l*] ...) (apply append l*)))
-  (Def : Def (ir) -> * ()
+(define-pass enum-defs : L0 (ir) -> * (l)
+  (XDR-Spec : XDR-Spec (ir) -> * (l)
+            ((,[l*] ...) (apply append l*)))
+  (Def : Def (ir) -> * (l)
         ((define-type ,i (enum (,i* ,c*) ...)) `((,i . ,(zip i* c*))))
         (else '()))
   (append
@@ -208,9 +211,6 @@
 
 (define Stellar-L1 (normalize-unions Stellar-L0 Stellar-enum-defs))
 
-; Next:
-; generate rules and struct-type defs
-
 (define-language L2
   ; add path of a struct in the type hierarchy
   ; this is to generate unique Racket struct names that represent struct types
@@ -233,4 +233,11 @@
   (Union-Spec : Union-Spec (ir p) -> Union-Spec ())
   (Union-Case-Spec : Union-Case-Spec (ir p) -> Union-Case-Spec ()))
 
-(add-path Stellar-L1)
+(define Stellar-L2 (add-path Stellar-L1))
+
+; collect all type defs in a hashmap
+;(define-pass collect-types : L2 (ir) -> * (h)
+;  (Def : 
+
+; Next:
+; generate rules and struct-type defs
