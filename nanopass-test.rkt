@@ -209,4 +209,28 @@
 (define Stellar-L1 (normalize-unions Stellar-L0 Stellar-enum-defs))
 
 ; Next:
-; generate constant definitions, rules, and struct-type defs
+; generate rules and struct-type defs
+
+(define-language L2
+  ; add path of a struct in the type hierarchy
+  ; this is to generate unique Racket struct names that represent struct types
+  (extends L1)
+  (terminals
+   (+ (path (p))))
+  (Spec (type-spec)
+        (- (struct decl* ...))
+        (+ (struct p decl* ...))))
+
+(define path? list?)
+
+(define-pass add-path : L1 (ir) -> L2 ()
+  (Def : Def (ir) -> Def ()
+       ((define-type ,i ,[Spec : type-spec0 (list i) -> type-spec1])
+        `(define-type ,i ,type-spec1)))
+  (Decl : Decl (ir p) -> Decl ()) ; NOTE processors with inputs are not auto-generated, but their body is
+  (Spec : Spec (ir p) -> Spec ()
+        ((struct ,[Decl : decl0 p -> decl1] ...) `(struct ,(cdr p) ,decl1 ...)))
+  (Union-Spec : Union-Spec (ir p) -> Union-Spec ())
+  (Union-Case-Spec : Union-Case-Spec (ir p) -> Union-Case-Spec ()))
+
+(add-path Stellar-L1)
