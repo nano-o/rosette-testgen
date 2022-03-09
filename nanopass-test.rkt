@@ -249,25 +249,60 @@
 
 (define Stellar-types (collect-types Stellar-L2))
 
+(define base-types '("opaque" "void" "int" "unsigned int" "hyper" "unsigned hyper" "double" "unsigned double"))
+(define (base-type? t)
+  (set-member? base-types t))
+
 (define-pass dependencies : (L2 Spec) (ir) -> * (d)
   ; all the types the given type spec depends on
   (Spec : Spec (ir) -> * (d)
-        (,i (list i))
+        (,i (if (base-type? i) (set) (set i)))
         ((variable-length-array ,[d] ,v) d)
         ((fixed-length-array ,[d] ,v) d)
         ((struct ,p ,[d*] ...) (apply set-union d*))
         ((union ,[d]) d)
-        (else null))
+        (else (set)))
   (Union-Spec : Union-Spec (ir) -> * (d)
               ((case (,i1 ,i2) ,[d*] ...) (apply set-union d*)))
   (Decl : Decl (ir) -> * (d)
         ((,i ,[d]) d)
-        (else null))
+        (else (set)))
   (Union-Case-Spec : Union-Case-Spec (ir) -> * (d)
                    ((,v ,[d]) d))
   (Spec ir))
 
 (dependencies (hash-ref Stellar-types "TransactionEnvelope"))
+
+(define (dependencies/rec h type-name)
+  ; here we must deal with cycles!
+  ; we use depth-first search
+  (let df-search ([t type-name]
+                  [visited (set)])
+    (if (set-member? visited t)
+        (set)
+        (let* ([xdr-type (hash-ref h t)]
+               [deps (dependencies xdr-type)]
+               [rec-deps
+                (for/fold ([rec-deps (set)]
+                           [vs (set-add visited t)]
+                           #:result rec-deps)
+                          ([ty (in-set deps)])
+                  (let ([ty-deps (df-search ty vs)])
+                    (values (set-union rec-deps ty-deps) (set-add vs ty))))])
+          (set-union deps rec-deps)))))
+
+(dependencies/rec Stellar-types "TransactionEnvelope")
+(dependencies/rec Stellar-types "TransactionResult")
+(dependencies/rec Stellar-types "LedgerEntry")
+
+(define (make-struct-type stx name fields) ; name and fields as strings
+  (let ([field-names (for/list ([f fields])
+                       (format-id stx "~a" f))])
+        #`(struct #,(format-id stx "~a" name) #,field-names #:transparent)))
+
+(make-struct-type #'() "my-struct" '("field1" "field2"))
+
+
   
 ; Next:
 ; generate rules and struct-type defs
