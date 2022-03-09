@@ -232,7 +232,6 @@
          `(,i ,type-spec1)))
   (Spec : Spec (ir p) -> Spec ()
         ((struct ,[Decl : decl0 p -> decl1] ...)
-         (when (> (length p) 1) (println p))
          `(struct ,p ,decl1 ...)))
   (Union-Spec : Union-Spec (ir p) -> Union-Spec ())  ; NOTE processors with inputs are not auto-generated, but their body is
   (Union-Case-Spec : Union-Case-Spec (ir p) -> Union-Case-Spec ()))
@@ -257,6 +256,8 @@
 (define (base-type? t)
   (set-member? base-types t))
 
+; Next we compute the type symbols that a type definition depends on.
+
 (define-pass dependencies : (L2 Spec) (ir) -> * (d)
   ; all the types the given type spec depends on
   (Spec : Spec (ir) -> * (d)
@@ -275,7 +276,7 @@
                    ((,v ,[d]) d))
   (Spec ir))
 
-(dependencies (hash-ref Stellar-types "TransactionEnvelope"))
+(define TransactionEnvelope-deps (dependencies (hash-ref Stellar-types "TransactionEnvelope")))
 
 (define (dependencies/rec h type-name)
   ; here we must deal with cycles!
@@ -295,9 +296,11 @@
                     (values (set-union rec-deps ty-deps) (set-add vs ty))))])
           (set-union deps rec-deps)))))
 
-(dependencies/rec Stellar-types "TransactionEnvelope")
-(dependencies/rec Stellar-types "TransactionResult")
-(dependencies/rec Stellar-types "LedgerEntry")
+(define TransactionEnvelope-deps/rec (dependencies/rec Stellar-types "TransactionEnvelope"))
+(define TransactionResult-deps/rec (dependencies/rec Stellar-types "TransactionResult"))
+(define LedgerEntry-deps/rec (dependencies/rec Stellar-types "LedgerEntry"))
+
+; Next we define needed Racket struct types
 
 (define (make-struct-type stx name fields) ; name and fields as strings
   (let ([field-names (for/list ([f fields])
@@ -306,7 +309,39 @@
 
 (make-struct-type #'() "my-struct" '("field1" "field2"))
 
+(define-pass make-struct-types : (L2 Spec) (ir stx) -> * (sts)
+  (Spec : Spec (ir) -> * (sts)
+        (,i (hash))
+        ((string ,c) (hash))
+        ((variable-length-array ,[sts] ,v) sts)
+        ((fixed-length-array ,[sts] ,v) sts)
+        ((enum (,i* ,c*) ...) (hash))
+        ((union ,[sts]) sts)
+        ((struct ,p ,decl* ...)
+         (let* ([get-decl-pair
+                 (λ (decl)
+                   (nanopass-case (L2 Decl)
+                                  decl
+                                  ((,i ,type-spec) (cons i type-spec))
+                                  (else #f)))]
+                [non-void  (filter identity (map get-decl-pair decl*))]
+                [f* (map car non-void)]
+                [s* (map cdr non-void)]
+                [t (make-struct-type stx (struct-name p) f*)]
+                [rec (apply hash-union (map (λ (s) (Spec s)) s*))])
+           (hash-union rec (hash (struct-name p) t)))))
+  (Decl : Decl (ir) -> * (sts)
+        ((,i ,[sts]) sts)
+        (else (hash)))
+  (Union-Spec : Union-Spec (ir) -> * (sts)
+              ((case (,i1 ,i2) ,[sts*] ...) (apply hash-union sts*)))
+  (Union-Case-Spec : Union-Case-Spec (ir) -> * (sts)
+                   ((,v ,[sts]) sts))
+  (Spec ir))
 
-  
+(make-struct-types (hash-ref Stellar-types "ManageOfferSuccessResult") #'())
+(make-struct-types (hash-ref Stellar-types "LiquidityPoolEntry") #'())
+
+
 ; Next:
 ; generate rules and struct-type defs
