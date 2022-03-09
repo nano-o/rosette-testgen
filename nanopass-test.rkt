@@ -310,6 +310,7 @@
 (make-struct-type #'() "my-struct" '("field1" "field2"))
 
 (define-pass make-struct-types : (L2 Spec) (ir stx) -> * (sts)
+  ; NOTE stops at type identifiers
   (Spec : Spec (ir) -> * (sts)
         (,i (hash))
         ((string ,c) (hash))
@@ -342,6 +343,20 @@
 (make-struct-types (hash-ref Stellar-types "ManageOfferSuccessResult") #'())
 (make-struct-types (hash-ref Stellar-types "LiquidityPoolEntry") #'())
 
+(define (make-struct-types/rec stx h ts)
+  (let* ([deps
+          (apply
+           set-union
+           (for/list ([t (in-set ts)])
+             (dependencies/rec h t)))])
+    (apply
+     hash-union
+     (for/list ([t (in-set (set-union ts deps))])
+       (make-struct-types (hash-ref h t) stx)))))
+
+(hash-count (make-struct-types/rec #'() Stellar-types
+                                   (set "TransactionEnvelope" "TransactionResult" "LedgerEntry")))
+
 
 ; Next:
-; generate rules and struct-type defs
+; generate rules
