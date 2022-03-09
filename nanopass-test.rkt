@@ -236,8 +236,15 @@
 (define Stellar-L2 (add-path Stellar-L1))
 
 ; collect all type defs in a hashmap
-;(define-pass collect-types : L2 (ir) -> * (h)
-;  (Def : 
+(define-pass collect-types : L2 (ir) -> * (h)
+  (XDR-Spec : XDR-Spec (ir) -> * (h)
+            ((,[def*] ...) (apply hash-union def*)))
+  (Def : Def (ir) -> * (h)
+       ((define-type ,i ,type-spec) (hash i type-spec))
+       ((define-constant ,i ,c) (hash)))
+  (XDR-Spec ir))
+
+(define Stellar-types (collect-types Stellar-L2))
 
 ; Next:
 ; generate rules and struct-type defs
