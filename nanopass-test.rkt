@@ -1,6 +1,7 @@
 #lang nanopass
 
-(require racket/hash)
+(require racket/hash "Stellar-nanopass.rkt" list-util)
+
 (provide (all-defined-out))
  ;L0-parser normalize-unions has-nested-enum? make-consts-hashmap)
 
@@ -54,7 +55,12 @@
 
 (L0-parser test-1)
 
-#|
+; does not work:
+; (define-language-node-counter L0-counter L0)
+
+(define Stellar-L0 (L0-parser the-ast))
+
+#| Example with inputs:
 (define-language
   Lsrc
   (terminals (number (n)))
@@ -67,7 +73,7 @@
   eval-src : Lsrc (ir i) -> * ()
   (Expr : Expr (ir i) -> * ()
         (,n n)
-        ((add ,[Expr : e i -> r0] ,[Expr : e2 i -> r1]) (+ (+ r0 r1) 1))
+        ((add ,[Expr : e i -> r0] ,[Expr : e2 i -> r1]) (+ (+ r0 r1) i))
         ((sub ,[Expr : e i -> r0] ,[Expr : e2 i -> r1]) (- r0 r1)))
   (Expr ir i))
 
@@ -123,6 +129,20 @@
 
 (make-consts-hashmap (L0-parser test-3))
 
+; Here we collect top-level enum definitions
+; Returns an alist
+(define-pass enum-defs : L0 (ir) -> * ()
+  (XDR-Spec : XDR-Spec (ir) -> * ()
+            ((,[Def : -> l*] ...) (apply append l*)))
+  (Def : Def (ir) -> * ()
+        ((define-type ,i (enum (,i* ,c*) ...)) `((,i . ,(zip i* c*))))
+        (else '()))
+  (append
+   (XDR-Spec ir)
+   '(("bool" . (("TRUE" . 1) ("FALSE" . 0)))))) ; bool is implicit
+
+(define Stellar-enum-defs (enum-defs Stellar-L0))
+
 ; next we normalize union specs
 
 (define-language L1
@@ -132,37 +152,43 @@
                       (else decl))
                    (+ (v decl))))
 
-(define (multi-alist->alist m-alist)
-  (let ([kvs
-         (for/list ([k (caar m-alist)])
-           `(,k . ,(cdar m-alist)))])
-    (if (null? (cdr m-alist))
-        kvs    
-        `(,@kvs ,@(multi-alist->alist (cdr m-alist))))))
-
-
-(define (replace-else tag-decl*)
+(define (replace-else tag-decl* enum-type)
   (let* ([tags (dict-keys tag-decl*)]
+         [all-tags (dict-keys enum-type)]
          [tag-decl2*
-          (if (set-member? tags 'else)
-              (let* ([other-tags (set-remove tags 'else)]
-                     [else-tags '("TODO")]
-                     [else-tag-decl* (for/list ([t else-tags])
-                                       `(,t . ,(dict-ref tag-decl* 'else)))])
-                (append (dict-remove tag-decl* 'else) else-tag-decl*))
-              tag-decl*)])
+          (let* ([other-tags (set-remove tags 'else)]
+                 [else-tags (set-subtract all-tags other-tags)]
+                 [else-tag-decl* (for/list ([t else-tags])
+                                   `(,t . ,(dict-ref tag-decl* 'else)))])
+            (append (dict-remove tag-decl* 'else) else-tag-decl*))])
     tag-decl2*))
 
-(define-pass normalize-unions : L0 (ir) -> L1 ()
+(define-pass normalize-unions : L0 (ir enum-dict) -> L1 ()
   (Union-Case-Spec : Union-Case-Spec (ir) -> * ()
                    (((,v* ...) ,[decl]) (for/list ([v v*])
-                                        `(,v . ,decl)))
+                                          `(,v . ,decl)))
                    ((else ,decl) `((else . ,decl))))
   (Union-Spec : Union-Spec (ir) -> Union-Spec ()
-              ((case (,i1 ,i2) ,[Union-Case-Spec : -> * alist*] ...)
-               (let* ([tag-decl2* (replace-else (apply append alist*))]
+              ((case (,i1 ,i2) ,[Union-Case-Spec : union-case-spec -> * alist*] ...)
+               (let* ([tag-decl* (apply append alist*)]
+                      [_ (when (and
+                                (dict-has-key? enum-dict i2) ; tag type is an enum type
+                                (ormap number? (dict-keys tag-decl*)))
+                           (error (format "numeric tag values not allowed in a union tagged by an enum type in: ~a" ir)))]
+                      [tag-decl2*
+                       (if (dict-has-key? tag-decl* 'else)
+                           (replace-else tag-decl* (dict-ref enum-dict i2))
+                           tag-decl*)]
                       [tag* (map car tag-decl2*)]
                       [decl* (map cdr tag-decl2*)])
                  `(case (,i1 ,i2) (,tag* ,decl*) ...)))))
 
-(normalize-unions (L0-parser test-1))
+(define test-5
+  '((define-type "my-enum" (enum ("A" 0) ("B" 1)))
+    (define-type "my-union" (union (case ("tag" "my-enum") (("A") ("i" "int")) ((1) ("j" "int")))))))
+(let* ([test-5-L0 (L0-parser test-5)]
+      [test-5-enums (enum-defs test-5-L0)])
+  (with-handlers ([exn:fail? (λ (exn) (println "okay"))])
+    (normalize-unions test-5-L0 test-5-enums)))
+
+(normalize-unions Stellar-L0 Stellar-enum-defs)
