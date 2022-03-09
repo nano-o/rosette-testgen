@@ -235,6 +235,9 @@
 
 (define Stellar-L2 (add-path Stellar-L1))
 
+(define (struct-name path)
+  (string-join (reverse path) "::"))
+
 ; collect all type defs in a hashmap
 (define-pass collect-types : L2 (ir) -> * (h)
   (XDR-Spec : XDR-Spec (ir) -> * (h)
