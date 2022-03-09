@@ -249,5 +249,25 @@
 
 (define Stellar-types (collect-types Stellar-L2))
 
+(define-pass dependencies : (L2 Spec) (ir) -> * (d)
+  ; all the types the given type spec depends on
+  (Spec : Spec (ir) -> * (d)
+        (,i (list i))
+        ((variable-length-array ,[d] ,v) d)
+        ((fixed-length-array ,[d] ,v) d)
+        ((struct ,p ,[d*] ...) (apply set-union d*))
+        ((union ,[d]) d)
+        (else null))
+  (Union-Spec : Union-Spec (ir) -> * (d)
+              ((case (,i1 ,i2) ,[d*] ...) (apply set-union d*)))
+  (Decl : Decl (ir) -> * (d)
+        ((,i ,[d]) d)
+        (else null))
+  (Union-Case-Spec : Union-Case-Spec (ir) -> * (d)
+                   ((,v ,[d]) d))
+  (Spec ir))
+
+(dependencies (hash-ref Stellar-types "TransactionEnvelope"))
+  
 ; Next:
 ; generate rules and struct-type defs
