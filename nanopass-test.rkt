@@ -229,7 +229,7 @@
         `(define-type ,i ,type-spec1)))
   (Decl : Decl (ir p) -> Decl ()) ; NOTE processors with inputs are not auto-generated, but their body is
   (Spec : Spec (ir p) -> Spec ()
-        ((struct ,[Decl : decl0 p -> decl1] ...) `(struct ,(cdr p) ,decl1 ...)))
+        ((struct ,[Decl : decl0 p -> decl1] ...) `(struct ,p ,decl1 ...)))
   (Union-Spec : Union-Spec (ir p) -> Union-Spec ())
   (Union-Case-Spec : Union-Case-Spec (ir p) -> Union-Case-Spec ()))
 
