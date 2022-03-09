@@ -227,10 +227,14 @@
   (Def : Def (ir) -> Def ()
        ((define-type ,i ,[Spec : type-spec0 (list i) -> type-spec1])
         `(define-type ,i ,type-spec1)))
-  (Decl : Decl (ir p) -> Decl ()) ; NOTE processors with inputs are not auto-generated, but their body is
+  (Decl : Decl (ir p) -> Decl ()
+        ((,i ,[Spec : type-spec0 (cons i p) -> type-spec1])
+         `(,i ,type-spec1)))
   (Spec : Spec (ir p) -> Spec ()
-        ((struct ,[Decl : decl0 p -> decl1] ...) `(struct ,p ,decl1 ...)))
-  (Union-Spec : Union-Spec (ir p) -> Union-Spec ())
+        ((struct ,[Decl : decl0 p -> decl1] ...)
+         (when (> (length p) 1) (println p))
+         `(struct ,p ,decl1 ...)))
+  (Union-Spec : Union-Spec (ir p) -> Union-Spec ())  ; NOTE processors with inputs are not auto-generated, but their body is
   (Union-Case-Spec : Union-Case-Spec (ir p) -> Union-Case-Spec ()))
 
 (define Stellar-L2 (add-path Stellar-L1))
