@@ -1,6 +1,10 @@
 #lang nanopass
 
-(require racket/hash "Stellar-nanopass.rkt" list-util)
+(require
+  racket/hash
+  "Stellar-nanopass.rkt"
+  list-util
+  racket/syntax)
 
 (provide (all-defined-out))
  ;L0-parser normalize-unions has-nested-enum? make-consts-hashmap)
@@ -129,6 +133,17 @@
 
 (make-consts-hashmap (L0-parser test-3))
 
+; Make constant definitions:
+
+(define (constant-definitions stx h)
+  ; expects a hashmap mapping identifiers to values
+  (let ([defs
+          (for/list ([(k v) (in-dict h)])
+            #`(define #,(format-id stx k) #,v))])
+    #`(#,@defs)))
+
+(define Stellar-const-defs (constant-definitions #'() (make-consts-hashmap Stellar-L0)))
+
 ; Here we collect top-level enum definitions
 ; Returns an alist
 (define-pass enum-defs : L0 (ir) -> * ()
@@ -191,4 +206,7 @@
   (with-handlers ([exn:fail? (λ (exn) (println "okay"))])
     (normalize-unions test-5-L0 test-5-enums)))
 
-(normalize-unions Stellar-L0 Stellar-enum-defs)
+(define Stellar-L1 (normalize-unions Stellar-L0 Stellar-enum-defs))
+
+; Next:
+; generate constant definitions, rules, and struct-type defs
