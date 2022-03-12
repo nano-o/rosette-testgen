@@ -4,7 +4,8 @@
   racket/hash
   "Stellar-nanopass.rkt"
   list-util
-  racket/syntax)
+  racket/syntax
+  racket/generator)
 
 (provide (all-defined-out))
  ;L0-parser normalize-unions has-nested-enum? make-consts-hashmap)
@@ -65,27 +66,6 @@
 ; (define-language-node-counter L0-counter L0)
 
 (define Stellar-L0 (L0-parser the-ast))
-
-#| Example with inputs:
-(define-language
-  Lsrc
-  (terminals (number (n)))
-  (Expr (e)
-        n
-        (add e0 e1)
-        (sub e0 e1)))
-
-(define-pass
-  eval-src : Lsrc (ir i) -> * ()
-  (Expr : Expr (ir i) -> * ()
-        (,n n)
-        ((add ,[Expr : e i -> r0] ,[Expr : e2 i -> r1]) (+ (+ r0 r1) i))
-        ((sub ,[Expr : e i -> r0] ,[Expr : e2 i -> r1]) (- r0 r1)))
-  (Expr ir i))
-
-(define-parser Lsrc-parser Lsrc)
-(eval-src (Lsrc-parser '(add 1 1)) 1)
-|#
 
 ; throws an exception if there are any nested enums
 ; NOTE we produce L0 to allow the framework to synthesis most of the rules
@@ -252,7 +232,7 @@
 
 (define Stellar-types (collect-types Stellar-L2))
 
-(define base-types '("opaque" "void" "int" "unsigned int" "hyper" "unsigned hyper" "double" "unsigned double"))
+(define base-types '("opaque" "void" "int" "unsigned int" "hyper" "unsigned hyper"))
 (define (base-type? t)
   (set-member? base-types t))
 
@@ -325,7 +305,7 @@
                                   decl
                                   ((,i ,type-spec) (cons i type-spec))
                                   (else #f)))]
-                [non-void  (filter identity (map get-decl-pair decl*))]
+                [non-void (filter identity (map get-decl-pair decl*))]
                 [f* (map car non-void)]
                 [s* (map cdr non-void)]
                 [t (make-struct-type stx (struct-name p) f*)]
@@ -357,6 +337,73 @@
 (hash-count (make-struct-types/rec #'() Stellar-types
                                    (set "TransactionEnvelope" "TransactionResult" "LedgerEntry")))
 
-
 ; Next:
-; generate rules
+; Generate rules
+
+(define max-sequence-length 2)
+
+(define (make-sequence seq-t elem-type-rule size)
+  ; seq-t is "list" or "vector"
+  ; size is a numeric value
+  (let ([s (if (or (not size) (> size 2)) 2 size)])
+    #`(#,seq-t
+       #,@(for/list ([i (in-range s)]) elem-type-rule))))
+(define (make-vector elem-type-rule size)
+  (make-sequence "vector" elem-type-rule size))
+(define (make-list elem-type-rule size)
+  (make-sequence "list" elem-type-rule size))
+(struct union (tag value) #:transparent)
+
+; generate an identifier for a grammar rule:
+(define (rule-id str)
+  ; generate unique indices
+  (define get-index! (generator ()
+                                (let loop ([index 0])
+                                  (yield index)
+                                  (loop (+ index 1)))))
+  ; Rosette seems to be relying on source-location information to create symbolic variable names.
+  ; Since we want all grammar holes to be independent, we need to use a unique location each time.
+  (format-id #f "~a-rule" str #:source (make-srcloc (format "~a-rule:~a" str (get-index!)) 1 0 1 0)))
+
+(define (rule-hole str)
+  #`(#,(rule-id str)))
+
+(define (value-rule stx v)
+  (if (string? v)
+      (format-id stx "~a" v)
+      v))
+
+(define-pass make-rule : (L2 Spec) (ir stx type-name) -> * (rule)
+  (Spec : Spec (ir) -> * (rule)
+        [,i (case i
+              [("opaque") #`(?? (bitvector 8))]
+              [("int" "unsigned int") #`(?? (bitvector 32))]
+              [("hyper" "unsigned hyper") #`(?? (bitvector 64))]
+              [else (rule-hole i)])]
+        [(struct ,p ,[decl-body*] ...)
+         (let ([struct-name (format-id stx "~a" (car (reverse p)))])
+           #`(#,struct-name #,@decl-body*))]
+        [(string ,c) (make-vector #'(?? (bitvector 8)) c)]
+        [(variable-length-array ,[elem-rule] ,v)
+         (make-vector elem-rule v)]
+        [(fixed-length-array ,[elem-rule] ,v)
+         (make-list elem-rule v)]
+        [(enum (,i* ,c*) ...)
+         (let ([bv* (map (λ (i) #`(bv #,(format-id stx "~a" i) (bitvector 32))) i*)])
+           #`(choose #,@bv*))]
+        [(union ,[union-spec]) union-spec])
+  (Decl : Decl (ir) -> * (rule)
+        [(,i ,[rule]) rule]
+        [,void #'null])
+  (Union-Spec : Union-Spec (ir) -> * (rule)
+              [(case (,i1 ,i2) ,[rule*] ...)
+               #`(choose #,@rule*)])
+  (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule)
+                   [(,v ,[rule])
+                    #`(union (bv #,(value-rule stx v) (?? (bitvector 32))) #,rule)])
+  #`(#,(rule-id type-name) #,(Spec ir)))
+
+(let ([t "SimplePaymentResult"])
+  (make-rule (hash-ref Stellar-types t)  #'() t))
+(let ([t "PathPaymentStrictReceiveResult"])
+  (make-rule (hash-ref Stellar-types t)  #'() t))
