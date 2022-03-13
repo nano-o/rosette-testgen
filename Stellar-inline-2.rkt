@@ -289,12 +289,7 @@
   (define PATH_PAYMENT_STRICT_SEND_NO_DESTINATION -5)
   (struct ClaimableBalanceEntryExtensionV1 (ext flags) #:transparent)
   (struct AlphaNum12 (assetCode issuer) #:transparent)
-  (struct
-   ClaimOfferAtom
-   (sellerID offerID assetSold amountSold assetBought amountBought)
-   #:transparent)
   (struct TransactionV1Envelope (tx signatures) #:transparent)
-  (struct InnerTransactionResultPair (transactionHash result) #:transparent)
   (struct
    AccountEntry
    (accountID
@@ -318,13 +313,11 @@
    (sendAsset sendAmount destination destAsset destMin path)
    #:transparent)
   (struct TimeBounds (minTime maxTime) #:transparent)
-  (struct ManageOfferSuccessResult (offersClaimed offer) #:transparent)
   (struct DataEntry (accountID dataName dataValue ext) #:transparent)
   (struct
    ManageBuyOfferOp
    (selling buying buyAmount price offerID)
    #:transparent)
-  (struct PathPaymentStrictSendResult::success (offers last) #:transparent)
   (struct
    Transaction
    (sourceAccount fee seqNum timeBounds memo operations ext)
@@ -346,7 +339,6 @@
    (params reserveA reserveB totalPoolShares poolSharesTrustLineCount)
    #:transparent)
   (struct ClaimClaimableBalanceOp (balanceID) #:transparent)
-  (struct SimplePaymentResult (destination asset amount) #:transparent)
   (struct LedgerKey::trustLine (accountID asset) #:transparent)
   (struct AllowTrustOp (trustor asset authorize) #:transparent)
   (struct BumpSequenceOp (bumpTo) #:transparent)
@@ -356,14 +348,9 @@
    AccountEntryExtensionV2
    (numSponsored numSponsoring signerSponsoringIDs ext)
    #:transparent)
-  (struct TransactionResult (feeCharged result ext) #:transparent)
-  (struct LedgerKey::liquidityPool (liquidityPoolID) #:transparent)
   (struct LedgerKey::offer (sellerID offerID) #:transparent)
   (struct Claimant::v0 (destination predicate) #:transparent)
-  (struct
-   ClaimOfferAtomV0
-   (sellerEd25519 offerID assetSold amountSold assetBought amountBought)
-   #:transparent)
+  (struct LedgerKey::liquidityPool (liquidityPoolID) #:transparent)
   (struct
    SetTrustLineFlagsOp
    (trustor asset clearFlags setFlags)
@@ -372,11 +359,6 @@
   (struct
    LiquidityPoolDepositOp
    (liquidityPoolID maxAmountA maxAmountB minPrice maxPrice)
-   #:transparent)
-  (struct InflationPayout (destination amount) #:transparent)
-  (struct
-   PathPaymentStrictReceiveOp
-   (sendAsset sendMax destination destAsset destAmount path)
    #:transparent)
   (struct ClawbackOp (asset from amount) #:transparent)
   (struct
@@ -388,10 +370,12 @@
    (liquidityPoolID amount minAmountA minAmountB)
    #:transparent)
   (struct ManageDataOp (dataName dataValue) #:transparent)
+  (struct
+   PathPaymentStrictReceiveOp
+   (sendAsset sendMax destination destAsset destAmount path)
+   #:transparent)
   (struct TransactionV0Envelope (tx signatures) #:transparent)
   (struct LedgerEntryExtensionV1 (sponsoringID ext) #:transparent)
-  (struct AlphaNum4 (assetCode issuer) #:transparent)
-  (struct PathPaymentStrictReceiveResult::success (offers last) #:transparent)
   (struct
    OfferEntry
    (sellerID offerID selling buying amount price flags ext)
@@ -408,14 +392,9 @@
     homeDomain
     signer)
    #:transparent)
-  (struct
-   ClaimLiquidityAtom
-   (liquidityPoolID assetSold amountSold assetBought amountBought)
-   #:transparent)
   (struct LedgerKey::data (accountID dataName) #:transparent)
   (struct Price (n d) #:transparent)
   (struct FeeBumpTransactionEnvelope (tx signatures) #:transparent)
-  (struct InnerTransactionResult (feeCharged result ext) #:transparent)
   (struct FeeBumpTransaction (feeSource fee innerTx ext) #:transparent)
   (struct RevokeSponsorshipOp::signer (accountID signerKey) #:transparent)
   (struct
@@ -433,6 +412,7 @@
    TransactionV0
    (sourceAccountEd25519 fee seqNum timeBounds memo operations ext)
    #:transparent)
+  (struct AlphaNum4 (assetCode issuer) #:transparent)
   (define-grammar
    (the-grammar)
    (Claimant-rule
@@ -448,15 +428,6 @@
     (choose
      (union (bv TRUE (?? (bitvector 32))) (AccountID-rule))
      (union (bv FALSE (?? (bitvector 32))) null)))
-   (AllowTrustResult-rule
-    (choose
-     (union (bv ALLOW_TRUST_SUCCESS (?? (bitvector 32))) null)
-     (union (bv ALLOW_TRUST_LOW_RESERVE (?? (bitvector 32))) null)
-     (union (bv ALLOW_TRUST_SELF_NOT_ALLOWED (?? (bitvector 32))) null)
-     (union (bv ALLOW_TRUST_CANT_REVOKE (?? (bitvector 32))) null)
-     (union (bv ALLOW_TRUST_TRUST_NOT_REQUIRED (?? (bitvector 32))) null)
-     (union (bv ALLOW_TRUST_NO_TRUST_LINE (?? (bitvector 32))) null)
-     (union (bv ALLOW_TRUST_MALFORMED (?? (bitvector 32))) null)))
    (AssetCode12-rule
     (list
      (?? (bitvector 8))
@@ -481,14 +452,6 @@
      (union (bv MEMO_ID (?? (bitvector 32))) (uint64-rule))
      (union (bv MEMO_HASH (?? (bitvector 32))) (Hash-rule))
      (union (bv MEMO_RETURN (?? (bitvector 32))) (Hash-rule))))
-   (ClaimOfferAtom-rule
-    (ClaimOfferAtom
-     (AccountID-rule)
-     (int64-rule)
-     (Asset-rule)
-     (int64-rule)
-     (Asset-rule)
-     (int64-rule)))
    (RevokeSponsorshipOp-rule
     (choose
      (union
@@ -509,16 +472,6 @@
     (TransactionV1Envelope
      (Transaction-rule)
      (vector (DecoratedSignature-rule) (DecoratedSignature-rule))))
-   (SetTrustLineFlagsResult-rule
-    (choose
-     (union (bv SET_TRUST_LINE_FLAGS_SUCCESS (?? (bitvector 32))) null)
-     (union (bv SET_TRUST_LINE_FLAGS_LOW_RESERVE (?? (bitvector 32))) null)
-     (union (bv SET_TRUST_LINE_FLAGS_INVALID_STATE (?? (bitvector 32))) null)
-     (union (bv SET_TRUST_LINE_FLAGS_CANT_REVOKE (?? (bitvector 32))) null)
-     (union (bv SET_TRUST_LINE_FLAGS_NO_TRUST_LINE (?? (bitvector 32))) null)
-     (union (bv SET_TRUST_LINE_FLAGS_MALFORMED (?? (bitvector 32))) null)))
-   (InnerTransactionResultPair-rule
-    (InnerTransactionResultPair (Hash-rule) (InnerTransactionResult-rule)))
    (AccountEntry-rule
     (AccountEntry
      (AccountID-rule)
@@ -547,49 +500,17 @@
         (int64-rule)
         (int64-rule)
         (int64-rule))))))
-   (ChangeTrustResult-rule
-    (choose
-     (union (bv CHANGE_TRUST_SUCCESS (?? (bitvector 32))) null)
-     (union
-      (bv CHANGE_TRUST_NOT_AUTH_MAINTAIN_LIABILITIES (?? (bitvector 32)))
-      null)
-     (union (bv CHANGE_TRUST_CANNOT_DELETE (?? (bitvector 32))) null)
-     (union (bv CHANGE_TRUST_TRUST_LINE_MISSING (?? (bitvector 32))) null)
-     (union (bv CHANGE_TRUST_SELF_NOT_ALLOWED (?? (bitvector 32))) null)
-     (union (bv CHANGE_TRUST_LOW_RESERVE (?? (bitvector 32))) null)
-     (union (bv CHANGE_TRUST_INVALID_LIMIT (?? (bitvector 32))) null)
-     (union (bv CHANGE_TRUST_NO_ISSUER (?? (bitvector 32))) null)
-     (union (bv CHANGE_TRUST_MALFORMED (?? (bitvector 32))) null)))
    (CreatePassiveSellOfferOp-rule
     (CreatePassiveSellOfferOp
      (Asset-rule)
      (Asset-rule)
      (int64-rule)
      (Price-rule)))
-   (ClawbackClaimableBalanceResult-rule
-    (choose
-     (union (bv CLAWBACK_CLAIMABLE_BALANCE_SUCCESS (?? (bitvector 32))) null)
-     (union
-      (bv CLAWBACK_CLAIMABLE_BALANCE_NOT_CLAWBACK_ENABLED (?? (bitvector 32)))
-      null)
-     (union
-      (bv CLAWBACK_CLAIMABLE_BALANCE_NOT_ISSUER (?? (bitvector 32)))
-      null)
-     (union
-      (bv CLAWBACK_CLAIMABLE_BALANCE_DOES_NOT_EXIST (?? (bitvector 32)))
-      null)))
    (CreateClaimableBalanceOp-rule
     (CreateClaimableBalanceOp
      (Asset-rule)
      (int64-rule)
      (vector (Claimant-rule) (Claimant-rule))))
-   (ManageOfferSuccessResult-rule
-    (ManageOfferSuccessResult
-     (vector (ClaimAtom-rule) (ClaimAtom-rule))
-     (choose
-      (union (bv MANAGE_OFFER_CREATED (?? (bitvector 32))) (OfferEntry-rule))
-      (union (bv MANAGE_OFFER_UPDATED (?? (bitvector 32))) (OfferEntry-rule))
-      (union (bv MANAGE_OFFER_DELETED (?? (bitvector 32))) null))))
    (PoolID-rule (Hash-rule))
    (PathPaymentStrictSendOp-rule
     (PathPaymentStrictSendOp
@@ -615,17 +536,18 @@
      (Price-rule)
      (int64-rule)))
    (DataValue-rule (vector (?? (bitvector 8)) (?? (bitvector 8))))
-   (LiquidityPoolWithdrawResult-rule
-    (choose
-     (union (bv LIQUIDITY_POOL_WITHDRAW_SUCCESS (?? (bitvector 32))) null)
-     (union
-      (bv LIQUIDITY_POOL_WITHDRAW_UNDER_MINIMUM (?? (bitvector 32)))
-      null)
-     (union (bv LIQUIDITY_POOL_WITHDRAW_LINE_FULL (?? (bitvector 32))) null)
-     (union (bv LIQUIDITY_POOL_WITHDRAW_UNDERFUNDED (?? (bitvector 32))) null)
-     (union (bv LIQUIDITY_POOL_WITHDRAW_NO_TRUST (?? (bitvector 32))) null)
-     (union (bv LIQUIDITY_POOL_WITHDRAW_MALFORMED (?? (bitvector 32))) null)))
    (PaymentOp-rule (PaymentOp (MuxedAccount-rule) (Asset-rule) (int64-rule)))
+   (ClaimableBalanceEntry-rule
+    (ClaimableBalanceEntry
+     (ClaimableBalanceID-rule)
+     (vector (Claimant-rule) (Claimant-rule))
+     (Asset-rule)
+     (int64-rule)
+     (choose
+      (union (bv 0 (?? (bitvector 32))) null)
+      (union
+       (bv 1 (?? (bitvector 32)))
+       (ClaimableBalanceEntryExtensionV1-rule)))))
    (Transaction-rule
     (Transaction
      (MuxedAccount-rule)
@@ -676,68 +598,11 @@
      (choose
       (union (bv 0 (?? (bitvector 32))) null)
       (union (bv 1 (?? (bitvector 32))) (LedgerEntryExtensionV1-rule)))))
-   (ClaimableBalanceEntry-rule
-    (ClaimableBalanceEntry
-     (ClaimableBalanceID-rule)
-     (vector (Claimant-rule) (Claimant-rule))
-     (Asset-rule)
-     (int64-rule)
-     (choose
-      (union (bv 0 (?? (bitvector 32))) null)
-      (union
-       (bv 1 (?? (bitvector 32)))
-       (ClaimableBalanceEntryExtensionV1-rule)))))
-   (InflationResult-rule
-    (choose
-     (union
-      (bv INFLATION_SUCCESS (?? (bitvector 32)))
-      (vector (InflationPayout-rule) (InflationPayout-rule)))
-     (union (bv INFLATION_NOT_TIME (?? (bitvector 32))) null)))
-   (CreateAccountResult-rule
-    (choose
-     (union (bv CREATE_ACCOUNT_SUCCESS (?? (bitvector 32))) null)
-     (union (bv CREATE_ACCOUNT_ALREADY_EXIST (?? (bitvector 32))) null)
-     (union (bv CREATE_ACCOUNT_LOW_RESERVE (?? (bitvector 32))) null)
-     (union (bv CREATE_ACCOUNT_UNDERFUNDED (?? (bitvector 32))) null)
-     (union (bv CREATE_ACCOUNT_MALFORMED (?? (bitvector 32))) null)))
    (Signature-rule (vector (?? (bitvector 8)) (?? (bitvector 8))))
-   (BeginSponsoringFutureReservesResult-rule
-    (choose
-     (union
-      (bv BEGIN_SPONSORING_FUTURE_RESERVES_SUCCESS (?? (bitvector 32)))
-      null)
-     (union
-      (bv BEGIN_SPONSORING_FUTURE_RESERVES_RECURSIVE (?? (bitvector 32)))
-      null)
-     (union
-      (bv
-       BEGIN_SPONSORING_FUTURE_RESERVES_ALREADY_SPONSORED
-       (?? (bitvector 32)))
-      null)
-     (union
-      (bv BEGIN_SPONSORING_FUTURE_RESERVES_MALFORMED (?? (bitvector 32)))
-      null)))
    (ClaimClaimableBalanceOp-rule
     (ClaimClaimableBalanceOp (ClaimableBalanceID-rule)))
-   (SimplePaymentResult-rule
-    (SimplePaymentResult (AccountID-rule) (Asset-rule) (int64-rule)))
-   (BumpSequenceResult-rule
-    (choose
-     (union (bv BUMP_SEQUENCE_SUCCESS (?? (bitvector 32))) null)
-     (union (bv BUMP_SEQUENCE_BAD_SEQ (?? (bitvector 32))) null)))
    (AllowTrustOp-rule
     (AllowTrustOp (AccountID-rule) (AssetCode-rule) (uint32-rule)))
-   (ClaimAtom-rule
-    (choose
-     (union
-      (bv CLAIM_ATOM_TYPE_V0 (?? (bitvector 32)))
-      (ClaimOfferAtomV0-rule))
-     (union
-      (bv CLAIM_ATOM_TYPE_ORDER_BOOK (?? (bitvector 32)))
-      (ClaimOfferAtom-rule))
-     (union
-      (bv CLAIM_ATOM_TYPE_LIQUIDITY_POOL (?? (bitvector 32)))
-      (ClaimLiquidityAtom-rule))))
    (LedgerKey-rule
     (choose
      (union (bv ACCOUNT (?? (bitvector 32))) (LedgerKey (AccountID-rule)))
@@ -756,25 +621,6 @@
      (union
       (bv LIQUIDITY_POOL (?? (bitvector 32)))
       (LedgerKey (PoolID-rule)))))
-   (LiquidityPoolDepositResult-rule
-    (choose
-     (union (bv LIQUIDITY_POOL_DEPOSIT_SUCCESS (?? (bitvector 32))) null)
-     (union (bv LIQUIDITY_POOL_DEPOSIT_POOL_FULL (?? (bitvector 32))) null)
-     (union (bv LIQUIDITY_POOL_DEPOSIT_BAD_PRICE (?? (bitvector 32))) null)
-     (union (bv LIQUIDITY_POOL_DEPOSIT_LINE_FULL (?? (bitvector 32))) null)
-     (union (bv LIQUIDITY_POOL_DEPOSIT_UNDERFUNDED (?? (bitvector 32))) null)
-     (union
-      (bv LIQUIDITY_POOL_DEPOSIT_NOT_AUTHORIZED (?? (bitvector 32)))
-      null)
-     (union (bv LIQUIDITY_POOL_DEPOSIT_NO_TRUST (?? (bitvector 32))) null)
-     (union (bv LIQUIDITY_POOL_DEPOSIT_MALFORMED (?? (bitvector 32))) null)))
-   (ManageDataResult-rule
-    (choose
-     (union (bv MANAGE_DATA_SUCCESS (?? (bitvector 32))) null)
-     (union (bv MANAGE_DATA_INVALID_NAME (?? (bitvector 32))) null)
-     (union (bv MANAGE_DATA_LOW_RESERVE (?? (bitvector 32))) null)
-     (union (bv MANAGE_DATA_NAME_NOT_FOUND (?? (bitvector 32))) null)
-     (union (bv MANAGE_DATA_NOT_SUPPORTED_YET (?? (bitvector 32))) null)))
    (BumpSequenceOp-rule (BumpSequenceOp (SequenceNumber-rule)))
    (Thresholds-rule
     (list
@@ -783,23 +629,6 @@
      (?? (bitvector 8))
      (?? (bitvector 8))))
    (AccountID-rule (PublicKey-rule))
-   (ManageBuyOfferResult-rule
-    (choose
-     (union
-      (bv MANAGE_BUY_OFFER_SUCCESS (?? (bitvector 32)))
-      (ManageOfferSuccessResult-rule))
-     (union (bv MANAGE_BUY_OFFER_LOW_RESERVE (?? (bitvector 32))) null)
-     (union (bv MANAGE_BUY_OFFER_NOT_FOUND (?? (bitvector 32))) null)
-     (union (bv MANAGE_BUY_OFFER_BUY_NO_ISSUER (?? (bitvector 32))) null)
-     (union (bv MANAGE_BUY_OFFER_SELL_NO_ISSUER (?? (bitvector 32))) null)
-     (union (bv MANAGE_BUY_OFFER_CROSS_SELF (?? (bitvector 32))) null)
-     (union (bv MANAGE_BUY_OFFER_UNDERFUNDED (?? (bitvector 32))) null)
-     (union (bv MANAGE_BUY_OFFER_LINE_FULL (?? (bitvector 32))) null)
-     (union (bv MANAGE_BUY_OFFER_BUY_NOT_AUTHORIZED (?? (bitvector 32))) null)
-     (union (bv MANAGE_BUY_OFFER_SELL_NOT_AUTHORIZED (?? (bitvector 32))) null)
-     (union (bv MANAGE_BUY_OFFER_BUY_NO_TRUST (?? (bitvector 32))) null)
-     (union (bv MANAGE_BUY_OFFER_SELL_NO_TRUST (?? (bitvector 32))) null)
-     (union (bv MANAGE_BUY_OFFER_MALFORMED (?? (bitvector 32))) null)))
    (int64-rule (?? (bitvector 64)))
    (Operation-rule
     (Operation
@@ -868,69 +697,16 @@
      (uint32-rule)
      (vector (SponsorshipDescriptor-rule) (SponsorshipDescriptor-rule))
      (choose (union (bv 0 (?? (bitvector 32))) null))))
-   (TransactionResult-rule
-    (TransactionResult
-     (int64-rule)
-     (choose
-      (union
-       (bv txFEE_BUMP_INNER_SUCCESS (?? (bitvector 32)))
-       (InnerTransactionResultPair-rule))
-      (union
-       (bv txFEE_BUMP_INNER_FAILED (?? (bitvector 32)))
-       (InnerTransactionResultPair-rule))
-      (union
-       (bv txSUCCESS (?? (bitvector 32)))
-       (vector (OperationResult-rule) (OperationResult-rule)))
-      (union
-       (bv txFAILED (?? (bitvector 32)))
-       (vector (OperationResult-rule) (OperationResult-rule)))
-      (union (bv txBAD_SPONSORSHIP (?? (bitvector 32))) null)
-      (union (bv txNOT_SUPPORTED (?? (bitvector 32))) null)
-      (union (bv txINTERNAL_ERROR (?? (bitvector 32))) null)
-      (union (bv txBAD_AUTH_EXTRA (?? (bitvector 32))) null)
-      (union (bv txINSUFFICIENT_FEE (?? (bitvector 32))) null)
-      (union (bv txNO_ACCOUNT (?? (bitvector 32))) null)
-      (union (bv txINSUFFICIENT_BALANCE (?? (bitvector 32))) null)
-      (union (bv txBAD_AUTH (?? (bitvector 32))) null)
-      (union (bv txBAD_SEQ (?? (bitvector 32))) null)
-      (union (bv txMISSING_OPERATION (?? (bitvector 32))) null)
-      (union (bv txTOO_LATE (?? (bitvector 32))) null)
-      (union (bv txTOO_EARLY (?? (bitvector 32))) null))
-     (choose (union (bv 0 (?? (bitvector 32))) null))))
    (uint32-rule (?? (bitvector 32)))
-   (ClaimOfferAtomV0-rule
-    (ClaimOfferAtomV0
-     (uint256-rule)
-     (int64-rule)
-     (Asset-rule)
-     (int64-rule)
-     (Asset-rule)
-     (int64-rule)))
-   (ClawbackClaimableBalanceOp-rule
-    (ClawbackClaimableBalanceOp (ClaimableBalanceID-rule)))
-   (int32-rule (?? (bitvector 32)))
-   (RevokeSponsorshipResult-rule
-    (choose
-     (union (bv REVOKE_SPONSORSHIP_SUCCESS (?? (bitvector 32))) null)
-     (union (bv REVOKE_SPONSORSHIP_MALFORMED (?? (bitvector 32))) null)
-     (union (bv REVOKE_SPONSORSHIP_ONLY_TRANSFERABLE (?? (bitvector 32))) null)
-     (union (bv REVOKE_SPONSORSHIP_LOW_RESERVE (?? (bitvector 32))) null)
-     (union (bv REVOKE_SPONSORSHIP_NOT_SPONSOR (?? (bitvector 32))) null)
-     (union (bv REVOKE_SPONSORSHIP_DOES_NOT_EXIST (?? (bitvector 32))) null)))
-   (EndSponsoringFutureReservesResult-rule
-    (choose
-     (union
-      (bv END_SPONSORING_FUTURE_RESERVES_SUCCESS (?? (bitvector 32)))
-      null)
-     (union
-      (bv END_SPONSORING_FUTURE_RESERVES_NOT_SPONSORED (?? (bitvector 32)))
-      null)))
    (SetTrustLineFlagsOp-rule
     (SetTrustLineFlagsOp
      (AccountID-rule)
      (Asset-rule)
      (uint32-rule)
      (uint32-rule)))
+   (ClawbackClaimableBalanceOp-rule
+    (ClawbackClaimableBalanceOp (ClaimableBalanceID-rule)))
+   (int32-rule (?? (bitvector 32)))
    (LiquidityPoolDepositOp-rule
     (LiquidityPoolDepositOp
      (PoolID-rule)
@@ -950,15 +726,6 @@
      (union
       (bv ASSET_TYPE_POOL_SHARE (?? (bitvector 32)))
       (LiquidityPoolParameters-rule))))
-   (TransactionV0Envelope-rule
-    (TransactionV0Envelope
-     (TransactionV0-rule)
-     (vector (DecoratedSignature-rule) (DecoratedSignature-rule))))
-   (LedgerEntryExtensionV1-rule
-    (LedgerEntryExtensionV1
-     (SponsorshipDescriptor-rule)
-     (choose (union (bv 0 (?? (bitvector 32))) null))))
-   (InflationPayout-rule (InflationPayout (AccountID-rule) (int64-rule)))
    (PathPaymentStrictReceiveOp-rule
     (PathPaymentStrictReceiveOp
      (Asset-rule)
@@ -967,13 +734,14 @@
      (Asset-rule)
      (int64-rule)
      (vector (Asset-rule) (Asset-rule))))
-   (ClawbackResult-rule
-    (choose
-     (union (bv CLAWBACK_SUCCESS (?? (bitvector 32))) null)
-     (union (bv CLAWBACK_UNDERFUNDED (?? (bitvector 32))) null)
-     (union (bv CLAWBACK_NO_TRUST (?? (bitvector 32))) null)
-     (union (bv CLAWBACK_NOT_CLAWBACK_ENABLED (?? (bitvector 32))) null)
-     (union (bv CLAWBACK_MALFORMED (?? (bitvector 32))) null)))
+   (TransactionV0Envelope-rule
+    (TransactionV0Envelope
+     (TransactionV0-rule)
+     (vector (DecoratedSignature-rule) (DecoratedSignature-rule))))
+   (LedgerEntryExtensionV1-rule
+    (LedgerEntryExtensionV1
+     (SponsorshipDescriptor-rule)
+     (choose (union (bv 0 (?? (bitvector 32))) null))))
    (ClawbackOp-rule (ClawbackOp (Asset-rule) (MuxedAccount-rule) (int64-rule)))
    (ClaimPredicate-rule
     (choose
@@ -1012,18 +780,6 @@
      (choose
       (union (bv TRUE (?? (bitvector 32))) (DataValue-rule))
       (union (bv FALSE (?? (bitvector 32))) null))))
-   (ClaimClaimableBalanceResult-rule
-    (choose
-     (union (bv CLAIM_CLAIMABLE_BALANCE_SUCCESS (?? (bitvector 32))) null)
-     (union
-      (bv CLAIM_CLAIMABLE_BALANCE_NOT_AUTHORIZED (?? (bitvector 32)))
-      null)
-     (union (bv CLAIM_CLAIMABLE_BALANCE_NO_TRUST (?? (bitvector 32))) null)
-     (union (bv CLAIM_CLAIMABLE_BALANCE_LINE_FULL (?? (bitvector 32))) null)
-     (union (bv CLAIM_CLAIMABLE_BALANCE_CANNOT_CLAIM (?? (bitvector 32))) null)
-     (union
-      (bv CLAIM_CLAIMABLE_BALANCE_DOES_NOT_EXIST (?? (bitvector 32)))
-      null)))
    (AlphaNum4-rule (AlphaNum4 (AssetCode4-rule) (AccountID-rule)))
    (uint256-rule
     (list
@@ -1059,25 +815,6 @@
      (?? (bitvector 8))
      (?? (bitvector 8))
      (?? (bitvector 8))))
-   (SetOptionsResult-rule
-    (choose
-     (union (bv SET_OPTIONS_SUCCESS (?? (bitvector 32))) null)
-     (union (bv SET_OPTIONS_AUTH_REVOCABLE_REQUIRED (?? (bitvector 32))) null)
-     (union (bv SET_OPTIONS_INVALID_HOME_DOMAIN (?? (bitvector 32))) null)
-     (union (bv SET_OPTIONS_BAD_SIGNER (?? (bitvector 32))) null)
-     (union (bv SET_OPTIONS_THRESHOLD_OUT_OF_RANGE (?? (bitvector 32))) null)
-     (union (bv SET_OPTIONS_UNKNOWN_FLAG (?? (bitvector 32))) null)
-     (union (bv SET_OPTIONS_CANT_CHANGE (?? (bitvector 32))) null)
-     (union (bv SET_OPTIONS_INVALID_INFLATION (?? (bitvector 32))) null)
-     (union (bv SET_OPTIONS_BAD_FLAGS (?? (bitvector 32))) null)
-     (union (bv SET_OPTIONS_TOO_MANY_SIGNERS (?? (bitvector 32))) null)
-     (union (bv SET_OPTIONS_LOW_RESERVE (?? (bitvector 32))) null)))
-   (MuxedAccount-rule
-    (choose
-     (union (bv KEY_TYPE_ED25519 (?? (bitvector 32))) (uint256-rule))
-     (union
-      (bv KEY_TYPE_MUXED_ED25519 (?? (bitvector 32)))
-      (MuxedAccount (uint64-rule) (uint256-rule)))))
    (SignerKey-rule
     (choose
      (union (bv SIGNER_KEY_TYPE_ED25519 (?? (bitvector 32))) (uint256-rule))
@@ -1085,65 +822,17 @@
       (bv SIGNER_KEY_TYPE_PRE_AUTH_TX (?? (bitvector 32)))
       (uint256-rule))
      (union (bv SIGNER_KEY_TYPE_HASH_X (?? (bitvector 32))) (uint256-rule))))
-   (ManageSellOfferResult-rule
+   (MuxedAccount-rule
     (choose
+     (union (bv KEY_TYPE_ED25519 (?? (bitvector 32))) (uint256-rule))
      (union
-      (bv MANAGE_SELL_OFFER_SUCCESS (?? (bitvector 32)))
-      (ManageOfferSuccessResult-rule))
-     (union (bv MANAGE_SELL_OFFER_LOW_RESERVE (?? (bitvector 32))) null)
-     (union (bv MANAGE_SELL_OFFER_NOT_FOUND (?? (bitvector 32))) null)
-     (union (bv MANAGE_SELL_OFFER_BUY_NO_ISSUER (?? (bitvector 32))) null)
-     (union (bv MANAGE_SELL_OFFER_SELL_NO_ISSUER (?? (bitvector 32))) null)
-     (union (bv MANAGE_SELL_OFFER_CROSS_SELF (?? (bitvector 32))) null)
-     (union (bv MANAGE_SELL_OFFER_UNDERFUNDED (?? (bitvector 32))) null)
-     (union (bv MANAGE_SELL_OFFER_LINE_FULL (?? (bitvector 32))) null)
-     (union (bv MANAGE_SELL_OFFER_BUY_NOT_AUTHORIZED (?? (bitvector 32))) null)
-     (union
-      (bv MANAGE_SELL_OFFER_SELL_NOT_AUTHORIZED (?? (bitvector 32)))
-      null)
-     (union (bv MANAGE_SELL_OFFER_BUY_NO_TRUST (?? (bitvector 32))) null)
-     (union (bv MANAGE_SELL_OFFER_SELL_NO_TRUST (?? (bitvector 32))) null)
-     (union (bv MANAGE_SELL_OFFER_MALFORMED (?? (bitvector 32))) null)))
+      (bv KEY_TYPE_MUXED_ED25519 (?? (bitvector 32)))
+      (MuxedAccount (uint64-rule) (uint256-rule)))))
    (LiquidityPoolParameters-rule
     (choose
      (union
       (bv LIQUIDITY_POOL_CONSTANT_PRODUCT (?? (bitvector 32)))
       (LiquidityPoolConstantProductParameters-rule))))
-   (PathPaymentStrictSendResult-rule
-    (choose
-     (union
-      (bv PATH_PAYMENT_STRICT_SEND_SUCCESS (?? (bitvector 32)))
-      (PathPaymentStrictSendResult
-       (vector (ClaimAtom-rule) (ClaimAtom-rule))
-       (SimplePaymentResult-rule)))
-     (union
-      (bv PATH_PAYMENT_STRICT_SEND_NO_ISSUER (?? (bitvector 32)))
-      (Asset-rule))
-     (union
-      (bv PATH_PAYMENT_STRICT_SEND_UNDER_DESTMIN (?? (bitvector 32)))
-      null)
-     (union
-      (bv PATH_PAYMENT_STRICT_SEND_OFFER_CROSS_SELF (?? (bitvector 32)))
-      null)
-     (union
-      (bv PATH_PAYMENT_STRICT_SEND_TOO_FEW_OFFERS (?? (bitvector 32)))
-      null)
-     (union (bv PATH_PAYMENT_STRICT_SEND_LINE_FULL (?? (bitvector 32))) null)
-     (union
-      (bv PATH_PAYMENT_STRICT_SEND_NOT_AUTHORIZED (?? (bitvector 32)))
-      null)
-     (union (bv PATH_PAYMENT_STRICT_SEND_NO_TRUST (?? (bitvector 32))) null)
-     (union
-      (bv PATH_PAYMENT_STRICT_SEND_NO_DESTINATION (?? (bitvector 32)))
-      null)
-     (union
-      (bv PATH_PAYMENT_STRICT_SEND_SRC_NOT_AUTHORIZED (?? (bitvector 32)))
-      null)
-     (union
-      (bv PATH_PAYMENT_STRICT_SEND_SRC_NO_TRUST (?? (bitvector 32)))
-      null)
-     (union (bv PATH_PAYMENT_STRICT_SEND_UNDERFUNDED (?? (bitvector 32))) null)
-     (union (bv PATH_PAYMENT_STRICT_SEND_MALFORMED (?? (bitvector 32))) null)))
    (TimePoint-rule (uint64-rule))
    (Price-rule (Price (int32-rule) (int32-rule)))
    (Hash-rule
@@ -1180,35 +869,6 @@
      (?? (bitvector 8))
      (?? (bitvector 8))
      (?? (bitvector 8))))
-   (CreateClaimableBalanceResult-rule
-    (choose
-     (union
-      (bv CREATE_CLAIMABLE_BALANCE_SUCCESS (?? (bitvector 32)))
-      (ClaimableBalanceID-rule))
-     (union (bv CREATE_CLAIMABLE_BALANCE_UNDERFUNDED (?? (bitvector 32))) null)
-     (union
-      (bv CREATE_CLAIMABLE_BALANCE_NOT_AUTHORIZED (?? (bitvector 32)))
-      null)
-     (union (bv CREATE_CLAIMABLE_BALANCE_NO_TRUST (?? (bitvector 32))) null)
-     (union (bv CREATE_CLAIMABLE_BALANCE_LOW_RESERVE (?? (bitvector 32))) null)
-     (union (bv CREATE_CLAIMABLE_BALANCE_MALFORMED (?? (bitvector 32))) null)))
-   (ClaimLiquidityAtom-rule
-    (ClaimLiquidityAtom
-     (PoolID-rule)
-     (Asset-rule)
-     (int64-rule)
-     (Asset-rule)
-     (int64-rule)))
-   (AccountMergeResult-rule
-    (choose
-     (union (bv ACCOUNT_MERGE_SUCCESS (?? (bitvector 32))) (int64-rule))
-     (union (bv ACCOUNT_MERGE_IS_SPONSOR (?? (bitvector 32))) null)
-     (union (bv ACCOUNT_MERGE_DEST_FULL (?? (bitvector 32))) null)
-     (union (bv ACCOUNT_MERGE_SEQNUM_TOO_FAR (?? (bitvector 32))) null)
-     (union (bv ACCOUNT_MERGE_HAS_SUB_ENTRIES (?? (bitvector 32))) null)
-     (union (bv ACCOUNT_MERGE_IMMUTABLE_SET (?? (bitvector 32))) null)
-     (union (bv ACCOUNT_MERGE_NO_ACCOUNT (?? (bitvector 32))) null)
-     (union (bv ACCOUNT_MERGE_MALFORMED (?? (bitvector 32))) null)))
    (OfferEntry-rule
     (OfferEntry
      (AccountID-rule)
@@ -1258,29 +918,6 @@
     (FeeBumpTransactionEnvelope
      (FeeBumpTransaction-rule)
      (vector (DecoratedSignature-rule) (DecoratedSignature-rule))))
-   (InnerTransactionResult-rule
-    (InnerTransactionResult
-     (int64-rule)
-     (choose
-      (union
-       (bv txSUCCESS (?? (bitvector 32)))
-       (vector (OperationResult-rule) (OperationResult-rule)))
-      (union
-       (bv txFAILED (?? (bitvector 32)))
-       (vector (OperationResult-rule) (OperationResult-rule)))
-      (union (bv txTOO_EARLY (?? (bitvector 32))) null)
-      (union (bv txTOO_LATE (?? (bitvector 32))) null)
-      (union (bv txMISSING_OPERATION (?? (bitvector 32))) null)
-      (union (bv txBAD_SEQ (?? (bitvector 32))) null)
-      (union (bv txBAD_AUTH (?? (bitvector 32))) null)
-      (union (bv txINSUFFICIENT_BALANCE (?? (bitvector 32))) null)
-      (union (bv txNO_ACCOUNT (?? (bitvector 32))) null)
-      (union (bv txINSUFFICIENT_FEE (?? (bitvector 32))) null)
-      (union (bv txBAD_AUTH_EXTRA (?? (bitvector 32))) null)
-      (union (bv txINTERNAL_ERROR (?? (bitvector 32))) null)
-      (union (bv txNOT_SUPPORTED (?? (bitvector 32))) null)
-      (union (bv txBAD_SPONSORSHIP (?? (bitvector 32))) null))
-     (choose (union (bv 0 (?? (bitvector 32))) null))))
    (PublicKey-rule
     (choose
      (union (bv PUBLIC_KEY_TYPE_ED25519 (?? (bitvector 32))) (uint256-rule))))
@@ -1302,18 +939,6 @@
        (bv ENVELOPE_TYPE_TX (?? (bitvector 32)))
        (TransactionV1Envelope-rule)))
      (choose (union (bv 0 (?? (bitvector 32))) null))))
-   (PaymentResult-rule
-    (choose
-     (union (bv PAYMENT_SUCCESS (?? (bitvector 32))) null)
-     (union (bv PAYMENT_NO_ISSUER (?? (bitvector 32))) null)
-     (union (bv PAYMENT_LINE_FULL (?? (bitvector 32))) null)
-     (union (bv PAYMENT_NOT_AUTHORIZED (?? (bitvector 32))) null)
-     (union (bv PAYMENT_NO_TRUST (?? (bitvector 32))) null)
-     (union (bv PAYMENT_NO_DESTINATION (?? (bitvector 32))) null)
-     (union (bv PAYMENT_SRC_NOT_AUTHORIZED (?? (bitvector 32))) null)
-     (union (bv PAYMENT_SRC_NO_TRUST (?? (bitvector 32))) null)
-     (union (bv PAYMENT_UNDERFUNDED (?? (bitvector 32))) null)
-     (union (bv PAYMENT_MALFORMED (?? (bitvector 32))) null)))
    (uint64-rule (?? (bitvector 64)))
    (CreateAccountOp-rule (CreateAccountOp (AccountID-rule) (int64-rule)))
    (TrustLineAsset-rule
@@ -1327,112 +952,6 @@
       (AlphaNum12-rule))
      (union (bv ASSET_TYPE_POOL_SHARE (?? (bitvector 32))) (PoolID-rule))))
    (ChangeTrustOp-rule (ChangeTrustOp (ChangeTrustAsset-rule) (int64-rule)))
-   (PathPaymentStrictReceiveResult-rule
-    (choose
-     (union
-      (bv PATH_PAYMENT_STRICT_RECEIVE_SUCCESS (?? (bitvector 32)))
-      (PathPaymentStrictReceiveResult
-       (vector (ClaimAtom-rule) (ClaimAtom-rule))
-       (SimplePaymentResult-rule)))
-     (union
-      (bv PATH_PAYMENT_STRICT_RECEIVE_NO_ISSUER (?? (bitvector 32)))
-      (Asset-rule))
-     (union
-      (bv PATH_PAYMENT_STRICT_RECEIVE_OVER_SENDMAX (?? (bitvector 32)))
-      null)
-     (union
-      (bv PATH_PAYMENT_STRICT_RECEIVE_OFFER_CROSS_SELF (?? (bitvector 32)))
-      null)
-     (union
-      (bv PATH_PAYMENT_STRICT_RECEIVE_TOO_FEW_OFFERS (?? (bitvector 32)))
-      null)
-     (union
-      (bv PATH_PAYMENT_STRICT_RECEIVE_LINE_FULL (?? (bitvector 32)))
-      null)
-     (union
-      (bv PATH_PAYMENT_STRICT_RECEIVE_NOT_AUTHORIZED (?? (bitvector 32)))
-      null)
-     (union (bv PATH_PAYMENT_STRICT_RECEIVE_NO_TRUST (?? (bitvector 32))) null)
-     (union
-      (bv PATH_PAYMENT_STRICT_RECEIVE_NO_DESTINATION (?? (bitvector 32)))
-      null)
-     (union
-      (bv PATH_PAYMENT_STRICT_RECEIVE_SRC_NOT_AUTHORIZED (?? (bitvector 32)))
-      null)
-     (union
-      (bv PATH_PAYMENT_STRICT_RECEIVE_SRC_NO_TRUST (?? (bitvector 32)))
-      null)
-     (union
-      (bv PATH_PAYMENT_STRICT_RECEIVE_UNDERFUNDED (?? (bitvector 32)))
-      null)
-     (union
-      (bv PATH_PAYMENT_STRICT_RECEIVE_MALFORMED (?? (bitvector 32)))
-      null)))
-   (OperationResult-rule
-    (choose
-     (union
-      (bv opINNER (?? (bitvector 32)))
-      (choose
-       (union
-        (bv CREATE_ACCOUNT (?? (bitvector 32)))
-        (CreateAccountResult-rule))
-       (union (bv PAYMENT (?? (bitvector 32))) (PaymentResult-rule))
-       (union
-        (bv PATH_PAYMENT_STRICT_RECEIVE (?? (bitvector 32)))
-        (PathPaymentStrictReceiveResult-rule))
-       (union
-        (bv MANAGE_SELL_OFFER (?? (bitvector 32)))
-        (ManageSellOfferResult-rule))
-       (union
-        (bv CREATE_PASSIVE_SELL_OFFER (?? (bitvector 32)))
-        (ManageSellOfferResult-rule))
-       (union (bv SET_OPTIONS (?? (bitvector 32))) (SetOptionsResult-rule))
-       (union (bv CHANGE_TRUST (?? (bitvector 32))) (ChangeTrustResult-rule))
-       (union (bv ALLOW_TRUST (?? (bitvector 32))) (AllowTrustResult-rule))
-       (union (bv ACCOUNT_MERGE (?? (bitvector 32))) (AccountMergeResult-rule))
-       (union (bv INFLATION (?? (bitvector 32))) (InflationResult-rule))
-       (union (bv MANAGE_DATA (?? (bitvector 32))) (ManageDataResult-rule))
-       (union (bv BUMP_SEQUENCE (?? (bitvector 32))) (BumpSequenceResult-rule))
-       (union
-        (bv MANAGE_BUY_OFFER (?? (bitvector 32)))
-        (ManageBuyOfferResult-rule))
-       (union
-        (bv PATH_PAYMENT_STRICT_SEND (?? (bitvector 32)))
-        (PathPaymentStrictSendResult-rule))
-       (union
-        (bv CREATE_CLAIMABLE_BALANCE (?? (bitvector 32)))
-        (CreateClaimableBalanceResult-rule))
-       (union
-        (bv CLAIM_CLAIMABLE_BALANCE (?? (bitvector 32)))
-        (ClaimClaimableBalanceResult-rule))
-       (union
-        (bv BEGIN_SPONSORING_FUTURE_RESERVES (?? (bitvector 32)))
-        (BeginSponsoringFutureReservesResult-rule))
-       (union
-        (bv END_SPONSORING_FUTURE_RESERVES (?? (bitvector 32)))
-        (EndSponsoringFutureReservesResult-rule))
-       (union
-        (bv REVOKE_SPONSORSHIP (?? (bitvector 32)))
-        (RevokeSponsorshipResult-rule))
-       (union (bv CLAWBACK (?? (bitvector 32))) (ClawbackResult-rule))
-       (union
-        (bv CLAWBACK_CLAIMABLE_BALANCE (?? (bitvector 32)))
-        (ClawbackClaimableBalanceResult-rule))
-       (union
-        (bv SET_TRUST_LINE_FLAGS (?? (bitvector 32)))
-        (SetTrustLineFlagsResult-rule))
-       (union
-        (bv LIQUIDITY_POOL_DEPOSIT (?? (bitvector 32)))
-        (LiquidityPoolDepositResult-rule))
-       (union
-        (bv LIQUIDITY_POOL_WITHDRAW (?? (bitvector 32)))
-        (LiquidityPoolWithdrawResult-rule))))
-     (union (bv opTOO_MANY_SPONSORING (?? (bitvector 32))) null)
-     (union (bv opEXCEEDED_WORK_LIMIT (?? (bitvector 32))) null)
-     (union (bv opTOO_MANY_SUBENTRIES (?? (bitvector 32))) null)
-     (union (bv opNOT_SUPPORTED (?? (bitvector 32))) null)
-     (union (bv opNO_ACCOUNT (?? (bitvector 32))) null)
-     (union (bv opBAD_AUTH (?? (bitvector 32))) null)))
    (TransactionEnvelope-rule
     (choose
      (union

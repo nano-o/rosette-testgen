@@ -440,4 +440,4 @@
 (define (go)
   (pretty-display
    (syntax->datum
-    (xdr-types->grammar the-ast #'() (set "TransactionEnvelope" "TransactionResult" "LedgerEntry")))))
+    (xdr-types->grammar the-ast #'() (set "TransactionEnvelope" "LedgerEntry")))))
