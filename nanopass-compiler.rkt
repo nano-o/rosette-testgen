@@ -387,7 +387,7 @@
               [("hyper" "unsigned hyper") #`(?? (bitvector 64))]
               [else (rule-hole i)])]
         [(struct ,p ,[decl-body*] ...)
-         (let ([struct-name (format-id stx "~a" (car (reverse p)))])
+         (let ([struct-name (format-id stx "~a" (struct-name p))])
            #`(#,struct-name #,@decl-body*))]
         [(string ,c) (make-vector consts #'(?? (bitvector 8)) c)]
         [(variable-length-array ,[elem-rule] ,v)

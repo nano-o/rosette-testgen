@@ -419,7 +419,7 @@
     (choose
      (union
       (bv CLAIMANT_TYPE_V0 (?? (bitvector 32)))
-      (Claimant (AccountID-rule) (ClaimPredicate-rule)))))
+      (Claimant::v0 (AccountID-rule) (ClaimPredicate-rule)))))
    (ClaimableBalanceEntryExtensionV1-rule
     (ClaimableBalanceEntryExtensionV1
      (choose (union (bv 0 (?? (bitvector 32))) null))
@@ -459,7 +459,7 @@
       (LedgerKey-rule))
      (union
       (bv REVOKE_SPONSORSHIP_SIGNER (?? (bitvector 32)))
-      (RevokeSponsorshipOp (AccountID-rule) (SignerKey-rule)))))
+      (RevokeSponsorshipOp::signer (AccountID-rule) (SignerKey-rule)))))
    (AssetCode-rule
     (choose
      (union
@@ -494,7 +494,7 @@
      (choose
       (union
        (bv LIQUIDITY_POOL_CONSTANT_PRODUCT (?? (bitvector 32)))
-       (LiquidityPoolEntry
+       (LiquidityPoolEntry::body::constantProduct
         (LiquidityPoolConstantProductParameters-rule)
         (int64-rule)
         (int64-rule)
@@ -571,7 +571,7 @@
       (union (bv 0 (?? (bitvector 32))) null)
       (union
        (bv 1 (?? (bitvector 32)))
-       (TrustLineEntry
+       (TrustLineEntry::ext::v1
         (Liabilities-rule)
         (choose
          (union (bv 0 (?? (bitvector 32))) null)
@@ -605,22 +605,24 @@
     (AllowTrustOp (AccountID-rule) (AssetCode-rule) (uint32-rule)))
    (LedgerKey-rule
     (choose
-     (union (bv ACCOUNT (?? (bitvector 32))) (LedgerKey (AccountID-rule)))
+     (union
+      (bv ACCOUNT (?? (bitvector 32)))
+      (LedgerKey::account (AccountID-rule)))
      (union
       (bv TRUSTLINE (?? (bitvector 32)))
-      (LedgerKey (AccountID-rule) (TrustLineAsset-rule)))
+      (LedgerKey::trustLine (AccountID-rule) (TrustLineAsset-rule)))
      (union
       (bv OFFER (?? (bitvector 32)))
-      (LedgerKey (AccountID-rule) (int64-rule)))
+      (LedgerKey::offer (AccountID-rule) (int64-rule)))
      (union
       (bv DATA (?? (bitvector 32)))
-      (LedgerKey (AccountID-rule) (string64-rule)))
+      (LedgerKey::data (AccountID-rule) (string64-rule)))
      (union
       (bv CLAIMABLE_BALANCE (?? (bitvector 32)))
-      (LedgerKey (ClaimableBalanceID-rule)))
+      (LedgerKey::claimableBalance (ClaimableBalanceID-rule)))
      (union
       (bv LIQUIDITY_POOL (?? (bitvector 32)))
-      (LedgerKey (PoolID-rule)))))
+      (LedgerKey::liquidityPool (PoolID-rule)))))
    (BumpSequenceOp-rule (BumpSequenceOp (SequenceNumber-rule)))
    (Thresholds-rule
     (list
@@ -827,7 +829,7 @@
      (union (bv KEY_TYPE_ED25519 (?? (bitvector 32))) (uint256-rule))
      (union
       (bv KEY_TYPE_MUXED_ED25519 (?? (bitvector 32)))
-      (MuxedAccount (uint64-rule) (uint256-rule)))))
+      (MuxedAccount::med25519 (uint64-rule) (uint256-rule)))))
    (LiquidityPoolParameters-rule
     (choose
      (union
