@@ -423,8 +423,6 @@
 (let ([t "PathPaymentStrictReceiveResult"])
   (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-L0) ))
 
-; TODO generate the final grammar.
-; const defs, structure defs, then map over dependencies.
 (define (xdr-types->grammar xdr-spec stx ts) ; ts is a set of types
   (let* ([l0 (throw-if-nested-enum (add-bool (L0-parser xdr-spec)))]
          [consts-h (make-consts-hashmap l0)]
