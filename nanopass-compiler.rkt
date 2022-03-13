@@ -63,10 +63,16 @@
 
 (L0-parser test-1)
 
+(define-pass add-bool : L0 (ir) -> L0 ()
+  (XDR-Spec : XDR-Spec (ir) -> XDR-Spec ()
+            ((,def* ...)
+             `(,def* ...
+               ,(with-output-language (L0 Def) `(define-type "bool" (enum ("TRUE" 1) ("FALSE" 0))))))))
+
 ; does not work:
 ; (define-language-node-counter L0-counter L0)
 
-(define Stellar-L0 (L0-parser the-ast))
+(define Stellar-L0 (add-bool (L0-parser the-ast)))
 
 ; throws an exception if there are any nested enums
 ; NOTE we produce L0 to allow the framework to synthesis most of the rules
@@ -417,7 +423,7 @@
 ; TODO generate the final grammar.
 ; const defs, structure defs, then map over dependencies.
 (define (xdr-types->grammar xdr-spec stx ts) ; ts is a set of types
-  (let* ([l0 (throw-if-nested-enum (L0-parser xdr-spec))]
+  (let* ([l0 (throw-if-nested-enum (add-bool (L0-parser xdr-spec)))]
          [consts-h (make-consts-hashmap l0)]
          [l1 (normalize-unions l0 (enum-defs l0))]
          [l2 (add-path l1)]
