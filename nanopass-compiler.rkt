@@ -5,7 +5,8 @@
   "Stellar-nanopass.rkt"
   list-util
   racket/syntax
-  racket/generator)
+  racket/generator
+  pretty-format)
 
 (provide (all-defined-out))
  ;L0-parser normalize-unions has-nested-enum? make-consts-hashmap)
@@ -435,3 +436,8 @@
         #,@struct-defs
         (define-grammar
           (#,(format-id stx "~a" "the-grammar")) #,@rules))))
+
+(define (go)
+  (pretty-display
+   (syntax->datum
+    (xdr-types->grammar the-ast #'() (set "TransactionEnvelope" "TransactionResult" "LedgerEntry")))))
