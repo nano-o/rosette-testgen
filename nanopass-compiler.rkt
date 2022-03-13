@@ -401,7 +401,7 @@
         [(fixed-length-array ,[elem-rule] ,v)
          (make-list consts elem-rule v)]
         [(enum (,i* ,c*) ...)
-         (let ([bv* (map (λ (i) #`(bv #,(format-id stx "~a" i) (bitvector 32))) i*)])
+         (let ([bv* (map (λ (i) #`(bv #,(format-id stx "~a" i) 32)) i*)])
            #`(choose #,@bv*))]
         [(union ,[union-spec]) union-spec])
   (Decl : Decl (ir) -> * (rule)
@@ -412,7 +412,10 @@
                #`(choose #,@rule*)])
   (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule)
                    [(,v ,[rule])
-                    #`(union (bv #,(value-rule stx v) (?? (bitvector 32))) #,rule)])
+                    #;#`(enum (bv #,(value-rule stx v) 32) #,rule)
+                    ; TODO seems like using a struct causes problems...
+                    ; So we just use cons
+                    #`(cons (bv #,(value-rule stx v) 32) #,rule)])
   #`(#,(rule-id type-name) #,(Spec ir)))
 
 (let ([t "SimplePaymentResult"])
@@ -446,4 +449,5 @@
 (define (go)
   (pretty-display
    (syntax->datum
-    (xdr-types->grammar the-ast #'() (set "TransactionEnvelope" "LedgerEntry")))))
+    (xdr-types->grammar the-ast #'() (set "TransactionEnvelope" "LedgerEntry"))
+    #;(xdr-types->grammar the-ast #'() (set "Operation")))))
