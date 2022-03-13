@@ -340,19 +340,24 @@
 ; Next:
 ; Generate rules
 
-(define max-sequence-length 2)
-
+(define (size->number consts size)
+  (if (string? size)
+      (hash-ref consts size)
+      size))
 (define (make-sequence seq-t elem-type-rule size)
   ; seq-t is "list" or "vector"
   ; size is a numeric value
-  (let ([s (if (or (not size) (> size 2)) 2 size)])
-    #`(#,seq-t
-       #,@(for/list ([i (in-range s)]) elem-type-rule))))
-(define (make-vector elem-type-rule size)
-  (make-sequence "vector" elem-type-rule size))
-(define (make-list elem-type-rule size)
-  (make-sequence "list" elem-type-rule size))
+  #`(#,seq-t
+     #,@(for/list ([i (in-range size)]) elem-type-rule)))
+(define (make-list consts elem-type-rule size)
+  (let ([n (size->number consts size)])
+    (make-sequence "list" elem-type-rule n)))
 (struct union (tag value) #:transparent)
+(define max-sequence-length 2)
+(define (make-vector consts elem-type-rule size) ; variable-size array
+  (let ([n (size->number consts size)])
+    (let ([s (if (or (not n) (> n 2)) 2 n)])
+      (make-sequence "vector" elem-type-rule s))))
 
 ; generate an identifier for a grammar rule:
 (define (rule-id str)
@@ -373,21 +378,21 @@
       (format-id stx "~a" v)
       v))
 
-(define-pass make-rule : (L2 Spec) (ir stx type-name) -> * (rule)
+(define-pass make-rule : (L2 Spec) (ir stx type-name consts) -> * (rule)
   (Spec : Spec (ir) -> * (rule)
         [,i (case i
-              [("opaque") #`(?? (bitvector 8))]
+              [("opaque") #`(?? (bitvector 8))] ; TODO might be better to encode opaque arrays as bitvectors
               [("int" "unsigned int") #`(?? (bitvector 32))]
               [("hyper" "unsigned hyper") #`(?? (bitvector 64))]
               [else (rule-hole i)])]
         [(struct ,p ,[decl-body*] ...)
          (let ([struct-name (format-id stx "~a" (car (reverse p)))])
            #`(#,struct-name #,@decl-body*))]
-        [(string ,c) (make-vector #'(?? (bitvector 8)) c)]
+        [(string ,c) (make-vector consts #'(?? (bitvector 8)) c)]
         [(variable-length-array ,[elem-rule] ,v)
-         (make-vector elem-rule v)]
+         (make-vector consts elem-rule v)]
         [(fixed-length-array ,[elem-rule] ,v)
-         (make-list elem-rule v)]
+         (make-list consts elem-rule v)]
         [(enum (,i* ,c*) ...)
          (let ([bv* (map (λ (i) #`(bv #,(format-id stx "~a" i) (bitvector 32))) i*)])
            #`(choose #,@bv*))]
@@ -404,6 +409,29 @@
   #`(#,(rule-id type-name) #,(Spec ir)))
 
 (let ([t "SimplePaymentResult"])
-  (make-rule (hash-ref Stellar-types t)  #'() t))
+  (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-L0) ))
 (let ([t "PathPaymentStrictReceiveResult"])
-  (make-rule (hash-ref Stellar-types t)  #'() t))
+  (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-L0) ))
+
+; TODO generate the final grammar.
+; const defs, structure defs, then map over dependencies.
+(define (xdr-types->grammar xdr-spec stx ts) ; ts is a set of types
+  (let* ([l0 (throw-if-nested-enum (L0-parser xdr-spec))]
+         [consts-h (make-consts-hashmap l0)]
+         [l1 (normalize-unions l0 (enum-defs l0))]
+         [l2 (add-path l1)]
+         [h (collect-types l2)]
+         [const-defs (constant-definitions stx (make-consts-hashmap l0))]
+         [struct-defs (hash-values (make-struct-types/rec stx h ts))]
+         [deps (set-union
+                ts
+                (apply set-union
+                       (for/list ([t ts])
+                         (dependencies/rec h t))))]
+         [rules (for/list ([t deps])
+                  (make-rule (hash-ref h t) stx t consts-h))])
+    #`(begin
+        #,@const-defs
+        #,@struct-defs
+        (define-grammar
+          (#,(format-id stx "~a" "the-grammar")) #,@rules))))
