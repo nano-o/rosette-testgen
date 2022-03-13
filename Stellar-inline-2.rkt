@@ -899,6 +899,4 @@
    (TrustLineEntryExtensionV2-rule
     (TrustLineEntryExtensionV2 (int32-rule) (choose (cons (bv 0 32) null))))))
 
-(the-grammar #:depth 5 #:start LedgerEntry-rule)
-
-;(define input-tx (the-grammar))
+;(the-grammar #:depth 5 #:start LedgerEntry-rule)

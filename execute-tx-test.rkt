@@ -1,7 +1,7 @@
 #lang rosette
 
 (require
-  "Stellar-inline.rkt"
+  "Stellar-inline-2.rkt"
   "path-explorer-2.rkt"
   rosette/lib/synthax
   syntax/to-string
@@ -48,7 +48,7 @@
        )))
 (define/path-explorer (execute-tx ledger time tx-envelope)
   ; We must check that accounts still have enough reserve after execution
-  ; How are sequence numbers used? Seems like a transaction must a a sequence number one above its source account
+  ; How are sequence numbers used? Seems like a transaction must use a sequence number one above its source account
   ; What about time bounds?
   (begin
     ; Assume we only have account entries in the ledger
@@ -63,19 +63,22 @@
            [account-id (CreateAccountOp-destination (cdr (Operation-body op)))] ; a public key
            )
       (begin
-        (assume (equal? op-type (bv CREATE_ACCOUNT (bitvector 32))))
+        (assume (equal? op-type (bv CREATE_ACCOUNT 32)))
         (if (account-exists? ledger account-id)
             (list CREATE_ACCOUNT_ALREADY_EXIST)
             (list CREATE_ACCOUNT_SUCCESS))))))
 ;) (list #'define/path-explorer))))
 
-(define input-tx (TransactionEnvelope-grammar #:depth 8))
+(define input-tx (the-grammar #:depth 7 #:start TransactionEnvelope-rule))
 ; TODO: what's an appropriate depth? Maybe compute the min depth needed when unfolding recursive types only once.
 
 ; A ledger is a list of ledger entries
-; For now, let's start with a single entry
+(define ledger-depth 5)
+; TODO ledger depth of 6 makes it go extremely slow; Why?
 (define input-ledger
-  `(,(LedgerEntry-grammar #:depth 8) ,(LedgerEntry-grammar #:depth 8)))
+  `(,
+    (the-grammar #:depth ledger-depth #:start LedgerEntry-rule)
+    ,(the-grammar #:depth ledger-depth #:start LedgerEntry-rule)))
 
 ;(all-paths (λ (gen) (execute-tx-path-explorer gen input-ledger null input-tx)))
 
