@@ -39,9 +39,9 @@
       #f
       (or
        (let* ([ledger-entry (car ledger)]
-              [type (union-tag (LedgerEntry-data ledger-entry))])
+              [type (:union:-tag (LedgerEntry-data ledger-entry))])
          (and (equal? type (bv ACCOUNT 32))
-              (let* ([account-entry (union-value (LedgerEntry-data ledger-entry))]
+              (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
                      [id (AccountEntry-accountID account-entry)])
                 (equal? id account-id))))
        (account-exists? (cdr ledger) account-id)
@@ -54,14 +54,14 @@
   (begin
     ; Assume we only have account entries in the ledger
     (assume (andmap
-              (λ (e) (equal? (union-tag (LedgerEntry-data e)) (bv ACCOUNT 32)))
+              (λ (e) (equal? (:union:-tag (LedgerEntry-data e)) (bv ACCOUNT 32)))
             ledger))
     ; Assume we have a create-account transaction:
-    (assume (equal? (union-tag tx-envelope) (bv ENVELOPE_TYPE_TX 32)))
-    (let* ([tx (TransactionV1Envelope-tx (union-value tx-envelope))]
+    (assume (equal? (:union:-tag tx-envelope) (bv ENVELOPE_TYPE_TX 32)))
+    (let* ([tx (TransactionV1Envelope-tx (:union:-value tx-envelope))]
            [op (vector-ref-bv (Transaction-operations tx) (bv 0 1))]
-           [op-type (union-tag (Operation-body op))]
-           [account-id (CreateAccountOp-destination (union-value (Operation-body op)))] ; a public key
+           [op-type (:union:-tag (Operation-body op))]
+           [account-id (CreateAccountOp-destination (:union:-value (Operation-body op)))] ; a public key
            )
       (begin
         (assume (equal? op-type (bv CREATE_ACCOUNT 32)))

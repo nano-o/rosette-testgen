@@ -409,9 +409,10 @@
       v))
 
 (define built-in-structs
+  ; we put ":" in the name to avoid clashes with XDR names
   (list 
-   #'(struct byte-array (value) #:transparent)
-   #'(struct union (tag value) #:transparent)))
+   #'(struct :byte-array: (value) #:transparent)
+   #'(struct :union: (tag value) #:transparent)))
 
 (define-pass make-rule : (L2 Spec) (ir stx type-name consts) -> * (rule)
   (Spec : Spec (ir) -> * (rule)
@@ -429,7 +430,7 @@
         [(fixed-length-array ,type-spec ,v)
          (guard (equal? type-spec "opaque"))
          (let ([n (size->number consts v)])
-           #`(byte-array (?? (bitvector #,(* n 8)))))]
+           #`(:byte-array: (?? (bitvector #,(* n 8)))))]
         [(fixed-length-array ,[elem-rule] ,v)
          (make-list consts elem-rule v)]
         [(enum (,i* ,c*) ...)
@@ -444,7 +445,7 @@
                #`(choose #,@rule*)])
   (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule)
                    [(,v ,[rule])
-                    #`(union (bv #,(value-rule stx v) 32) #,rule)
+                    #`(:union: (bv #,(value-rule stx v) 32) #,rule)
                     ; TODO seems like using a struct causes problems...
                     ; So we just use cons
                     #;#`(cons (bv #,(value-rule stx v) 32) #,rule)])
