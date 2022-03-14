@@ -39,13 +39,14 @@
       #f
       (or
        (let* ([ledger-entry (car ledger)]
-              [type (car (LedgerEntry-data ledger-entry))])
+              [type (union-tag (LedgerEntry-data ledger-entry))])
          (and (equal? type (bv ACCOUNT 32))
-              (let* ([account-entry (cdr (LedgerEntry-data ledger-entry))]
+              (let* ([account-entry (union-value (LedgerEntry-data ledger-entry))]
                      [id (AccountEntry-accountID account-entry)])
-                (equal? (cdr id) (cdr account-id)))))
+                (equal? id account-id))))
        (account-exists? (cdr ledger) account-id)
        )))
+
 (define/path-explorer (execute-tx ledger time tx-envelope)
   ; We must check that accounts still have enough reserve after execution
   ; How are sequence numbers used? Seems like a transaction must use a sequence number one above its source account
@@ -53,14 +54,14 @@
   (begin
     ; Assume we only have account entries in the ledger
     (assume (andmap
-              (λ (e) (equal? (car (LedgerEntry-data e)) (bv ACCOUNT 32)))
+              (λ (e) (equal? (union-tag (LedgerEntry-data e)) (bv ACCOUNT 32)))
             ledger))
     ; Assume we have a create-account transaction:
-    (assume (equal? (car tx-envelope) (bv ENVELOPE_TYPE_TX 32)))
-    (let* ([tx (TransactionV1Envelope-tx (cdr tx-envelope))]
+    (assume (equal? (union-tag tx-envelope) (bv ENVELOPE_TYPE_TX 32)))
+    (let* ([tx (TransactionV1Envelope-tx (union-value tx-envelope))]
            [op (vector-ref-bv (Transaction-operations tx) (bv 0 1))]
-           [op-type (car (Operation-body op))]
-           [account-id (CreateAccountOp-destination (cdr (Operation-body op)))] ; a public key
+           [op-type (union-tag (Operation-body op))]
+           [account-id (CreateAccountOp-destination (union-value (Operation-body op)))] ; a public key
            )
       (begin
         (assume (equal? op-type (bv CREATE_ACCOUNT 32)))
@@ -70,15 +71,13 @@
 ;) (list #'define/path-explorer))))
 
 (define input-tx (the-grammar #:depth 7 #:start TransactionEnvelope-rule))
-; TODO: what's an appropriate depth? Maybe compute the min depth needed when unfolding recursive types only once.
 
 ; A ledger is a list of ledger entries
-(define ledger-depth 5)
-; TODO ledger depth of 6 makes it go extremely slow; Why?
+(define ledger-depth 4)
 (define input-ledger
-  `(,
-    (the-grammar #:depth ledger-depth #:start LedgerEntry-rule)
-    ,(the-grammar #:depth ledger-depth #:start LedgerEntry-rule)))
+  (list
+   (the-grammar #:depth ledger-depth #:start LedgerEntry-rule)
+   (the-grammar #:depth ledger-depth #:start LedgerEntry-rule)))
 
 ;(all-paths (λ (gen) (execute-tx-path-explorer gen input-ledger null input-tx)))
 

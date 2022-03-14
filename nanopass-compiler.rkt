@@ -382,12 +382,12 @@
 (define (make-list consts elem-type-rule size)
   (let ([n (size->number consts size)])
     (make-sequence "list" elem-type-rule n)))
-(struct union (tag value) #:transparent)
+;struct union (tag value) #:transparent)
 (define max-sequence-length 2)
 (define (make-vector consts elem-type-rule size) ; variable-size array
   (let ([n (size->number consts size)])
-    (let ([s (if (or (not n) (> n 2)) 2 n)])
-      (make-sequence "vector" elem-type-rule s))))
+    (let ([m (if (or (not n) (> n 2)) max-sequence-length n)])
+      (make-sequence "vector" elem-type-rule m))))
 
 ; generate an identifier for a grammar rule:
 (define (rule-id str)
@@ -408,10 +408,15 @@
       (format-id stx "~a" v)
       v))
 
+(define built-in-structs
+  (list 
+   #'(struct byte-array (value) #:transparent)
+   #'(struct union (tag value) #:transparent)))
+
 (define-pass make-rule : (L2 Spec) (ir stx type-name consts) -> * (rule)
   (Spec : Spec (ir) -> * (rule)
         [,i (case i
-              [("opaque") #`(?? (bitvector 8))] ; TODO might be better to encode opaque arrays as bitvectors
+              [("opaque") #`(?? (bitvector 8))]
               [("int" "unsigned int") #`(?? (bitvector 32))]
               [("hyper" "unsigned hyper") #`(?? (bitvector 64))]
               [else (rule-hole i)])]
@@ -421,6 +426,10 @@
         [(string ,c) (make-vector consts #'(?? (bitvector 8)) c)]
         [(variable-length-array ,[elem-rule] ,v)
          (make-vector consts elem-rule v)]
+        [(fixed-length-array ,type-spec ,v)
+         (guard (equal? type-spec "opaque"))
+         (let ([n (size->number consts v)])
+           #`(byte-array (?? (bitvector #,(* n 8)))))]
         [(fixed-length-array ,[elem-rule] ,v)
          (make-list consts elem-rule v)]
         [(enum (,i* ,c*) ...)
@@ -435,10 +444,10 @@
                #`(choose #,@rule*)])
   (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule)
                    [(,v ,[rule])
-                    #;#`(enum (bv #,(value-rule stx v) 32) #,rule)
+                    #`(union (bv #,(value-rule stx v) 32) #,rule)
                     ; TODO seems like using a struct causes problems...
                     ; So we just use cons
-                    #`(cons (bv #,(value-rule stx v) 32) #,rule)])
+                    #;#`(cons (bv #,(value-rule stx v) 32) #,rule)])
   #`(#,(rule-id type-name) #,(Spec ir)))
 
 (let ([t "SimplePaymentResult"])
@@ -464,6 +473,7 @@
     #`(begin
         #,@const-defs
         #,@struct-defs
+        #,@built-in-structs
         (define-grammar
           (#,(format-id stx "~a" "the-grammar")) #,@rules))))
 
