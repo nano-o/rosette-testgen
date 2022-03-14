@@ -420,14 +420,11 @@
   (define-grammar
    (the-grammar)
    (Claimant-rule
-    (choose
-     (:union:
-      (bv CLAIMANT_TYPE_V0 32)
-      (Claimant::v0 (AccountID-rule) (ClaimPredicate-rule)))))
+    (:union:
+     (bv CLAIMANT_TYPE_V0 32)
+     (Claimant::v0 (AccountID-rule) (ClaimPredicate-rule))))
    (ClaimableBalanceEntryExtensionV1-rule
-    (ClaimableBalanceEntryExtensionV1
-     (choose (:union: (bv 0 32) null))
-     (uint32-rule)))
+    (ClaimableBalanceEntryExtensionV1 (:union: (bv 0 32) null) (uint32-rule)))
    (SponsorshipDescriptor-rule
     (choose
      (:union: (bv TRUE 32) (AccountID-rule))
@@ -474,15 +471,14 @@
    (LiquidityPoolEntry-rule
     (LiquidityPoolEntry
      (PoolID-rule)
-     (choose
-      (:union:
-       (bv LIQUIDITY_POOL_CONSTANT_PRODUCT 32)
-       (LiquidityPoolEntry::body::constantProduct
-        (LiquidityPoolConstantProductParameters-rule)
-        (int64-rule)
-        (int64-rule)
-        (int64-rule)
-        (int64-rule))))))
+     (:union:
+      (bv LIQUIDITY_POOL_CONSTANT_PRODUCT 32)
+      (LiquidityPoolEntry::body::constantProduct
+       (LiquidityPoolConstantProductParameters-rule)
+       (int64-rule)
+       (int64-rule)
+       (int64-rule)
+       (int64-rule)))))
    (CreatePassiveSellOfferOp-rule
     (CreatePassiveSellOfferOp
      (Asset-rule)
@@ -510,7 +506,7 @@
      (AccountID-rule)
      (string64-rule)
      (DataValue-rule)
-     (choose (:union: (bv 0 32) null))))
+     (:union: (bv 0 32) null)))
    (ManageBuyOfferOp-rule
     (ManageBuyOfferOp
      (Asset-rule)
@@ -539,7 +535,7 @@
       (:union: (bv FALSE 32) null))
      (Memo-rule)
      (vector (Operation-rule) (Operation-rule))
-     (choose (:union: (bv 0 32) null))))
+     (:union: (bv 0 32) null)))
    (Signer-rule (Signer (SignerKey-rule) (uint32-rule)))
    (TrustLineEntry-rule
     (TrustLineEntry
@@ -645,7 +641,7 @@
      (uint32-rule)
      (uint32-rule)
      (vector (SponsorshipDescriptor-rule) (SponsorshipDescriptor-rule))
-     (choose (:union: (bv 0 32) null))))
+     (:union: (bv 0 32) null)))
    (uint32-rule (?? (bitvector 32)))
    (SetTrustLineFlagsOp-rule
     (SetTrustLineFlagsOp
@@ -684,7 +680,7 @@
    (LedgerEntryExtensionV1-rule
     (LedgerEntryExtensionV1
      (SponsorshipDescriptor-rule)
-     (choose (:union: (bv 0 32) null))))
+     (:union: (bv 0 32) null)))
    (ClawbackOp-rule (ClawbackOp (Asset-rule) (MuxedAccount-rule) (int64-rule)))
    (ClaimPredicate-rule
     (choose
@@ -733,10 +729,9 @@
       (bv KEY_TYPE_MUXED_ED25519 32)
       (MuxedAccount::med25519 (uint64-rule) (uint256-rule)))))
    (LiquidityPoolParameters-rule
-    (choose
-     (:union:
-      (bv LIQUIDITY_POOL_CONSTANT_PRODUCT 32)
-      (LiquidityPoolConstantProductParameters-rule))))
+    (:union:
+     (bv LIQUIDITY_POOL_CONSTANT_PRODUCT 32)
+     (LiquidityPoolConstantProductParameters-rule)))
    (TimePoint-rule (uint64-rule))
    (Price-rule (Price (int32-rule) (int32-rule)))
    (Hash-rule (:byte-array: (?? (bitvector 256))))
@@ -749,7 +744,7 @@
      (int64-rule)
      (Price-rule)
      (uint32-rule)
-     (choose (:union: (bv 0 32) null))))
+     (:union: (bv 0 32) null)))
    (SetOptionsOp-rule
     (SetOptionsOp
      (choose
@@ -772,8 +767,7 @@
     (FeeBumpTransactionEnvelope
      (FeeBumpTransaction-rule)
      (vector (DecoratedSignature-rule) (DecoratedSignature-rule))))
-   (PublicKey-rule
-    (choose (:union: (bv PUBLIC_KEY_TYPE_ED25519 32) (uint256-rule))))
+   (PublicKey-rule (:union: (bv PUBLIC_KEY_TYPE_ED25519 32) (uint256-rule)))
    (Asset-rule
     (choose
      (:union: (bv ASSET_TYPE_NATIVE 32) null)
@@ -783,8 +777,8 @@
     (FeeBumpTransaction
      (MuxedAccount-rule)
      (int64-rule)
-     (choose (:union: (bv ENVELOPE_TYPE_TX 32) (TransactionV1Envelope-rule)))
-     (choose (:union: (bv 0 32) null))))
+     (:union: (bv ENVELOPE_TYPE_TX 32) (TransactionV1Envelope-rule))
+     (:union: (bv 0 32) null)))
    (uint64-rule (?? (bitvector 64)))
    (CreateAccountOp-rule (CreateAccountOp (AccountID-rule) (int64-rule)))
    (TrustLineAsset-rule
@@ -817,7 +811,7 @@
    (DecoratedSignature-rule
     (DecoratedSignature (SignatureHint-rule) (Signature-rule)))
    (ClaimableBalanceID-rule
-    (choose (:union: (bv CLAIMABLE_BALANCE_ID_TYPE_V0 32) (Hash-rule))))
+    (:union: (bv CLAIMABLE_BALANCE_ID_TYPE_V0 32) (Hash-rule)))
    (Liabilities-rule (Liabilities (int64-rule) (int64-rule)))
    (TransactionV0-rule
     (TransactionV0
@@ -829,11 +823,9 @@
       (:union: (bv FALSE 32) null))
      (Memo-rule)
      (vector (Operation-rule) (Operation-rule))
-     (choose (:union: (bv 0 32) null))))
+     (:union: (bv 0 32) null)))
    (TrustLineEntryExtensionV2-rule
-    (TrustLineEntryExtensionV2
-     (int32-rule)
-     (choose (:union: (bv 0 32) null))))))
+    (TrustLineEntryExtensionV2 (int32-rule) (:union: (bv 0 32) null)))))
 
 ;(the-grammar #:depth 4 #:start LedgerEntry-rule)
 ;(the-grammar #:depth 7 #:start TransactionEnvelope-rule)

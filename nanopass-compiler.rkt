@@ -415,6 +415,7 @@
    #'(struct :union: (tag value) #:transparent)))
 
 (define-pass make-rule : (L2 Spec) (ir stx type-name consts) -> * (rule)
+  ; TODO enums and unions with only one case
   (Spec : Spec (ir) -> * (rule)
         [,i (case i
               [("opaque") #`(?? (bitvector 8))]
@@ -435,20 +436,21 @@
          (make-list consts elem-rule v)]
         [(enum (,i* ,c*) ...)
          (let ([bv* (map (λ (i) #`(bv #,(format-id stx "~a" i) 32)) i*)])
-           #`(choose #,@bv*))]
+           (if (> (length bv*) 1)
+               #`(choose #,@bv*)
+               (car bv*)))]
         [(union ,[union-spec]) union-spec])
   (Decl : Decl (ir) -> * (rule)
         [(,i ,[rule]) rule]
         [,void #'null])
   (Union-Spec : Union-Spec (ir) -> * (rule)
               [(case (,i1 ,i2) ,[rule*] ...)
-               #`(choose #,@rule*)])
+               (if (> (length rule*) 1)
+                   #`(choose #,@rule*)
+                   (car rule*))])
   (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule)
                    [(,v ,[rule])
-                    #`(:union: (bv #,(value-rule stx v) 32) #,rule)
-                    ; TODO seems like using a struct causes problems...
-                    ; So we just use cons
-                    #;#`(cons (bv #,(value-rule stx v) 32) #,rule)])
+                    #`(:union: (bv #,(value-rule stx v) 32) #,rule)])
   #`(#,(rule-id type-name) #,(Spec ir)))
 
 (let ([t "SimplePaymentResult"])
