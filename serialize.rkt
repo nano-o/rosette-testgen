@@ -1,67 +1,39 @@
 #lang racket
 
-(require syntax/parse racket/syntax "Stellar-inline.rkt")
+(require
+  syntax/parse racket/syntax
+  binaryio/integer
+  pretty-format
+  "Stellar-inline-2.rkt"
+  "synthesized-tx-examples.rkt")
 
 ; We serialize synthesized transactions and ledger entries to the representation expected by the guile-rpc library
-
-; Example:
-(define tx-1
-  #'(define input-tx
-      (cons
-       (bv ENVELOPE_TYPE_TX (bitvector 32))
-       (TransactionV1Envelope
-        (Transaction
-         (cons
-          (bv KEY_TYPE_ED25519 (bitvector 32))
-          (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-         (bv #x00000000 32)
-         (bv #x0000000000000000 64)
-         (cons (bv FALSE (bitvector 32)) null)
-         (cons (bv MEMO_NONE (bitvector 32)) null)
-         (vector
-          (Operation
-           (cons (bv FALSE (bitvector 32)) null)
-           (cons
-            (bv CREATE_ACCOUNT (bitvector 32))
-            (CreateAccountOp
-             (cons
-              (bv PUBLIC_KEY_TYPE_ED25519 (bitvector 32))
-              (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-             (bv #x0000000000000000 64)))))
-         (cons (bv 0 (bitvector 32)) null))
-        (vector
-         (DecoratedSignature
-          (bv #x00000000 32)
-          (cons
-           64
-           (bv #x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 512))))))))
 
 (define (racket->guile-rpc stx) ; generate-forms produces syntax objects
   (syntax-parse stx
     [((~datum define) _ d:xdr-rep) #'d.out]))
 
-; TODO we cannot tell integers from opaque arrays...
-; In guile-rpc, fixed-length types are represented with lists while variable-length ones are represented with vectors.
-; Enum values are also a problem. We could use Racket structs for those.
-; Another solution is to use the type description to guide the translation.
+; we need the current namespace to do reflection on structs with eval
 (define-namespace-anchor a)
 (define ns (namespace-anchor->namespace a))
+(define (struct? id)
+  (and
+   (identifier-binding id)
+   (struct-type? (eval-syntax id ns))))
 
 (define-syntax-class xdr-rep
-  #:datum-literals (cons bv vector null bitvector)
-  [pattern (cons (bv i:id (bitvector n:number)) val:xdr-rep)
-           #:attr out #`(cons 'i val.out)]
-  [pattern (cons tag:xdr-rep val:xdr-rep)
-           #:attr out #'(cons tag.out val.out)]
-  [pattern (bv v:number (~or 32 64)) ; TODO hack
-           #:attr out #'v]
+  #:datum-literals (bv vector null bitvector :union: :byte-array:)
+  [pattern (:union: tag:xdr-rep val:xdr-rep)
+           #:attr out #`(cons tag.out val.out)]
+  [pattern (:byte-array: (bv n:number size:number))
+           ; opaque fixed-sized array -> list of bytes
+           #:attr out #`(bytes->list (integer->bytes n size #f #t))] ; unsigned big-endian
   [pattern (bv v:number n:number)
-           #:attr out #''(bv v n)] ; TODO vector of bytes
-  [pattern (bv v:number (bitvector (~or 32 64)))
            #:attr out #'v]
-  [pattern (bv v:number (bitvector n:number))
-           #:attr out #''(bv v n)]
+  [pattern (bv v:id n:number)
+           #:attr out #''v]
   [pattern (vector e*:xdr-rep ...)
+           ; variable-size array
            #:attr out #'`#(,e*.out ...)]
   [pattern (struct-name:id e*:xdr-rep ...)
            #:when (let ([type-id (format-id #'() "struct:~a" #'struct-name)])
@@ -77,4 +49,5 @@
            #:do ((println (format "matched ~a" #'(e* ...))))
            #:attr out #'`(,e*.out ...)])
 
-(eval-syntax (racket->guile-rpc tx-1) ns)
+(pretty-display (eval-syntax (racket->guile-rpc example-1) ns))
+#;(racket->guile-rpc example-1)
