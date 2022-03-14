@@ -4,6 +4,7 @@
   syntax/parse racket/syntax
   binaryio/integer
   pretty-format
+  syntax/to-string
   "Stellar-inline-2.rkt"
   "synthesized-tx-examples.rkt")
 
@@ -28,10 +29,8 @@
   [pattern (:byte-array: (bv n:number size:number))
            ; opaque fixed-sized array -> list of bytes
            #:attr out #`(bytes->list (integer->bytes n size #f #t))] ; unsigned big-endian
-  [pattern (bv v:number n:number)
-           #:attr out #'v]
-  [pattern (bv v:id n:number)
-           #:attr out #''v]
+  [pattern (bv v:xdr-rep n:number)
+           #:attr out #`v.out]
   [pattern (vector e*:xdr-rep ...)
            ; variable-size array
            #:attr out #'`#(,e*.out ...)]
@@ -45,9 +44,9 @@
            #:attr out #'n]
   [pattern null
            #:attr out #''void]
-  #;[pattern (e*:xdr-rep ...)
-           #:do ((println (format "matched ~a" #'(e* ...))))
-           #:attr out #'`(,e*.out ...)])
+  [pattern i:id
+           ; here we need to replace all "_" characters by "-"
+           #:attr out #`'#,(format-id #'() "~a" (string-replace (syntax->string #'(i)) "_" "-"))])
 
-(pretty-display (eval-syntax (racket->guile-rpc example-1) ns))
-#;(racket->guile-rpc example-1)
+(println (eval-syntax (racket->guile-rpc example-1) ns))
+;(racket->guile-rpc example-1)
