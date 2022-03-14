@@ -281,13 +281,28 @@
             #:visit: (set-add $acc $v)))
 
 (define (depth h t)
-    (let-values ([(a _) (bfs (deps-graph h) t)])
-      (let ([reachable (for/fold ([acc null])
-                                 ([(k v) (in-hash a)])
-                         (if (equal? v +inf.0)
-                             acc
-                             (cons (cons k v) acc)))])
-        (cdr (argmax (λ (p) (cdr p)) reachable)))))
+  ; the minimum depth to cover the graph
+  (let-values ([(a _) (bfs (deps-graph h) t)])
+    (let ([reachable (for/fold ([acc null])
+                               ([(k v) (in-hash a)])
+                       (if (equal? v +inf.0)
+                           acc
+                           (cons (cons k v) acc)))])
+      (cdr (argmax (λ (p) (cdr p)) reachable)))))
+
+(define (recursive-types h t)
+  ; returns the set of types that are recursive
+  (let ([g (deps-graph h)]
+        [rec-types (mutable-set)])
+    (define-vertex-property g path)
+    (do-bfs g t
+            #:init (path-set! t null)
+            #:on-enqueue: (path-set! $v (cons $from (path $from)))
+            #:visit?: (begin
+                        (let ([seen (set-member? (path $from) $v)])
+                          (when seen (set-add! rec-types $v))
+                          (not seen))))
+    rec-types))
 
 #;(depth Stellar-types "TransactionEnvelope")
 
