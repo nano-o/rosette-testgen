@@ -6,7 +6,9 @@
   list-util
   racket/syntax
   racket/generator
-  pretty-format)
+  pretty-format
+  racket/trace
+  graph)
 
 (provide (all-defined-out))
  ;L0-parser normalize-unions has-nested-enum? make-consts-hashmap)
@@ -245,7 +247,7 @@
 
 ; Next we compute the type symbols that a type definition depends on.
 
-(define-pass dependencies : (L2 Spec) (ir) -> * (d)
+(define-pass immediate-deps : (L2 Spec) (ir) -> * (d)
   ; all the types the given type spec depends on
   (Spec : Spec (ir) -> * (d)
         (,i (if (base-type? i) (set) (set i)))
@@ -263,29 +265,35 @@
                    ((,v ,[d]) d))
   (Spec ir))
 
-(define TransactionEnvelope-deps (dependencies (hash-ref Stellar-types "TransactionEnvelope")))
+(define TransactionEnvelope-deps (immediate-deps (hash-ref Stellar-types "TransactionEnvelope")))
 
-(define (dependencies/rec h type-name)
-  ; here we must deal with cycles!
-  ; we use depth-first search
-  (let df-search ([t type-name]
-                  [visited (set)])
-    (if (set-member? visited t)
-        (set)
-        (let* ([xdr-type (hash-ref h t)]
-               [deps (dependencies xdr-type)]
-               [rec-deps
-                (for/fold ([rec-deps (set)]
-                           [vs (set-add visited t)]
-                           #:result rec-deps)
-                          ([ty (in-set deps)])
-                  (let ([ty-deps (df-search ty vs)])
-                    (values (set-union rec-deps ty-deps) (set-add vs ty))))])
-          (set-union deps rec-deps)))))
+(define (deps-graph h)
+  (let ([edges
+         (apply append
+          (for/list ([(k v) (in-hash h)])
+            (let ([deps (set->list (immediate-deps v))])
+              (map (λ (d) (list k d)) deps))))])
+    (unweighted-graph/directed edges)))
 
-(define TransactionEnvelope-deps/rec (dependencies/rec Stellar-types "TransactionEnvelope"))
-(define TransactionResult-deps/rec (dependencies/rec Stellar-types "TransactionResult"))
-(define LedgerEntry-deps/rec (dependencies/rec Stellar-types "LedgerEntry"))
+(define (deps h t)
+    (do-bfs (deps-graph h) t
+            #:init (set)
+            #:visit: (set-add $acc $v)))
+
+(define (depth h t)
+    (let-values ([(a _) (bfs (deps-graph h) t)])
+      (let ([reachable (for/fold ([acc null])
+                                 ([(k v) (in-hash a)])
+                         (if (equal? v +inf.0)
+                             acc
+                             (cons (cons k v) acc)))])
+        (cdr (argmax (λ (p) (cdr p)) reachable)))))
+
+#;(depth Stellar-types "TransactionEnvelope")
+
+(define TransactionEnvelope-deps/rec (deps Stellar-types "TransactionEnvelope"))
+(define TransactionResult-deps/rec (deps Stellar-types "TransactionResult"))
+(define LedgerEntry-deps/rec (deps Stellar-types "LedgerEntry"))
 
 ; Next we define needed Racket struct types
 
@@ -335,7 +343,7 @@
           (apply
            set-union
            (for/list ([t (in-set ts)])
-             (dependencies/rec h t)))])
+             (deps h t)))])
     (apply
      hash-union
      (for/list ([t (in-set (set-union ts deps))])
@@ -435,7 +443,7 @@
                 ts
                 (apply set-union
                        (for/list ([t ts])
-                         (dependencies/rec h t))))]
+                         (deps h t))))]
          [rules (for/list ([t deps])
                   (make-rule (hash-ref h t) stx t consts-h))])
     #`(begin
