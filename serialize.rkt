@@ -5,7 +5,7 @@
   binaryio/integer
   pretty-format
   syntax/to-string
-  "Stellar-inline-2.rkt"
+  "Stellar-grammar.rkt"
   "synthesized-tx-examples.rkt")
 
 ; We serialize synthesized transactions and ledger entries to the representation expected by the guile-rpc library

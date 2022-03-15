@@ -1,8 +1,8 @@
 #lang rosette
 
 (require
-  "Stellar-inline-2.rkt"
-  "path-explorer-2.rkt"
+  "Stellar-grammar.rkt"
+  "path-explorer.rkt"
   rosette/lib/synthax
   syntax/to-string
   macro-debugger/stepper
