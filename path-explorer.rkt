@@ -7,7 +7,7 @@
 (require (for-syntax syntax/parse racket/syntax)
          rosette/lib/destruct racket/stxparam rackunit "./generators.rkt" syntax/parse macro-debugger/stepper)
 
-(provide define-with-path-explorer all-paths)
+(provide define-with-path-explorer all-paths print-all-paths path-explorer)
 
 (define-syntax-parameter g (lambda (stx) (raise-syntax-error (syntax-e stx) "can only be used inside path-explorer")))
 ; TODO it seem bad to define this globally when we're only going to use it internally in path-explorer
@@ -18,7 +18,7 @@
 (define-for-syntax (explorer-id x)
   (format-id x "~a-path-explorer" x))
 
-(define-for-syntax debug? #f) ; TODO: should this be a syntax parameter? can we set! it?
+(define-for-syntax debug? #t) ; TODO: should this be a syntax parameter? can we set! it?
 #;(define-for-syntax (set-debug b)
   (set! debug? b))
 
@@ -26,7 +26,7 @@
 (define-syntax (define-with-path-explorer stx)
   (syntax-parse stx
     [(_ (name:id arg0:id ...) body:expr)
-     (if debug? (println (format "defining ~a" (syntax->datum #'name))) (void))
+     (if debug? (println (format "defining ~a" (syntax->datum #'name))) (void)) ; this runs at compile-time
      #`(begin
          (define (#,(explorer-id #'name) gen arg0 ...)
            (syntax-parameterize ([g (make-rename-transformer #'gen)])
@@ -45,10 +45,10 @@
   (define (print-branch-condition b c)
     (with-syntax ([c-string #`(quote #,(syntax->datum c))])
     (if debug?
-        #`(print-branch #,b c-string)
-        #'(void))))
+        #`(print-branch #,b c-string) ; will execute at runtime
+        #'(void)))) ; TODO
   (define (print-debug-info i [str ""])
-    (if debug?
+    (if #f
         (println (format "~a ; ~a" i str))
         (void)))
   (define-syntax-class (has-path-explorer)
@@ -58,7 +58,7 @@
     #:track-literals ; per advice here:  https://school.racket-lang.org/2019/plan/tue-aft-lecture.html
     [(_ ((~literal if) c then-branch else-branch))
      (print-debug-info "if" (syntax->datum stx))
-     #`(let ([branch (g 2)] [cond (path-explorer c)])
+     #`(let ([cond (path-explorer c)] [branch (g 2)])
          (if (equal? branch 0)
              (begin
                #,(print-branch-condition #'branch #'c)
@@ -68,6 +68,7 @@
                #,(print-branch-condition #'branch #'(! c))
                (assume (! cond))
                (path-explorer else-branch))))]
+    ; the cond cases below are incorrect as they don't follow Racket evaluation order...
     [(_ ((~literal cond) [c0 body0] ... [(~literal else) ~! else-body]))
      (print-debug-info "cond with else" (syntax->datum stx))
      (with-syntax ([how-many (length (syntax->list #'(c0 ... 'else)))]
@@ -104,7 +105,7 @@
     [(_ ((~or (~literal lambda) (~literal λ)) (arg0:id ...) body:expr) (~do (print-debug-info "lambda"))) #'(lambda (arg0 ...) (path-explorer body))]
     [(_ ((~literal quote) arg0:expr ...) (~do (print-debug-info "quote"))) #'(quote arg0 ...)]
     [(_ ((~literal let) bindings body0 ...)) #'(let bindings (path-explorer body0) ...)]
-    [(_ ((~literal let*) bindings body0 ...)) #'(let bindings (path-explorer body0) ...)]
+    [(_ ((~literal let*) bindings body0 ...)) #'(let* bindings (path-explorer body0) ...)]
     [(_ (fn:has-path-explorer arg0:expr ...) (~do (print-debug-info "path-explorer application"))) #`(#,(explorer-id #'fn) g (path-explorer arg0) ...)]
     [(_ (fn:id arg0:expr ...) (~do (print-debug-info "application"))) #'(fn (path-explorer arg0) ...)]
     [(_ x (~do (print-debug-info "catch all case"))) #'x]))
@@ -113,8 +114,29 @@
 (define (all-paths prog) ; prog must take a generator as argument
   (define gen (exhaustive-gen))
   (define (go)
-    (let ([solution (solve (prog gen))])
-      (if (equal? (gen 0) 0) (stream-cons solution (go)) (stream-cons solution empty-stream))))
+    (let ([solution
+           (solve (begin
+                    (prog gen)
+                    #;(displayln "VC is:")
+                    #;(displayln (vc))))])
+      (begin
+        (displayln (format "End of execution path; SAT: ~a" (sat? solution)))
+        (if (equal? (gen 0) 0) (stream-cons solution (go)) (stream-cons solution empty-stream)))))
+  (go))
+
+(define (print-all-paths prog)
+  (define gen (exhaustive-gen))
+  (define (go)
+    (let ([solution
+           (solve (begin
+                    (prog gen)
+                    #;(displayln "VC is:")
+                    #;(displayln (vc))))])
+      (begin
+        (displayln (format "End of execution path; SAT: ~a" (sat? solution)))
+        (clear-vc!)
+        (clear-terms!)
+        (if (equal? (gen 0) 0) (go) (void)))))
   (go))
 
 ; tests
@@ -123,6 +145,7 @@
 
 ;(define-with-path-explorer (test) (let ([x 1]) x))
 
+#|
 (define-with-path-explorer (test-if i) (if (<= 0 i) (if (<= 1 i) 'strict-pos 'zero) 'neg))
 
 
@@ -165,3 +188,4 @@
   (check-equal? (evaluate x model) #f))
 
 ; TODO test lambda etc. and test with definition with nested conditionals
+|#

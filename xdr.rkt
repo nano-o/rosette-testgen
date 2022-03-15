@@ -14,7 +14,7 @@
     (define (type-name val) (bv val type-pred))))
 
 ; enums are just 32-bit bitvectors; we define a type-predicate shorthand and symbols for each member, but no constructor
-(define-syntax-parse-rule (make-enum name:string ([field0:string value0:number] ...)) ; NOTE must allow negative values
+(define-syntax-parse-rule (make-enum-type name:string ([field0:string value0:number] ...)) ; NOTE must allow negative values
   #:with type-pred (format-id #'name #:source #'name "~a?" (syntax-e #'name))
   #:with (member0 ...) (map (λ (f) (format-id #'name #:source f "~a-~a" (syntax-e #'name) (syntax-e f))) (syntax->list #'(field0 ...)))
   ; NOTE: we need to prefix union-member names by the type name because it's a local scope according to the RFC
@@ -22,24 +22,22 @@
     (define type-pred (bitvector 32))
     (define member0 (bv value0 type-pred)) ...))
 
+(define-syntax-parse-rule (make-union-type typename:string ([tag-value0:string variant-name0:string variant-type0:string] ...))
+  #:with type-pred (format-id #'typename #:source #'typename "~a?" (syntax-e #'typename))
+  (begin
+    (define (type-pred x) 
+
 ; TODO: unions
-; A union is a list starting with a tag
+; A union is a pair of the form (tag, value)
 ; We probably need a case construct
 ; What about a type predicate?
 
 (begin-for-syntax
   (define-syntax-class opaque-fixed-length-array
     [pattern (typename:string ((~literal fixed-length-array) "opaque" nbits:nat))])
-  #;(define-syntax-class union-class
-    [pattern (typename:string
-              ((~literal union)
-               ((~literal case)
-                (tag-name:string tag-type:string)
-                (((tag-value0:string) (variant-name0:string variant-type0:string)) ...))))
-             #:attr variants #'((tag-value0 variant-name0 variant-type0) ...)])
   (define-syntax-class variant-spec
     [pattern ((tag-value:string) (variant-name:string variant-type:string))])
-  (define-syntax-class union-class
+  (define-syntax-class union
     [pattern (typename:string
               ((~literal union)
                ((~literal case)
@@ -47,35 +45,35 @@
              #:attr variants #'((v0.tag-value v0.variant-name v0.variant-type) ...)]))
 
 ; the define-type macro:
-; TODO: is that what define-syntax-parser is for?
 (define-syntax-parser define-type
-    ; int
-    [(_ typename:string "int")
-     #'(make-bv-type typename 32)]
-    ; unsigned int
-    ; TODO: would be nice to remember it's unsigned and not allow signed operations
-    [(_ typename:string "unsigned int")
-     #'(make-bv-type typename 32)]
-    ; hyper
-    [(_ typename:string "hyper")
-     #'(make-bv-type typename 64)]
-    ; unsigned hyper
-    [(_ typename:string "unsigned hyper")
-     #'(make-bv-type typename 64)]
-    ; enum
-    [(_ typename:string ((~literal enum) [name0:string val0:number] ...))
-     #'(make-enum typename ([name0 val0] ...))]
-    ; opaque fixe-length arrays
-    [(_ . ofla:opaque-fixed-length-array)
-     #'(make-bv-type ofla.typename ofla.nbits)]
-    ; union
-    [(_ . u:union-class)
-     #'(display 'u.variants)])
+  ; int
+  [(_ typename:string "int")
+   #'(make-bv-type typename 32)]
+  ; unsigned int
+  ; TODO: would be nice to remember it's unsigned and not allow signed operations
+  [(_ typename:string "unsigned int")
+   #'(make-bv-type typename 32)]
+  ; hyper
+  [(_ typename:string "hyper")
+   #'(make-bv-type typename 64)]
+  ; unsigned hyper
+  [(_ typename:string "unsigned hyper")
+   #'(make-bv-type typename 64)]
+  ; enum
+  [(_ typename:string ((~literal enum) [name0:string val0:number] ...))
+   #'(make-enum-type typename ([name0 val0] ...))]
+  ; opaque fixed-length arrays
+  [(_ . ofla:opaque-fixed-length-array)
+   #'(make-bv-type ofla.typename ofla.nbits)]
+  ; union
+  [(_ . u:union)
+   #'(display 'u.variants)]
+  ; struct
+  )
 
 #;(include (file "./Stellar.xdr.scm"))
 
 ; test
-; TODO: should we normalize all names? probably yes.
 (begin
   (define-type
     "Hash"

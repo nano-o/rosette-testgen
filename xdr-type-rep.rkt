@@ -13,8 +13,7 @@
     (define-type
       "PublicKey"
       (union (case ("type" "PublicKeyType")
-               (("PUBLIC_KEY_TYPE_ED25519")
-                ("ed25519" "uint256")))))))
+               (("PUBLIC_KEY_TYPE_ED25519") ("ed25519" "uint256")) )))))
 
 ; Now we want a basic compiler that transforms this into a more friendly data-structure.
 ; E.g. type names become symbols that are bound to their type descriptor.
@@ -25,9 +24,9 @@
 (define PublicKeyType
   '(enum PublicKeyType:PUBLIC_KEY_TYPE_ED25519))
 (define PublicKey
-  '(union (type PublicKeyType)
-          [PublicKeyType:PUBLIC_KEY_TYPE_ED25519 (PublicKey:ed25519 uint256)]))
-; Is it better to use 
+  '(union ("type" PublicKeyType)
+          [PublicKeyType:PUBLIC_KEY_TYPE_ED25519 ("ed25519" uint256)]))
+; TODO: should we evaluate all types?
 
 (define-namespace-anchor a)
 (define ns (namespace-anchor->namespace a))
@@ -46,8 +45,6 @@
               [(list tag (list field type))
                #`(cons #,(eval tag ns) #,(type-rep->grammar-rules (eval type ns)))]) ; TODO: here we need just the name of the rule; then add the rule after.
             variant))]))
-
-; Let's try with a syntax class!
 
 ; This is the result we'd want:
 (define-grammar (g)
