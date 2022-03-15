@@ -32,6 +32,8 @@ RUN make install
 WORKDIR /home/user/
 ENV PATH=/home/user/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 RUN grpc-compile --help # force compilation
+COPY serialize.scm /home/user/
+RUN guile serialize.scm # force compilation
 
-CMD grpc-compile --intermediate -S
+# CMD grpc-compile --intermediate -S
 # run with `cat spec.xdr | docker run -i --rm CONTAINER-ID
