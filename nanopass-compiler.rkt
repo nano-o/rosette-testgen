@@ -2,7 +2,7 @@
 
 (require
   racket/hash
-  "Stellar-nanopass.rkt"
+  "Stellar-XDR-spec.rkt"
   list-util
   racket/syntax
   racket/generator

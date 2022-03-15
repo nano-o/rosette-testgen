@@ -1,18 +1,21 @@
 #lang racket
 
-(require
-  (for-syntax "nanopass-test.rkt")
-  syntax/parse/define)
+(provide the-ast)
 
-(define-syntax (test stx)
+#;(require
+  (for-syntax "nanopass-test.rkt")
+  syntax/parse/define
+  list-util)
+
+#;(define-syntax (test stx)
   (syntax-parse stx
     [(_ defs)
      (begin
-       (displayln (L0-parser (syntax->datum #'defs)))
+       (displayln (enum-defs (L0-parser (syntax->datum #'defs))))
        #'(println "hello"))]))
 
-(test
-(
+(define the-ast
+'(
  (define-type
    "Hash"
    (fixed-length-array "opaque" 32))
