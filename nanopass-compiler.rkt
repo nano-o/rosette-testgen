@@ -267,12 +267,14 @@
 
 (define TransactionEnvelope-deps (immediate-deps (hash-ref Stellar-types "TransactionEnvelope")))
 
+(define (type-graph-edges h)
+  (apply append
+         (for/list ([(k v) (in-hash h)])
+           (let ([deps (set->list (immediate-deps v))])
+             (map (λ (d) (list k d)) deps)))))
+
 (define (deps-graph h)
-  (let ([edges
-         (apply append
-          (for/list ([(k v) (in-hash h)])
-            (let ([deps (set->list (immediate-deps v))])
-              (map (λ (d) (list k d)) deps))))])
+  (let ([edges (type-graph-edges h)])
     (unweighted-graph/directed edges)))
 
 (define (deps h t)
@@ -483,5 +485,5 @@
 (define (go)
   (pretty-display
    (syntax->datum
-    (xdr-types->grammar the-ast #'() (set "TransactionEnvelope" "LedgerEntry"))
+    (xdr-types->grammar the-ast #'() (set "TransactionEnvelope" "LedgerEntry" "LedgerHeader" "TransactionResult"))
     #;(xdr-types->grammar the-ast #'() (set "Operation")))))
