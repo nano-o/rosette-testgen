@@ -2,16 +2,19 @@
 
 (require
   racket/hash
-  "Stellar-XDR-spec.rkt"
   list-util
   racket/syntax
   racket/generator
   pretty-format
-  racket/trace
-  graph)
+  ;racket/trace
+  graph
+  "read-spec.rkt")
 
-(provide (all-defined-out))
+(provide generate-grammar)
  ;L0-parser normalize-unions has-nested-enum? make-consts-hashmap)
+
+(define the-ast
+  (read-spec "temp/Stellar.sexp")) ; for testing
 
 ; TODO there's pretty much no error checking
 
@@ -482,8 +485,10 @@
         (define-grammar
           (#,(format-id stx "~a" "the-grammar")) #,@rules))))
 
-(define (go)
+(define (generate-grammar xdr-spec)
   (pretty-display
    (syntax->datum
-    (xdr-types->grammar the-ast #'() (set "TransactionEnvelope" "LedgerEntry" "LedgerHeader" "TransactionResult"))
-    #;(xdr-types->grammar the-ast #'() (set "Operation")))))
+    (xdr-types->grammar
+     xdr-spec
+     #'()
+     (set "TransactionEnvelope" "LedgerEntry" "LedgerHeader" "TransactionResult")))))
