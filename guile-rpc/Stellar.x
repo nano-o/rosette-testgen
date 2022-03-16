@@ -2440,3 +2440,12 @@ struct TransactionResult
     }
     ext;
 };
+
+struct TestCase
+{
+    LedgerHeader ledgerHeader;
+    LedgerEntry ledgerEntries<>;
+    Transaction transations<>;
+    TransactionResult results<>;
+    LedgerEntry newLedgerEntries<>;
+};
