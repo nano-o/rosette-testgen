@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y build-essential pkg-config autoconf aut
 
 USER user
 WORKDIR /home/user/
+RUN mkdir /home/user/bin/
 RUN git clone git://git.sv.gnu.org/guile-rpc.git
 WORKDIR /home/user/guile-rpc/
 RUN mkdir m4
@@ -30,10 +31,15 @@ RUN autoreconf -vfi
 RUN ./configure --prefix=/home/user
 RUN make install
 WORKDIR /home/user/
+
 ENV PATH=/home/user/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 RUN grpc-compile --help # force compilation
-COPY serialize.scm /home/user/
-RUN guile serialize.scm # force compilation
+COPY --chown=user:user xdr_spec_to_sexp.sh /home/user/bin/
+RUN chmod +x /home/user/bin/xdr_spec_to_sexp.sh
 
-# CMD grpc-compile --intermediate -S
-# run with `cat spec.xdr | docker run -i --rm CONTAINER-ID
+RUN git clone  https://github.com/jacobrec/guile-lib.git jlib # for base64 support
+COPY --chown=user:user serialize.scm /home/user/
+RUN guile serialize.scm # force compilation
+COPY --chown=user:user Stellar.x /home/user/
+COPY --chown=user:user serialize.sh /home/user/bin/
+RUN chmod +x /home/user/bin/serialize.sh
