@@ -1639,9 +1639,9 @@
     ("ledgerHeader" "LedgerHeader")
     ("ledgerEntries"
      (variable-length-array "LedgerEntry" #f))
-    ("transations"
-     (variable-length-array "Transaction" #f))
-    ("results"
+    ("transationEnvelopes"
+     (variable-length-array "TransactionEnvelope" #f))
+    ("transactionResults"
      (variable-length-array "TransactionResult" #f))
-    ("newLedgerEntries"
-     (variable-length-array "LedgerEntry" #f))))
+    ("ledgerChanges"
+     (variable-length-array "LedgerEntryChange" #f))))

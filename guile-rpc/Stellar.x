@@ -2445,7 +2445,7 @@ struct TestCase
 {
     LedgerHeader ledgerHeader;
     LedgerEntry ledgerEntries<>;
-    Transaction transations<>;
-    TransactionResult results<>;
-    LedgerEntry newLedgerEntries<>;
+    TransactionEnvelope transationEnvelopes<>;
+    TransactionResult transactionResults<>;
+    LedgerEntryChange ledgerChanges<>;
 };

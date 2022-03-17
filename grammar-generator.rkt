@@ -228,7 +228,6 @@
   (let ([key (reverse (cons "_len" path))])
     (if (dict-has-key? len-specs key)
         (begin
-          (println "match!")
           (dict-ref len-specs key))
         len)))
 
@@ -250,7 +249,6 @@
          `(union (,i1 ,i2) ,union-case-spec2* ...))
         ((variable-length-array ,type-spec ,v)
          (begin
-           (println path)
            `(variable-length-array ,type-spec ,(get-length len-specs path v))))
         (else ir))
   (Union-Case-Spec : Union-Case-Spec (ir path) -> Union-Case-Spec ()
@@ -511,7 +509,7 @@
   (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-L0a) ))
 
 (define (xdr-types->grammar xdr-spec len-specs stx ts) ; ts is a set of types
-  (let* ([l0 (throw-if-nested-enum (add-bool (L0-parser xdr-spec)))]
+  (let* ([l0 (throw-if-nested-enum (add-bool (simplify-union (L0-parser xdr-spec))))]
          [consts-h (make-consts-hashmap l0)]
          [l1 (normalize-unions l0 (enum-defs l0))]
          [l2 (add-path (override-lengths l1 len-specs))]
@@ -539,4 +537,4 @@
      xdr-spec
      len-specs
      #'()
-     (set "TransactionEnvelope" "LedgerEntry" "LedgerHeader" "TransactionResult" "TestCase")))))
+     (set "TestCase")))))

@@ -352,6 +352,14 @@
    #:transparent)
   (struct PathPaymentStrictSendResult::success (offers last) #:transparent)
   (struct
+   TestCase
+   (ledgerHeader
+    ledgerEntries
+    transationEnvelopes
+    transactionResults
+    ledgerChanges)
+   #:transparent)
+  (struct
    Transaction
    (sourceAccount fee seqNum timeBounds memo operations ext)
    #:transparent)
@@ -587,6 +595,12 @@
      (Asset-rule)
      (int64-rule)
      (vector (Claimant-rule) (Claimant-rule))))
+   (LedgerEntryChange-rule
+    (choose
+     (:union: (bv LEDGER_ENTRY_CREATED 32) (LedgerEntry-rule))
+     (:union: (bv LEDGER_ENTRY_UPDATED 32) (LedgerEntry-rule))
+     (:union: (bv LEDGER_ENTRY_REMOVED 32) (LedgerKey-rule))
+     (:union: (bv LEDGER_ENTRY_STATE 32) (LedgerEntry-rule))))
    (StellarValue-rule
     (StellarValue
      (Hash-rule)
@@ -639,6 +653,13 @@
      (int64-rule)
      (Price-rule)
      (int64-rule)))
+   (TestCase-rule
+    (TestCase
+     (LedgerHeader-rule)
+     (vector (LedgerEntry-rule) (LedgerEntry-rule))
+     (vector (TransactionEnvelope-rule) (TransactionEnvelope-rule))
+     (vector (TransactionResult-rule) (TransactionResult-rule))
+     (vector (LedgerEntryChange-rule) (LedgerEntryChange-rule))))
    (DataValue-rule (vector (?? (bitvector 8)) (?? (bitvector 8))))
    (LiquidityPoolWithdrawResult-rule
     (choose
@@ -658,7 +679,7 @@
       (:union: (bv TRUE 32) (TimeBounds-rule))
       (:union: (bv FALSE 32) null))
      (Memo-rule)
-     (vector (Operation-rule) (Operation-rule))
+     (vector (Operation-rule))
      (:union: (bv 0 32) null)))
    (Signer-rule (Signer (SignerKey-rule) (uint32-rule)))
    (TrustLineEntry-rule
@@ -1297,5 +1318,5 @@
    (TrustLineEntryExtensionV2-rule
     (TrustLineEntryExtensionV2 (int32-rule) (:union: (bv 0 32) null)))))
 
-;(the-grammar #:depth 4 #:start LedgerEntry-rule)
+;(the-grammar #:depth 7 #:start TestCase-rule)
 ;(the-grammar #:depth 7 #:start TransactionEnvelope-rule)
