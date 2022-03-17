@@ -558,4 +558,7 @@
      #'()
      (set "TestCase" "TestCaseResult")))))
 
-(generate-grammar the-ast test-len-specs)
+(require (rename-in "txrep-test.rkt"
+                    (spec len-specs)))
+
+(generate-grammar the-ast len-specs)
