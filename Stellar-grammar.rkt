@@ -353,11 +353,7 @@
   (struct PathPaymentStrictSendResult::success (offers last) #:transparent)
   (struct
    TestCase
-   (ledgerHeader
-    ledgerEntries
-    transationEnvelopes
-    transactionResults
-    ledgerChanges)
+   (ledgerHeader ledgerEntries transationEnvelopes)
    #:transparent)
   (struct
    Transaction
@@ -482,6 +478,7 @@
   (struct ChangeTrustOp (line limit) #:transparent)
   (struct MuxedAccount::med25519 (id ed25519) #:transparent)
   (struct TrustLineEntryExtensionV2 (liquidityPoolUseCount ext) #:transparent)
+  (struct TestCaseResult (transactionResults ledgerChanges) #:transparent)
   (struct Liabilities (buying selling) #:transparent)
   (struct
    TransactionV0
@@ -657,9 +654,7 @@
     (TestCase
      (LedgerHeader-rule)
      (vector (LedgerEntry-rule) (LedgerEntry-rule))
-     (vector (TransactionEnvelope-rule) (TransactionEnvelope-rule))
-     (vector (TransactionResult-rule) (TransactionResult-rule))
-     (vector (LedgerEntryChange-rule) (LedgerEntryChange-rule))))
+     (vector (TransactionEnvelope-rule) (TransactionEnvelope-rule))))
    (DataValue-rule (vector (?? (bitvector 8)) (?? (bitvector 8))))
    (LiquidityPoolWithdrawResult-rule
     (choose
@@ -979,17 +974,6 @@
    (ClaimPredicate-rule
     (choose
      (:union: (bv CLAIM_PREDICATE_UNCONDITIONAL 32) null)
-     (:union:
-      (bv CLAIM_PREDICATE_AND 32)
-      (vector (ClaimPredicate-rule) (ClaimPredicate-rule)))
-     (:union:
-      (bv CLAIM_PREDICATE_OR 32)
-      (vector (ClaimPredicate-rule) (ClaimPredicate-rule)))
-     (:union:
-      (bv CLAIM_PREDICATE_NOT 32)
-      (choose
-       (:union: (bv TRUE 32) (ClaimPredicate-rule))
-       (:union: (bv FALSE 32) null)))
      (:union: (bv CLAIM_PREDICATE_BEFORE_ABSOLUTE_TIME 32) (int64-rule))
      (:union: (bv CLAIM_PREDICATE_BEFORE_RELATIVE_TIME 32) (int64-rule))))
    (LiquidityPoolConstantProductParameters-rule
@@ -1303,6 +1287,10 @@
     (DecoratedSignature (SignatureHint-rule) (Signature-rule)))
    (ClaimableBalanceID-rule
     (:union: (bv CLAIMABLE_BALANCE_ID_TYPE_V0 32) (Hash-rule)))
+   (TestCaseResult-rule
+    (TestCaseResult
+     (vector (TransactionResult-rule) (TransactionResult-rule))
+     (vector (LedgerEntryChange-rule) (LedgerEntryChange-rule))))
    (Liabilities-rule (Liabilities (int64-rule) (int64-rule)))
    (TransactionV0-rule
     (TransactionV0

@@ -4,6 +4,7 @@
 
 ; TODO there's pretty much no error checking
 ; TODO write tests
+; TODO a pass to remove recursion or limit its depth (ClaimPredicate)?
 
 (require
   racket/hash
@@ -232,7 +233,9 @@
         len)))
 
 (define test-len-specs
-  '((("Transaction" "operations" "_len") . 1)))
+  '((("Transaction" "operations" "_len") . 1)
+    (("TestCase" "ledgerEntries" "_len") . 2)
+    (("TestCase" "transactionEnvelopes" "_len") . 1)))
 
 ; TODO what about specifying more specific paths, e.g. ("TransactionEnvelope" "v1" "tx" "operations" "_len")
 (define-pass override-lengths : L1 (ir len-specs) -> L1 ()
@@ -537,4 +540,6 @@
      xdr-spec
      len-specs
      #'()
-     (set "TestCase")))))
+     (set "TestCase" "TestCaseResult")))))
+
+(generate-grammar the-ast test-len-specs)

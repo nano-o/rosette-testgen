@@ -542,17 +542,6 @@
   "ClaimPredicate"
   (union (case ("type" "ClaimPredicateType")
            (("CLAIM_PREDICATE_UNCONDITIONAL") "void")
-           (("CLAIM_PREDICATE_AND")
-            ("andPredicates"
-             (variable-length-array "ClaimPredicate" 2)))
-           (("CLAIM_PREDICATE_OR")
-            ("orPredicates"
-             (variable-length-array "ClaimPredicate" 2)))
-           (("CLAIM_PREDICATE_NOT")
-            ("notPredicate"
-             (union (case ("opted" "bool")
-                      (("TRUE") ("value" "ClaimPredicate"))
-                      (("FALSE") "void")))))
            (("CLAIM_PREDICATE_BEFORE_ABSOLUTE_TIME")
             ("absBefore" "int64"))
            (("CLAIM_PREDICATE_BEFORE_RELATIVE_TIME")
@@ -1640,7 +1629,10 @@
     ("ledgerEntries"
      (variable-length-array "LedgerEntry" #f))
     ("transationEnvelopes"
-     (variable-length-array "TransactionEnvelope" #f))
+     (variable-length-array "TransactionEnvelope" #f))))
+(define-type
+  "TestCaseResult"
+  (struct
     ("transactionResults"
      (variable-length-array "TransactionResult" #f))
     ("ledgerChanges"
