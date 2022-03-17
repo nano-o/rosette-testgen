@@ -5,9 +5,6 @@
 ; TODO there's pretty much no error checking
 ; TODO write tests
 
-; TODO allow specifying the size of each variable-size types
-; Use a syntax inspired from the txrep format, e.g. t1.t2._len
-
 (require
   racket/hash
   list-util
@@ -53,7 +50,6 @@
   (Union-Case-Spec (union-case-spec)
                    ((v* ...) decl)
                    (else decl)))
-; TODO rewrite union specs to obtain a single production
 
 (define constant? number?)
 (define identifier? string?)
@@ -76,20 +72,35 @@
 
 (L0-parser test-1)
 
-(define-pass add-bool : L0 (ir) -> L0 ()
+; L0a simplifies L0 a bit by removing the superfluous Union-Spec production
+
+(define-language L0a
+  (extends L0)
+  (Spec (type-spec)
+        (- (union union-spec))
+        (+ (union (i1 i2) union-case-spec* ...))))
+
+(define-pass simplify-union : L0 (ir) -> L0a ()
+  (Spec : Spec (ir) -> Spec ()
+        ((union (case (,i1 ,i2) ,[union-case-spec*] ...))
+         `(union (,i1 ,i2) ,union-case-spec* ...))))
+
+; Next we add the default bool enum
+
+(define-pass add-bool : L0a (ir) -> L0a ()
   (XDR-Spec : XDR-Spec (ir) -> XDR-Spec ()
             ((,def* ...)
              `(,def* ...
-               ,(with-output-language (L0 Def) `(define-type "bool" (enum ("TRUE" 1) ("FALSE" 0))))))))
+               ,(with-output-language (L0a Def) `(define-type "bool" (enum ("TRUE" 1) ("FALSE" 0))))))))
 
 ; does not work:
 ; (define-language-node-counter L0-counter L0)
 
-(define Stellar-L0 (add-bool (L0-parser the-ast)))
+(define Stellar-L0a (add-bool (simplify-union (L0-parser the-ast))))
 
 ; throws an exception if there are any nested enums
 ; NOTE we produce L0 to allow the framework to synthesis most of the rules
-(define-pass throw-if-nested-enum : L0 (ir) -> L0 ()
+(define-pass throw-if-nested-enum : L0a (ir) -> L0a ()
   (Def : Def (ir) -> Def ()
        ; a top-level enum: 
        ((define-type ,i (enum (,i* ,c*) ...)) ir))
@@ -103,7 +114,7 @@
       (throw-if-nested-enum l0)
       #f)))
 
-(println (has-nested-enum? (L0-parser test-1)))
+(println (has-nested-enum? (simplify-union (L0-parser test-1))))
 
 (define test-2
   '((define-type "test-struct"
@@ -112,12 +123,12 @@
 (define test-3
   '((define-type "t1" (enum ("A" 1)))))
 
-(println (has-nested-enum? (L0-parser test-2)))
-(println (has-nested-enum? (L0-parser test-3)))
+(println (has-nested-enum? (simplify-union (L0-parser test-2))))
+(println (has-nested-enum? (simplify-union (L0-parser test-3))))
 
 
 ; returns a hashmap mapping top-level enum symbols and constants to values
-(define-pass make-consts-hashmap : L0 (ir) -> * (h)
+(define-pass make-consts-hashmap : L0a (ir) -> * (h)
   (XDR-Spec : XDR-Spec (ir) -> * (h)
             ((,[h*] ...) (apply hash-union h*)))
   (Def : Def (ir) -> * (h)
@@ -133,8 +144,8 @@
 (define test-4
   '((define-type "test-enum" (enum ("A" 1) ("B" 2))) (define-constant "C" 3)))
 
-(make-consts-hashmap (L0-parser test-3))
-(make-consts-hashmap (L0-parser test-4))
+(make-consts-hashmap (simplify-union (L0-parser test-3)))
+(make-consts-hashmap (simplify-union (L0-parser test-4)))
                      
 ; Make constant definitions:
 
@@ -145,11 +156,11 @@
             #`(define #,(format-id stx k) #,v))])
     #`(#,@defs)))
 
-(define Stellar-const-defs (constant-definitions #'() (make-consts-hashmap Stellar-L0)))
+(define Stellar-const-defs (constant-definitions #'() (make-consts-hashmap Stellar-L0a)))
 
 ; Here we collect top-level enum definitions
 ; Returns an alist
-(define-pass enum-defs : L0 (ir) -> * (l)
+(define-pass enum-defs : L0a (ir) -> * (l)
   (XDR-Spec : XDR-Spec (ir) -> * (l)
             ((,[l*] ...) (apply append l*)))
   (Def : Def (ir) -> * (l)
@@ -159,12 +170,12 @@
    (XDR-Spec ir)
    '(("bool" . (("TRUE" . 1) ("FALSE" . 0)))))) ; bool is implicit
 
-(define Stellar-enum-defs (enum-defs Stellar-L0))
+(define Stellar-enum-defs (enum-defs Stellar-L0a))
 
 ; next we normalize union specs
 
 (define-language L1
-  (extends L0)
+  (extends L0a)
   (Union-Case-Spec (union-case-spec)
                    (- ((v* ...) decl)
                       (else decl))
@@ -181,13 +192,13 @@
             (append (dict-remove tag-decl* 'else) else-tag-decl*))])
     tag-decl2*))
 
-(define-pass normalize-unions : L0 (ir enum-dict) -> L1 ()
+(define-pass normalize-unions : L0a (ir enum-dict) -> L1 ()
   (Union-Case-Spec : Union-Case-Spec (ir) -> * ()
                    (((,v* ...) ,[decl]) (for/list ([v v*])
                                           `(,v . ,decl)))
                    ((else ,decl) `((else . ,decl))))
-  (Union-Spec : Union-Spec (ir) -> Union-Spec ()
-              ((case (,i1 ,i2) ,[Union-Case-Spec : union-case-spec -> * alist*] ...)
+  (Spec : Spec (ir) -> Spec ()
+              ((union (,i1 ,i2) ,[Union-Case-Spec : union-case-spec -> * alist*] ...)
                (let* ([tag-decl* (apply append alist*)]
                       [_ (when (and
                                 (dict-has-key? enum-dict i2) ; tag type is an enum type
@@ -199,17 +210,17 @@
                            tag-decl*)]
                       [tag* (map car tag-decl2*)]
                       [decl* (map cdr tag-decl2*)])
-                 `(case (,i1 ,i2) (,tag* ,decl*) ...)))))
+                 `(union (,i1 ,i2) (,tag* ,decl*) ...)))))
 
 (define test-5
   '((define-type "my-enum" (enum ("A" 0) ("B" 1)))
     (define-type "my-union" (union (case ("tag" "my-enum") (("A") ("i" "int")) ((1) ("j" "int")))))))
-(let* ([test-5-L0 (L0-parser test-5)]
-      [test-5-enums (enum-defs test-5-L0)])
+(let* ([test-5-L0 (simplify-union (L0-parser test-5))]
+       [test-5-enums (enum-defs test-5-L0)])
   (with-handlers ([exn:fail? (λ (exn) (println "okay"))])
     (normalize-unions test-5-L0 test-5-enums)))
 
-(define Stellar-L1 (normalize-unions Stellar-L0 Stellar-enum-defs))
+(define Stellar-L1 (normalize-unions Stellar-L0a Stellar-enum-defs))
 
 ; Next we define a pass that changes the length of variable-length arrays as specified by the caller
 
@@ -235,15 +246,13 @@
         (else ir))
   (Spec : Spec (ir path) -> Spec ()
         ((struct ,[Decl : decl* path -> decl2*] ...) `(struct ,decl2* ...))
-        ((union ,[Union-Spec : union-spec path -> union-spec2]) `(union ,union-spec2))
+        ((union (,i1 ,i2) ,[Union-Case-Spec : union-case-spec* path -> union-case-spec2*] ...)
+         `(union (,i1 ,i2) ,union-case-spec2* ...))
         ((variable-length-array ,type-spec ,v)
          (begin
            (println path)
            `(variable-length-array ,type-spec ,(get-length len-specs path v))))
         (else ir))
-  (Union-Spec : Union-Spec (ir path) -> Union-Spec ()
-              ((case (,i1 ,i2) ,[Union-Case-Spec : union-case-spec* path -> union-case-spec2*] ...)
-               `(case (,i1 ,i2) ,union-case-spec2* ...)))
   (Union-Case-Spec : Union-Case-Spec (ir path) -> Union-Case-Spec ()
                    ((,v ,[Decl : decl path -> decl2]) `(,v ,decl2))))
 
@@ -301,10 +310,8 @@
         ((variable-length-array ,[d] ,v) d)
         ((fixed-length-array ,[d] ,v) d)
         ((struct ,p ,[d*] ...) (apply set-union d*))
-        ((union ,[d]) d)
+        ((union (,i1 ,i2) ,[d*] ...) (apply set-union d*))
         (else (set)))
-  (Union-Spec : Union-Spec (ir) -> * (d)
-              ((case (,i1 ,i2) ,[d*] ...) (apply set-union d*)))
   (Decl : Decl (ir) -> * (d)
         ((,i ,[d]) d)
         (else (set)))
@@ -376,7 +383,7 @@
         ((variable-length-array ,[sts] ,v) sts)
         ((fixed-length-array ,[sts] ,v) sts)
         ((enum (,i* ,c*) ...) (hash))
-        ((union ,[sts]) sts)
+        ((union (,i1 ,i2) ,[sts*] ...) (apply hash-union sts*))
         ((struct ,p ,decl* ...)
          (let* ([get-decl-pair
                  (λ (decl)
@@ -393,8 +400,6 @@
   (Decl : Decl (ir) -> * (sts)
         ((,i ,[sts]) sts)
         (else (hash)))
-  (Union-Spec : Union-Spec (ir) -> * (sts)
-              ((case (,i1 ,i2) ,[sts*] ...) (apply hash-union sts*)))
   (Union-Case-Spec : Union-Case-Spec (ir) -> * (sts)
                    ((,v ,[sts]) sts))
   (Spec ir))
@@ -488,24 +493,22 @@
            (if (> (length bv*) 1)
                #`(choose #,@bv*)
                (car bv*)))]
-        [(union ,[union-spec]) union-spec])
+        [(union (,i1 ,i2) ,[rule*] ...)
+         (if (> (length rule*) 1)
+                   #`(choose #,@rule*)
+                   (car rule*))])
   (Decl : Decl (ir) -> * (rule)
         [(,i ,[rule]) rule]
         [,void #'null])
-  (Union-Spec : Union-Spec (ir) -> * (rule)
-              [(case (,i1 ,i2) ,[rule*] ...)
-               (if (> (length rule*) 1)
-                   #`(choose #,@rule*)
-                   (car rule*))])
   (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule)
                    [(,v ,[rule])
                     #`(:union: (bv #,(value-rule stx v) 32) #,rule)])
   #`(#,(rule-id type-name) #,(Spec ir)))
 
 (let ([t "SimplePaymentResult"])
-  (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-L0) ))
+  (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-L0a) ))
 (let ([t "PathPaymentStrictReceiveResult"])
-  (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-L0) ))
+  (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-L0a) ))
 
 (define (xdr-types->grammar xdr-spec len-specs stx ts) ; ts is a set of types
   (let* ([l0 (throw-if-nested-enum (add-bool (L0-parser xdr-spec)))]
@@ -536,4 +539,4 @@
      xdr-spec
      len-specs
      #'()
-     (set "TransactionEnvelope" "LedgerEntry" "LedgerHeader" "TransactionResult")))))
+     (set "TransactionEnvelope" "LedgerEntry" "LedgerHeader" "TransactionResult" "TestCase")))))
