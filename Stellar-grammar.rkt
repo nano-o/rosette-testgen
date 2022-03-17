@@ -353,7 +353,7 @@
   (struct PathPaymentStrictSendResult::success (offers last) #:transparent)
   (struct
    TestCase
-   (ledgerHeader ledgerEntries transationEnvelopes)
+   (ledgerHeader ledgerEntries transactionEnvelopes)
    #:transparent)
   (struct
    Transaction
@@ -654,7 +654,7 @@
     (TestCase
      (LedgerHeader-rule)
      (vector (LedgerEntry-rule) (LedgerEntry-rule))
-     (vector (TransactionEnvelope-rule) (TransactionEnvelope-rule))))
+     (vector (TransactionEnvelope-rule))))
    (DataValue-rule (vector (?? (bitvector 8)) (?? (bitvector 8))))
    (LiquidityPoolWithdrawResult-rule
     (choose

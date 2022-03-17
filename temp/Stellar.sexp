@@ -1628,7 +1628,7 @@
     ("ledgerHeader" "LedgerHeader")
     ("ledgerEntries"
      (variable-length-array "LedgerEntry" #f))
-    ("transationEnvelopes"
+    ("transactionEnvelopes"
      (variable-length-array "TransactionEnvelope" #f))))
 (define-type
   "TestCaseResult"

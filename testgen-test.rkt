@@ -9,10 +9,10 @@
   "path-explorer.rkt"
   rosette/lib/synthax
   syntax/to-string
-  macro-debugger/stepper
-  macro-debugger/expand)
+  #;macro-debugger/stepper
+  #;macro-debugger/expand)
 
-; 10 millon stroop = 1 XLM
+; 10 millon stroops = 1 XLM
 (define (xlm->stroop x)
   (* x 10000000))
 
@@ -70,29 +70,26 @@
           (list CREATE_ACCOUNT_SUCCESS)))))
 ;) (list #'define/path-explorer))))
 
-(define ledger-header
-  (the-grammar #:depth 5 #:start LedgerHeader-rule))
+; grammar depth can be computed with the "max-depth" function in "nanopass-compiler.rkt"
 
-; A ledger is a list of ledger entries
-(define ledger-depth 4)
-(define input-ledger
-  (list
-   (the-grammar #:depth ledger-depth #:start LedgerEntry-rule)
-   (the-grammar #:depth ledger-depth #:start LedgerEntry-rule)))
-
-(define input-tx (the-grammar #:depth 7 #:start TransactionEnvelope-rule))
-
+(define test-case
+  (the-grammar #:depth 16 #:start TestCase-rule))
+  
 (define (spec gen)
-  (base-assumptions ledger-header input-ledger input-tx)
-  (execute-create-account/path-explorer gen ledger-header input-ledger null input-tx))
+  (let ([ledger-header (TestCase-ledgerHeader test-case)]
+        [input-ledger (vector->list (TestCase-ledgerEntries test-case))]
+        [input-tx (vector-ref-bv (TestCase-transactionEnvelopes test-case) (bv 0 1))])
+    (base-assumptions ledger-header input-ledger input-tx)
+    (execute-create-account/path-explorer gen ledger-header input-ledger null input-tx)))
 
 (define solution-list
   (stream->list
    (all-paths spec)))
 
+(define all-symbolics (symbolics test-case))
+
 (for ([s solution-list])
   (if (sat? s)
-      (let* ([syms (apply set-union (map symbolics (list ledger-header input-tx input-ledger)))]
-             [complete-sol (complete-solution s syms)])
+      (let* ([complete-sol (complete-solution s all-symbolics)])
         (map (λ (f) (pretty-display (syntax->datum f))) (generate-forms complete-sol)))
       (displayln "unsat")))

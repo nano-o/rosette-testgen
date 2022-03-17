@@ -337,7 +337,7 @@
             #:init (set)
             #:visit: (set-add $acc $v)))
 
-(define (depth h t)
+(define (min-depth h t)
   ; the minimum depth to cover the graph
   (let-values ([(a _) (bfs (deps-graph h) t)])
     (let ([reachable (for/fold ([acc null])
@@ -346,6 +346,22 @@
                            acc
                            (cons (cons k v) acc)))])
       (cdr (argmax (λ (p) (cdr p)) reachable)))))
+
+; max depth without recursing:
+(define (max-depth h)
+  (define g (deps-graph h))
+  (define-vertex-property g max-depth)
+  (do-dfs g
+          #:epilogue: (let ([ns (get-neighbors g $v)])
+                        (if (null? ns)
+                            (max-depth-set! $v 1)
+                            (let* ([get-depth (λ (v)
+                                                (if (max-depth-defined? v)
+                                                    (max-depth v)
+                                                    0))]
+                                   [m (apply max (map get-depth ns))])
+                              (max-depth-set! $v (+ m 1))))))
+  (max-depth->hash))
 
 (define (recursive-types h t)
   ; returns the set of types that are recursive
