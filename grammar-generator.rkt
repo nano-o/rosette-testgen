@@ -1,4 +1,12 @@
 #lang nanopass
+; Generate a Rosette grammar corresponding to an XDR specification
+; We use the nanopass compiler framework
+
+; TODO there's pretty much no error checking
+; TODO write tests
+
+; TODO allow specifying the size of each variable-size types
+; Use a syntax inspired from the txrep format, e.g. t1.t2._len
 
 (require
   racket/hash
@@ -16,9 +24,8 @@
 (define the-ast
   (read-spec "temp/Stellar.sexp")) ; for testing
 
-; TODO there's pretty much no error checking
-
 (define-language L0
+  ; This is a subset of the the language of guile-rpc ASTs
   (terminals
    (identifier (i))
    (constant (c))
@@ -46,6 +53,7 @@
   (Union-Case-Spec (union-case-spec)
                    ((v* ...) decl)
                    (else decl)))
+; TODO rewrite union specs to obtain a single production
 
 (define constant? number?)
 (define identifier? string?)
@@ -202,6 +210,42 @@
     (normalize-unions test-5-L0 test-5-enums)))
 
 (define Stellar-L1 (normalize-unions Stellar-L0 Stellar-enum-defs))
+
+; Next we define a pass that changes the length of variable-length arrays as specified by the caller
+
+(define (get-length len-specs path len)
+  (let ([key (reverse (cons "_len" path))])
+    (if (dict-has-key? len-specs key)
+        (begin
+          (println "match!")
+          (dict-ref len-specs key))
+        len)))
+
+(define test-len-specs
+  '((("Transaction" "operations" "_len") . 1)))
+
+; TODO what about specifying more specific paths, e.g. ("TransactionEnvelope" "v1" "tx" "operations" "_len")
+(define-pass override-lengths : L1 (ir len-specs) -> L1 ()
+  (Def : Def (ir) -> Def ()
+       ((define-type ,i ,[Spec : type-spec (list i) -> type-spec2])
+        `(define-type ,i ,type-spec2))
+       (else ir))
+  (Decl : Decl (ir path) -> Decl ()
+        ((,i ,[Spec : type-spec (cons i path) -> type-spec2]) `(,i ,type-spec2))
+        (else ir))
+  (Spec : Spec (ir path) -> Spec ()
+        ((struct ,[Decl : decl* path -> decl2*] ...) `(struct ,decl2* ...))
+        ((union ,[Union-Spec : union-spec path -> union-spec2]) `(union ,union-spec2))
+        ((variable-length-array ,type-spec ,v)
+         (begin
+           (println path)
+           `(variable-length-array ,type-spec ,(get-length len-specs path v))))
+        (else ir))
+  (Union-Spec : Union-Spec (ir path) -> Union-Spec ()
+              ((case (,i1 ,i2) ,[Union-Case-Spec : union-case-spec* path -> union-case-spec2*] ...)
+               `(case (,i1 ,i2) ,union-case-spec2* ...)))
+  (Union-Case-Spec : Union-Case-Spec (ir path) -> Union-Case-Spec ()
+                   ((,v ,[Decl : decl path -> decl2]) `(,v ,decl2))))
 
 (define-language L2
   ; add path of a struct in the type hierarchy
@@ -388,10 +432,10 @@
   (let ([n (size->number consts size)])
     (make-sequence "list" elem-type-rule n)))
 ;struct union (tag value) #:transparent)
-(define max-sequence-length 2)
+(define max-seq-len 2)
 (define (make-vector consts elem-type-rule size) ; variable-size array
   (let ([n (size->number consts size)])
-    (let ([m (if (or (not n) (> n 2)) max-sequence-length n)])
+    (let ([m (if (or (not n) (> n max-seq-len)) max-seq-len n)])
       (make-sequence "vector" elem-type-rule m))))
 
 ; generate an identifier for a grammar rule:
@@ -403,6 +447,7 @@
                                   (loop (+ index 1)))))
   ; Rosette seems to be relying on source-location information to create symbolic variable names.
   ; Since we want all grammar holes to be independent, we need to use a unique location each time.
+  ; This is only useful if using the grammar generator in a macro
   (format-id #f "~a-rule" str #:source (make-srcloc (format "~a-rule:~a" str (get-index!)) 1 0 1 0)))
 
 (define (rule-hole str)
@@ -420,7 +465,6 @@
    #'(struct :union: (tag value) #:transparent)))
 
 (define-pass make-rule : (L2 Spec) (ir stx type-name consts) -> * (rule)
-  ; TODO enums and unions with only one case
   (Spec : Spec (ir) -> * (rule)
         [,i (case i
               [("opaque") #`(?? (bitvector 8))]
@@ -463,11 +507,11 @@
 (let ([t "PathPaymentStrictReceiveResult"])
   (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-L0) ))
 
-(define (xdr-types->grammar xdr-spec stx ts) ; ts is a set of types
+(define (xdr-types->grammar xdr-spec len-specs stx ts) ; ts is a set of types
   (let* ([l0 (throw-if-nested-enum (add-bool (L0-parser xdr-spec)))]
          [consts-h (make-consts-hashmap l0)]
          [l1 (normalize-unions l0 (enum-defs l0))]
-         [l2 (add-path l1)]
+         [l2 (add-path (override-lengths l1 len-specs))]
          [h (collect-types l2)]
          [const-defs (constant-definitions stx (make-consts-hashmap l0))]
          [struct-defs (hash-values (make-struct-types/rec stx h ts))]
@@ -485,10 +529,11 @@
         (define-grammar
           (#,(format-id stx "~a" "the-grammar")) #,@rules))))
 
-(define (generate-grammar xdr-spec)
+(define (generate-grammar xdr-spec len-specs)
   (pretty-display
    (syntax->datum
     (xdr-types->grammar
      xdr-spec
+     len-specs
      #'()
      (set "TransactionEnvelope" "LedgerEntry" "LedgerHeader" "TransactionResult")))))
