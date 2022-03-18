@@ -6,19 +6,26 @@
              (rnrs io ports)
              (jlib base64))
 
-(if (< (length (command-line)) 2)
+(if (not (equal? (length (command-line)) 3))
   (begin
-    (display "not enough arguments")
+    (display "Takes 2 arguments: a file containing the XDR specification and the XDR type to use.")
     (newline)
     (exit)))
 
 (define type-defs
   (open-file (cadr (command-line)) "r"))
+(define type-name
+  (caddr (command-line)))
 ; (display (cadr (command-line)))
 ; (newline)
 (define types (rpc-language->xdr-types type-defs))
 (close-port type-defs)
-(define type (cdr (assoc "TransactionEnvelope" types)))
+(define type (assoc-ref types type-name))
+(if (not type)
+ (begin
+   (display "type not found")
+   (newline)
+   (exit)))
 
 ; read data from stdin
 (define scm-tx
