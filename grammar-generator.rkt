@@ -1,5 +1,6 @@
 #lang nanopass
 ; Generate a Rosette grammar corresponding to an XDR specification
+; Reads an input specification in guile-rpc AST format
 ; We use the nanopass compiler framework
 
 ; TODO there's pretty much no error checking
@@ -11,19 +12,18 @@
   list-util
   racket/syntax
   racket/generator
-  pretty-format
-  ;racket/trace
-  graph
-  "read-spec.rkt")
+  racket/pretty
+  graph)
 
-(provide generate-grammar)
- ;L0-parser normalize-unions has-nested-enum? make-consts-hashmap)
+(provide display-grammar xdr-types->grammar max-depth)
 
-(define the-ast
-  (read-spec "temp/Stellar.sexp")) ; for testing
+(module+ test
+  (require rackunit "read-datums.rkt")
+  (define Stellar-xdr-types
+    (read-datums "Stellar.xdr-types")))
 
 (define-language L0
-  ; This is a subset of the the language of guile-rpc ASTs
+  ; This is a subset of the language of guile-rpc ASTs
   (terminals
    (identifier (i))
    (constant (c))
@@ -60,18 +60,30 @@
 
 (define-parser L0-parser L0)
 
-(define test-0 '((define-type "t" (union (case ("tag" "type") (("X") ("x" "tx")) (else ("y" "Y")))))))
-(L0-parser test-0)
-
-(define test-1
-  '((define-type "test-union"
-     (union (case ("tagname" "tagtype")
-              (("A") ("c" (union (case ("tagname-2" "tagtype-2") (("X" "Y") ("x" "T"))))))
-              (("B" "C") ("d" "int")))))
-    (define-type "test-struct"
-      (struct ("t1" (union (case ("tagname-3" "tagtype-3") (("F" "G") ("y" "T")))))))))
-
-(L0-parser test-1)
+(module+ test
+  (define test-0 '((define-type "t" (union (case ("tag" "type") (("X") ("x" "tx")) (else ("y" "Y")))))))
+  (define test-1
+    '((define-type "test-union"
+        (union (case ("tagname" "tagtype")
+                 (("A") ("c" (union (case ("tagname-2" "tagtype-2") (("X" "Y") ("x" "T"))))))
+                 (("B" "C") ("d" "int")))))
+      (define-type "test-struct"
+        (struct ("t1" (union (case ("tagname-3" "tagtype-3") (("F" "G") ("y" "T")))))))))
+  (define/provide-test-suite L0-parser/test
+    (test-case
+     "parse simple examples"
+     (check-not-exn
+      (λ ()
+        (L0-parser test-0)
+        (L0-parser test-1))
+      "parsing threw an exception"))
+    (test-case
+     "parser Stellar-xdr-types"
+     (check-not-exn
+      (λ ()
+        (L0-parser Stellar-xdr-types))
+      "exception parsing Stellar-xdr-types")))
+  (define Stellar-l0 (L0-parser Stellar-xdr-types)))
 
 ; L0a simplifies L0 a bit by removing the superfluous Union-Spec production
 
@@ -97,36 +109,46 @@
 ; does not work:
 ; (define-language-node-counter L0-counter L0)
 
-(define Stellar-L0a (add-bool (simplify-union (L0-parser the-ast))))
+(module+ test
+  (define/provide-test-suite simplify-union/test
+    (test-case
+     "run simplify-union on stellar spec"
+     (check-not-exn
+      (λ ()
+        (simplify-union Stellar-l0))
+      "exception in simplify-union")))
+  (define Stellar-l0a (add-bool (simplify-union Stellar-l0))))
 
 ; throws an exception if there are any nested enums
-; NOTE we produce L0 to allow the framework to synthesis most of the rules
+; NOTE we produce L0a to allow the nanopass framework to synthesize most of the rules
 (define-pass throw-if-nested-enum : L0a (ir) -> L0a ()
   (Def : Def (ir) -> Def ()
-       ; a top-level enum: 
        ((define-type ,i (enum (,i* ,c*) ...)) ir))
   (Spec : Spec (ir) -> Spec ()
         ((enum (,i* ,c*) ...)
          (error "enums defined inside other types are not supported"))))
 
-(define (has-nested-enum? l0)
-  (with-handlers ([exn:fail? (λ (exn) #t)])
-    (begin
-      (throw-if-nested-enum l0)
-      #f)))
-
-(println (has-nested-enum? (simplify-union (L0-parser test-1))))
-
-(define test-2
-  '((define-type "test-struct"
-      (struct ("t1" (enum ("A" 1)))))))
-
-(define test-3
-  '((define-type "t1" (enum ("A" 1)))))
-
-(println (has-nested-enum? (simplify-union (L0-parser test-2))))
-(println (has-nested-enum? (simplify-union (L0-parser test-3))))
-
+(module+ test
+  (define test-2
+    '((define-type "test-struct"
+        (struct ("t1" (enum ("A" 1)))))))
+  (define test-3
+    '((define-type "t1" (enum ("A" 1)))))
+  (define/provide-test-suite throw-if-nested-enum/test
+    (test-case
+     "should throw on nested enum"
+     (check-exn
+      exn:fail?
+      (λ ()
+          (throw-if-nested-enum (simplify-union (L0-parser test-2)))))
+    (test-case
+     "should not throw"
+     (check-not-exn
+      (λ ()
+        (begin
+          (throw-if-nested-enum (simplify-union (L0-parser test-1)))
+          (throw-if-nested-enum (simplify-union (L0-parser test-3)))
+          (throw-if-nested-enum Stellar-l0a))))))))
 
 ; returns a hashmap mapping top-level enum symbols and constants to values
 (define-pass make-consts-hashmap : L0a (ir) -> * (h)
@@ -142,11 +164,19 @@
         (else (hash)))
   (XDR-Spec ir))
 
-(define test-4
-  '((define-type "test-enum" (enum ("A" 1) ("B" 2))) (define-constant "C" 3)))
+(module+ test
+  (define test-4
+    '((define-type "test-enum" (enum ("A" 1) ("B" 2))) (define-constant "C" 3)))
 
-(make-consts-hashmap (simplify-union (L0-parser test-3)))
-(make-consts-hashmap (simplify-union (L0-parser test-4)))
+  (define/provide-test-suite make-consts-hashmap/test
+    (test-case
+     "no exn"
+     (check-not-exn
+      (λ ()
+        (begin
+          (make-consts-hashmap (simplify-union (L0-parser test-3)))
+          (make-consts-hashmap (simplify-union (L0-parser test-4)))
+          (make-consts-hashmap Stellar-l0a)))))))
                      
 ; Make constant definitions:
 
@@ -157,7 +187,14 @@
             #`(define #,(format-id stx k) #,v))])
     #`(#,@defs)))
 
-(define Stellar-const-defs (constant-definitions #'() (make-consts-hashmap Stellar-L0a)))
+(module+ test
+  (define/provide-test-suite constant-definitions/test
+    (test-case
+     "no exn"
+     (check-not-exn
+      (λ ()
+        (constant-definitions #'() (make-consts-hashmap Stellar-l0a))))))
+  (define Stellar-const-defs (constant-definitions #'() (make-consts-hashmap Stellar-l0a))))
 
 ; Here we collect top-level enum definitions
 ; Returns an alist
@@ -171,7 +208,15 @@
    (XDR-Spec ir)
    '(("bool" . (("TRUE" . 1) ("FALSE" . 0)))))) ; bool is implicit
 
-(define Stellar-enum-defs (enum-defs Stellar-L0a))
+(module+ test
+  (define/provide-test-suite enum-defs/test
+    (test-case
+     "no exn"
+     (check-not-exn
+      (λ ()
+        (enum-defs Stellar-l0a))
+      "exception in enum-defs")))
+  (define Stellar-enum-defs (enum-defs Stellar-l0a)))
 
 ; next we normalize union specs
 
@@ -213,32 +258,32 @@
                       [decl* (map cdr tag-decl2*)])
                  `(union (,i1 ,i2) (,tag* ,decl*) ...)))))
 
-(define test-5
-  '((define-type "my-enum" (enum ("A" 0) ("B" 1)))
-    (define-type "my-union" (union (case ("tag" "my-enum") (("A") ("i" "int")) ((1) ("j" "int")))))))
-(let* ([test-5-L0 (simplify-union (L0-parser test-5))]
-       [test-5-enums (enum-defs test-5-L0)])
-  (with-handlers ([exn:fail? (λ (exn) (println "okay"))])
-    (normalize-unions test-5-L0 test-5-enums)))
-
-(define Stellar-L1 (normalize-unions Stellar-L0a Stellar-enum-defs))
+(module+ test
+  (define test-5
+    '((define-type "my-enum" (enum ("A" 0) ("B" 1)))
+      (define-type "my-union" (union (case ("tag" "my-enum") (("A") ("i" "int")) ((1) ("j" "int")))))))
+  (define/provide-test-suite normalize-unions/test
+    (test-case
+     "throw on numeric tag value in union tagged by an enum type"
+     (check-exn
+      exn:fail?
+      (λ ()
+        (let* ([test-5-L0 (simplify-union (L0-parser test-5))]
+               [test-5-enums (enum-defs test-5-L0)])
+          (normalize-unions test-5-L0 test-5-enums))))))
+  (define Stellar-l1 (normalize-unions Stellar-l0a Stellar-enum-defs)))
 
 ; Next we define a pass that changes the length of variable-length arrays as specified by the caller
 
-(define (get-length len-specs path len)
+(define (get-length overridess path len)
   (let ([key (reverse (cons "_len" path))])
-    (if (dict-has-key? len-specs key)
+    (if (dict-has-key? overridess key)
         (begin
-          (dict-ref len-specs key))
+          (dict-ref overridess key))
         len)))
 
-(define test-len-specs
-  '((("Transaction" "operations" "_len") . 1)
-    (("TestCase" "ledgerEntries" "_len") . 2)
-    (("TestCase" "transactionEnvelopes" "_len") . 1)))
-
-; TODO what about specifying more specific paths, e.g. ("TransactionEnvelope" "v1" "tx" "operations" "_len")
-(define-pass override-lengths : L1 (ir len-specs) -> L1 ()
+; overridess must be a dict mapping paths to natural numbers
+(define-pass override-lengths : L1 (ir overridess) -> L1 ()
   (Def : Def (ir) -> Def ()
        ((define-type ,i ,[Spec : type-spec (list i) -> type-spec2])
         `(define-type ,i ,type-spec2))
@@ -252,7 +297,7 @@
          `(union (,i1 ,i2) ,union-case-spec2* ...))
         ((variable-length-array ,type-spec ,v)
          (begin
-           `(variable-length-array ,type-spec ,(get-length len-specs path v))))
+           `(variable-length-array ,type-spec ,(get-length overridess path v))))
         (else ir))
   (Union-Case-Spec : Union-Case-Spec (ir path) -> Union-Case-Spec ()
                    ((,v ,[Decl : decl path -> decl2]) `(,v ,decl2))))
@@ -282,7 +327,21 @@
   (Union-Spec : Union-Spec (ir p) -> Union-Spec ())  ; NOTE processors with inputs are not auto-generated, but their body is
   (Union-Case-Spec : Union-Case-Spec (ir p) -> Union-Case-Spec ()))
 
-(define Stellar-L2 (add-path Stellar-L1))
+(define (l0->l2 overrides l0)
+  (let* ([l0a (throw-if-nested-enum (add-bool (simplify-union l0)))]
+         [l1 (normalize-unions l0 (enum-defs l0))]
+         [l2 (add-path (override-lengths l1 overrides))])
+    l2))
+
+(module+ test
+  (define/provide-test-suite add-path/test
+    (test-case
+     "no exn on Stellar"
+     (check-not-exn
+      (λ ()
+        (add-path Stellar-l1))
+      "exception in add-path")))
+  (define Stellar-l2 (add-path Stellar-l1)))
 
 (define (struct-name path)
   (string-join (reverse path) "::"))
@@ -296,7 +355,15 @@
        ((define-constant ,i ,c) (hash)))
   (XDR-Spec ir))
 
-(define Stellar-types (collect-types Stellar-L2))
+(module+ test
+  (define/provide-test-suite collect-types/test
+    (test-case
+     "no exn"
+     (check-not-exn
+      (λ ()
+        (collect-types Stellar-l2))
+      "exception in collect-types")))
+  (define Stellar-types (collect-types Stellar-l2)))
 
 (define base-types '("opaque" "void" "int" "unsigned int" "hyper" "unsigned hyper"))
 (define (base-type? t)
@@ -320,7 +387,8 @@
                    ((,v ,[d]) d))
   (Spec ir))
 
-(define TransactionEnvelope-deps (immediate-deps (hash-ref Stellar-types "TransactionEnvelope")))
+(module+ test
+  (define TransactionEnvelope-deps (immediate-deps (hash-ref Stellar-types "TransactionEnvelope"))))
 
 (define (type-graph-edges h)
   (apply append
@@ -348,20 +416,21 @@
       (cdr (argmax (λ (p) (cdr p)) reachable)))))
 
 ; max depth without recursing:
-(define (max-depth h)
-  (define g (deps-graph h))
-  (define-vertex-property g max-depth)
-  (do-dfs g
-          #:epilogue: (let ([ns (get-neighbors g $v)])
-                        (if (null? ns)
-                            (max-depth-set! $v 1)
-                            (let* ([get-depth (λ (v)
-                                                (if (max-depth-defined? v)
-                                                    (max-depth v)
-                                                    0))]
-                                   [m (apply max (map get-depth ns))])
-                              (max-depth-set! $v (+ m 1))))))
-  (max-depth->hash))
+(define (max-depth xdr-types)
+  (let ([h (collect-types (l0->l2 null (L0-parser xdr-types)))])
+    (define g (deps-graph h))
+    (define-vertex-property g max-depth)
+    (do-dfs g
+            #:epilogue: (let ([ns (get-neighbors g $v)])
+                          (if (null? ns)
+                              (max-depth-set! $v 1)
+                              (let* ([get-depth (λ (v)
+                                                  (if (max-depth-defined? v)
+                                                      (max-depth v)
+                                                      0))]
+                                     [m (apply max (map get-depth ns))])
+                                (max-depth-set! $v (+ m 1))))))
+    (max-depth->hash)))
 
 (define (recursive-types h t)
   ; returns the set of types that are recursive
@@ -377,11 +446,10 @@
                           (not seen))))
     rec-types))
 
-#;(depth Stellar-types "TransactionEnvelope")
-
-(define TransactionEnvelope-deps/rec (deps Stellar-types "TransactionEnvelope"))
-(define TransactionResult-deps/rec (deps Stellar-types "TransactionResult"))
-(define LedgerEntry-deps/rec (deps Stellar-types "LedgerEntry"))
+(module+ test
+  (define TransactionEnvelope-deps/rec (deps Stellar-types "TransactionEnvelope"))
+  (define TransactionResult-deps/rec (deps Stellar-types "TransactionResult"))
+  (define LedgerEntry-deps/rec (deps Stellar-types "LedgerEntry")))
 
 ; Next we define needed Racket struct types
 
@@ -421,8 +489,9 @@
                    ((,v ,[sts]) sts))
   (Spec ir))
 
-(make-struct-types (hash-ref Stellar-types "ManageOfferSuccessResult") #'())
-(make-struct-types (hash-ref Stellar-types "LiquidityPoolEntry") #'())
+(module+ test
+  (make-struct-types (hash-ref Stellar-types "ManageOfferSuccessResult") #'())
+  (make-struct-types (hash-ref Stellar-types "LiquidityPoolEntry") #'()))
 
 (define (make-struct-types/rec stx h ts)
   (let* ([deps
@@ -435,8 +504,9 @@
      (for/list ([t (in-set (set-union ts deps))])
        (make-struct-types (hash-ref h t) stx)))))
 
-(hash-count (make-struct-types/rec #'() Stellar-types
-                                   (set "TransactionEnvelope" "TransactionResult" "LedgerEntry")))
+(module+ test
+  (hash-count (make-struct-types/rec #'() Stellar-types
+                                     (set "TransactionEnvelope" "TransactionResult" "LedgerEntry"))))
 
 ; Next:
 ; Generate rules
@@ -522,18 +592,20 @@
                     #`(:union: (bv #,(value-rule stx v) 32) #,rule)])
   #`(#,(rule-id type-name) #,(Spec ir)))
 
-(let ([t "SimplePaymentResult"])
-  (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-L0a) ))
-(let ([t "PathPaymentStrictReceiveResult"])
-  (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-L0a) ))
+(module+ test
+  (let ([t "SimplePaymentResult"])
+    (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-l0a) ))
+  (let ([t "PathPaymentStrictReceiveResult"])
+    (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-l0a) )))
 
-(define (xdr-types->grammar xdr-spec len-specs stx ts) ; ts is a set of types
+; returns a grammar as a syntax object
+(define (xdr-types->grammar xdr-spec overridess stx ts) ; ts is a set of types
   (let* ([l0 (throw-if-nested-enum (add-bool (simplify-union (L0-parser xdr-spec))))]
-         [consts-h (make-consts-hashmap l0)]
          [l1 (normalize-unions l0 (enum-defs l0))]
-         [l2 (add-path (override-lengths l1 len-specs))]
+         [l2 (add-path (override-lengths l1 overridess))]
          [h (collect-types l2)]
-         [const-defs (constant-definitions stx (make-consts-hashmap l0))]
+         [consts-h (make-consts-hashmap l0)]
+         [const-defs (constant-definitions stx consts-h)]
          [struct-defs (hash-values (make-struct-types/rec stx h ts))]
          [deps (set-union
                 ts
@@ -549,16 +621,18 @@
         (define-grammar
           (#,(format-id stx "~a" "the-grammar")) #,@rules))))
 
-(define (generate-grammar xdr-spec len-specs)
-  (pretty-display
+(define (display-grammar xdr-spec overridess types)
+  (pretty-print
    (syntax->datum
     (xdr-types->grammar
      xdr-spec
-     len-specs
+     overridess
      #'()
-     (set "TestCase" "TestCaseResult")))))
+     types))))
 
-(require (rename-in "txrep-test.rkt"
-                    (spec len-specs)))
-
-(generate-grammar the-ast len-specs)
+(module+ test
+  (define test-overrides
+    '((("Transaction" "operations" "_len") . 1)
+      (("TestCase" "ledgerEntries" "_len") . 2)
+      (("TestCase" "transactionEnvelopes" "_len") . 1)))
+  (display-grammar Stellar-xdr-types test-overrides (set "TestCase" "TestCaseResult")))

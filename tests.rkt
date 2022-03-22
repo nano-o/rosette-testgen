@@ -2,6 +2,7 @@
 
 (require
   (submod "generators.rkt" test)
+  (submod "grammar-generator.rkt" test)
   rackunit/text-ui)
 
 (define (get-test-exports m)
@@ -15,6 +16,7 @@
 (define-namespace-anchor a)
 (define ns (namespace-anchor->namespace a))
 
+; TODO: there's certainly a better way to run all tests than this hack...
 (define (run-all m)
   (for ([test (get-test-exports m)])
     (if (regexp-match (regexp ".*/test$") (symbol->string test))
@@ -25,3 +27,4 @@
 
 ; run all tests
 (run-all "generators.rkt")
+(run-all "grammar-generator.rkt")
