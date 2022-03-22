@@ -9,3 +9,9 @@ cat transaction.scm | docker run -i --rm CONTAINER_ID serialize.sh
 ```
 cat Stellar.x | docker run -i --rm CONTAINER_ID xdr_spec_to_sexp.sh
 ```
+
+* To run stc:
+
+```
+docker run -i --rm CONTAINER_ID stc
+```

@@ -1,4 +1,4 @@
-FROM ubuntu:focal
+FROM ubuntu:impish
 
 RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
 RUN apt-get update && apt-get install -y --no-install-recommends apt-utils dialog ca-certificates
@@ -16,13 +16,14 @@ RUN apt-get update && apt-get install -y sudo rsync
 RUN useradd -ms /bin/bash user && echo 'user:user' | chpasswd && adduser user sudo
 RUN echo "ALL ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
-RUN apt-get update && apt-get install -y git
-RUN apt-get update && apt-get install -y guile-3.0 guile-3.0-dev
-RUN apt-get update && apt-get install -y build-essential pkg-config autoconf automake libtool texinfo
+RUN apt-get update && apt-get install -y git build-essential pkg-config autoconf automake libtool texinfo guile-3.0 guile-3.0-dev golang-go
 
 USER user
 WORKDIR /home/user/
 RUN mkdir /home/user/bin/
+
+# make and install guile-rpc:
+
 RUN git clone git://git.sv.gnu.org/guile-rpc.git
 WORKDIR /home/user/guile-rpc/
 RUN mkdir m4
@@ -32,10 +33,14 @@ RUN ./configure --prefix=/home/user
 RUN make install
 WORKDIR /home/user/
 
+# install script xdr_spec_to-sexp.sh:
+
 ENV PATH=/home/user/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 RUN grpc-compile --help # force compilation
 COPY --chown=user:user xdr_spec_to_sexp.sh /home/user/bin/
 RUN chmod +x /home/user/bin/xdr_spec_to_sexp.sh
+
+# install script serialize.sh:
 
 RUN git clone  https://github.com/jacobrec/guile-lib.git jlib # for base64 support
 COPY --chown=user:user serialize.scm /home/user/
@@ -43,3 +48,7 @@ RUN guile serialize.scm # force compilation
 COPY --chown=user:user Stellar.x /home/user/
 COPY --chown=user:user serialize.sh /home/user/bin/
 RUN chmod +x /home/user/bin/serialize.sh
+
+# install stc
+ENV PATH=/home/user/go/bin:${PATH}
+RUN GOPROXY=direct go install github.com/xdrpp/stc/...@latest
