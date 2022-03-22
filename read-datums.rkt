@@ -1,6 +1,7 @@
 #lang racket
 
-(provide read-spec)
+; read a list of datums from a file
+(provide read-datums)
 
 (define (read-all in)
   (let ([d (read in)])
@@ -8,7 +9,7 @@
         null
         (cons d (read-all in)))))
 
-(define (read-spec file-name)
+(define (read-datums file-name)
   (call-with-input-file file-name
     (lambda (in)
       (read-all in))))
