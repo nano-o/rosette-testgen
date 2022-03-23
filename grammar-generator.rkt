@@ -1,4 +1,4 @@
-#lang nanopass
+#lang racket
 
 ; Generate a Rosette grammar corresponding to an XDR specification
 ; Reads an input specification in guile-rpc AST format
@@ -9,6 +9,7 @@
 ; TODO a pass to remove recursion or limit its depth (ClaimPredicate)?
 
 (require
+  (rename-in nanopass [extends extends-language]) ; conflicts with rosette
   racket/hash
   (only-in list-util zip)
   racket/syntax
@@ -18,7 +19,7 @@
   (for-template
    ;racket
    #;(only-in rosette bitvector bv)
-   (except-in rosette extends)
+   rosette
    rosette/lib/synthax
    #;(only-in rosette/lib/synthax ?? define-grammar choose)))
 
@@ -95,7 +96,7 @@
 ; L0a simplifies L0 a bit by removing the superfluous Union-Spec production
 
 (define-language L0a
-  (extends L0)
+  (extends-language L0)
   (Spec (type-spec)
         (- (union union-spec))
         (+ (union (i1 i2) union-case-spec* ...))))
@@ -228,7 +229,7 @@
 ; next we normalize union specs
 
 (define-language L1
-  (extends L0a)
+  (extends-language L0a)
   (Union-Case-Spec (union-case-spec)
                    (- ((v* ...) decl)
                       (else decl))
@@ -312,7 +313,7 @@
 (define-language L2
   ; add path of a struct in the type hierarchy
   ; this is to generate unique Racket struct names that represent struct types
-  (extends L1)
+  (extends-language L1)
   (terminals
    (+ (path (p))))
   (Spec (type-spec)
@@ -530,7 +531,7 @@
   ; seq-t is list or vector
   ; size is a numeric value
   #`(#,seq-t
-     #,@(for/list ([i (in-range size)]) elem-type-rule)))
+     #,@(for/list ([i (in-range size)]) elem-type-rule))) ; TODO: here we need different slocs for the rules
 (define (make-list consts elem-type-rule size)
   (let ([n (size->number consts size)])
     (make-sequence #'list elem-type-rule n)))
@@ -542,7 +543,7 @@
       (make-sequence #'vector elem-type-rule m))))
 
 ; generate an identifier for a grammar rule:
-(define (rule-id str)
+(define (format-id/unique-loc str [stx #f])
   ; generate unique indices
   (define get-index! (generator ()
                                 (let loop ([index 0])
@@ -550,15 +551,15 @@
                                   (loop (+ index 1)))))
   ; Rosette seems to be relying on source-location information to create symbolic variable names.
   ; Since we want all grammar holes to be independent, we need to use a unique location each time.
-  ; This is only useful if using the grammar generator in a macro
-  (format-id #f "~a-rule" str #:source (make-srcloc (format "~a-rule:~a" str (get-index!)) 1 0 1 0)))
+  ; This is only useful if using the grammar generator in a macro.
+  (format-id stx "~a" str #:source (make-srcloc (format "~a:~a" str (get-index!)) 1 0 1 0)))
 
 (define (rule-hole str)
-  #`(#,(rule-id str)))
+  #`(#,(format-id/unique-loc (string-append str "-rule"))))
 
 (define (value-rule stx v)
   (if (string? v)
-      (format-id stx "~a" v)
+      (format-id/unique-loc v stx)
       v))
 
 (define (built-in-structs stx)
@@ -570,40 +571,40 @@
 (define-pass make-rule : (L2 Spec) (ir stx type-name consts) -> * (rule)
   (Spec : Spec (ir) -> * (rule)
         [,i (case i
-              [("opaque") #`(?? (bitvector 8))]
-              [("int" "unsigned int") #`(?? (bitvector 32))]
-              [("hyper" "unsigned hyper") #`(?? (bitvector 64))]
+              [("opaque") #`(#,(format-id/unique-loc "??" stx) (#,(format-id/unique-loc "bitvector" stx) 8))]
+              [("int" "unsigned int") #`(#,(format-id/unique-loc "??" stx) (#,(format-id/unique-loc "bitvector" stx) 32))]
+              [("hyper" "unsigned hyper") #`(#,(format-id/unique-loc "??" stx) (#,(format-id/unique-loc "bitvector" stx) 64))]
               [else (rule-hole i)])]
         [(struct ,p ,[decl-body*] ...)
-         (let ([struct-name (format-id stx "~a" (struct-name p))])
+         (let ([struct-name (format-id/unique-loc (struct-name p) stx)])
            #`(#,struct-name #,@decl-body*))]
-        [(string ,c) (make-vector consts #'(?? (bitvector 8)) c)]
+        [(string ,c) (make-vector consts #`(#,(format-id/unique-loc "??" stx) (#,(format-id/unique-loc "bitvector" stx) 8)) c)]
         [(variable-length-array ,[elem-rule] ,v)
          (make-vector consts elem-rule v)]
         [(fixed-length-array ,type-spec ,v)
          (guard (equal? type-spec "opaque"))
          (let ([n (size->number consts v)]
-               [byte-array (format-id stx "~a" ":byte-array:")])
-           #`(#,byte-array (?? (bitvector #,(* n 8)))))]
+               [byte-array (format-id/unique-loc ":byte-array:" stx)])
+           #`(#,byte-array (#,(format-id/unique-loc "??" stx) (#,(format-id/unique-loc "bitvector" stx) #,(* n 8)))))]
         [(fixed-length-array ,[elem-rule] ,v)
          (make-list consts elem-rule v)]
         [(enum (,i* ,c*) ...)
-         (let ([bv* (map (λ (i) #`(bv #,(format-id stx "~a" i) 32)) i*)])
+         (let ([bv* (map (λ (i) #`(#,(format-id/unique-loc "bv" stx) #,(format-id/unique-loc i stx) 32)) i*)])
            (if (> (length bv*) 1)
-               #`(choose #,@bv*)
+               #`(#,(format-id/unique-loc "choose" stx) #,@bv*)
                (car bv*)))]
         [(union (,i1 ,i2) ,[rule*] ...)
          (if (> (length rule*) 1)
-                   #`(choose #,@rule*)
+                   #`(#,(format-id/unique-loc "choose" stx) #,@rule*)
                    (car rule*))])
   (Decl : Decl (ir) -> * (rule)
         [(,i ,[rule]) rule]
         [,void #'null])
   (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule)
                    [(,v ,[rule])
-                    (let ([union (format-id stx "~a" ":union:")])
-                    #`(#,union (bv #,(value-rule stx v) 32) #,rule))])
-  #`(#,(rule-id type-name) #,(Spec ir)))
+                    (let ([union (format-id/unique-loc ":union:" stx)])
+                    #`(#,union (#,(format-id/unique-loc "bv" stx) #,(value-rule stx v) 32) #,rule))])
+  #`(#,(format-id/unique-loc (string-append type-name "-rule")) #,(Spec ir)))
 
 (module+ test
   (let ([t "SimplePaymentResult"])
