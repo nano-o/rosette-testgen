@@ -649,4 +649,4 @@
     '((("Transaction" "operations" "_len") . 1)
       (("TestCase" "ledgerEntries" "_len") . 2)
       (("TestCase" "transactionEnvelopes" "_len") . 1)))
-  (display-grammar Stellar-xdr-types test-overrides (set "TransactionEnvelope" "TestCase" "TestCaseResult")))
+  (display-grammar Stellar-xdr-types test-overrides (set "TestCase" "TestCaseResult")))
