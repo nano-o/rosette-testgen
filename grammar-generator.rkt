@@ -16,9 +16,11 @@
   racket/pretty
   graph
   (for-template
-   racket
-   (only-in rosette bitvector bv)
-   (only-in rosette/lib/synthax ?? define-grammar choose)))
+   ;racket
+   #;(only-in rosette bitvector bv)
+   (except-in rosette extends)
+   rosette/lib/synthax
+   #;(only-in rosette/lib/synthax ?? define-grammar choose)))
 
 (provide display-grammar xdr-types->grammar max-depth)
 
