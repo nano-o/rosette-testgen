@@ -1,7 +1,10 @@
 #lang racket
 (require
   syntax/strip-context
-  #;syntax/readerr)
+  parser-tools/lex
+  (prefix-in : parser-tools/lex-sre)
+  megaparsack
+  syntax/readerr)
 
 (provide read-syntax) ; meant to be used as a reader language
 
@@ -11,14 +14,26 @@
 ; TODO parse more robustly (e.g. what about comments?)
 ; TODO enable specifying a set of value for a given type
 
-(define (parse-line l)
-  (match-let ([(list xdr-path len) (map string-trim (string-split l "="))])
-    `(,(string-split xdr-path ".") . ,(string->number len))))
+(define-empty-tokens infix-op (gets in))
+(define-tokens id (xdr-id))
+(define-tokens data (pubkey))
+
+; a Stellar public key (base 32 and must start with G).
+; See https://stellar.stackexchange.com/a/261
+(define-lex-abbrev pubkey (:: "G" (:= 55 (:or (:/ "A" "Z") (:/ "2" "7")))))
+
+(define lexer
+  (lexer-src-pos
+   [":=" (token-gets)]
+   ["in" (token-in)]
+   [pubkey (token-pubkey lexeme)]
+   [(:&
+     (:+ (:or alphabetic numeric "_"))
+     (complement pubkey))
+    (token-xdr-id lexeme)]))
 
 (define (parse-overrides port)
-  (filter (λ (x) (not (equal? x "")))
-          (for/list ([l (port->lines port)])
-            (if (equal? l "") l (parse-line l)))))
+  void) 
 
 (define (read-syntax path port)
     (strip-context ; TODO why is this needed?
