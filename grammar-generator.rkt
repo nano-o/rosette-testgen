@@ -522,13 +522,13 @@
      #,@(for/list ([i (in-range size)]) elem-type-rule)))
 (define (make-list consts elem-type-rule size)
   (let ([n (size->number consts size)])
-    (make-sequence "list" elem-type-rule n)))
+    (make-sequence #'list elem-type-rule n)))
 ;struct union (tag value) #:transparent)
 (define max-seq-len 2)
 (define (make-vector consts elem-type-rule size) ; variable-size array
   (let ([n (size->number consts size)])
     (let ([m (if (or (not n) (> n max-seq-len)) max-seq-len n)])
-      (make-sequence "vector" elem-type-rule m))))
+      (make-sequence #'vector elem-type-rule m))))
 
 ; generate an identifier for a grammar rule:
 (define (rule-id str)
