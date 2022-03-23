@@ -23,7 +23,7 @@
    rosette/lib/synthax
    #;(only-in rosette/lib/synthax ?? define-grammar choose)))
 
-(provide display-grammar xdr-types->grammar max-depth)
+(provide xdr-types->grammar-datum xdr-types->grammar max-depth)
 
 (module+ test
   (require rackunit "read-datums.rkt")
@@ -635,18 +635,17 @@
         (define-grammar
           (#,(format-id stx "~a" "the-grammar")) #,@rules))))
 
-(define (display-grammar xdr-spec overrides types)
-  (pretty-print
+(define (xdr-types->grammar-datum xdr-types overrides types)
    (syntax->datum
     (xdr-types->grammar
-     xdr-spec
+     xdr-types
      overrides
      #'()
-     types))))
+     types)))
 
 (module+ test
   (define test-overrides
     '((("Transaction" "operations" "_len") . 1)
       (("TestCase" "ledgerEntries" "_len") . 2)
       (("TestCase" "transactionEnvelopes" "_len") . 1)))
-  (display-grammar Stellar-xdr-types test-overrides (set "TestCase" "TestCaseResult")))
+  (xdr-types->grammar-datum Stellar-xdr-types test-overrides (set "TestCase" "TestCaseResult")))

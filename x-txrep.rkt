@@ -4,6 +4,7 @@
   syntax/readerr)
 
 ; The eXtented txrep language
+; creates a module that provides `overrides`
 
 #;(define (xdr-identifier? s)
   (regexp-match #rx"^[:alnum:][:alnum:_]*$" s))
