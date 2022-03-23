@@ -3,6 +3,7 @@
 (require
   (submod "generators.rkt" test)
   (submod "grammar-generator.rkt" test)
+  (submod "x-txrep.rkt" test)
   rackunit/text-ui)
 
 (define (get-test-exports m)
@@ -28,3 +29,4 @@
 ; run all tests
 (run-all "generators.rkt")
 (run-all "grammar-generator.rkt")
+(run-all "x-txrep.rkt")
