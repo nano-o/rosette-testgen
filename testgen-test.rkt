@@ -1,16 +1,18 @@
 #lang rosette
 
-; TODO Maybe create a new XDR type called TestCase
 ; TODO use a little language that extends txrep to specify constraints
 ; TODO it would be nice to have a rudimentary type checker (e.g. for bv length)
 
 (require
-  "Stellar-grammar.rkt"
+  "make-grammar.rkt"
+  ;"Stellar-grammar.rkt"
   "path-explorer.rkt"
   rosette/lib/synthax
   syntax/to-string
   #;macro-debugger/stepper
   #;macro-debugger/expand)
+
+(make-grammar #:xdr-types "Stellar.xdr-types" #:types "TestCase")
 
 ; 10 millon stroops = 1 XLM
 (define (xlm->stroop x)

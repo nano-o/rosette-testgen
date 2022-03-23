@@ -1,4 +1,5 @@
 #lang nanopass
+
 ; Generate a Rosette grammar corresponding to an XDR specification
 ; Reads an input specification in guile-rpc AST format
 ; We use the nanopass compiler framework
@@ -9,11 +10,15 @@
 
 (require
   racket/hash
-  list-util
+  (only-in list-util zip)
   racket/syntax
   racket/generator
   racket/pretty
-  graph)
+  graph
+  (for-template
+   racket
+   (only-in rosette bitvector bv)
+   (only-in rosette/lib/synthax ?? define-grammar choose)))
 
 (provide display-grammar xdr-types->grammar max-depth)
 
@@ -329,7 +334,7 @@
 
 (define (l0->l2 overrides l0)
   (let* ([l0a (throw-if-nested-enum (add-bool (simplify-union l0)))]
-         [l1 (normalize-unions l0 (enum-defs l0))]
+         [l1 (normalize-unions l0a (enum-defs l0a))]
          [l2 (add-path (override-lengths l1 overrides))])
     l2))
 
@@ -458,7 +463,8 @@
                        (format-id stx "~a" f))])
         #`(struct #,(format-id stx "~a" name) #,field-names #:transparent)))
 
-(make-struct-type #'() "my-struct" '("field1" "field2"))
+(module+ test
+  (make-struct-type #'() "my-struct" '("field1" "field2")))
 
 (define-pass make-struct-types : (L2 Spec) (ir stx) -> * (sts)
   ; NOTE stops at type identifiers
@@ -505,8 +511,11 @@
        (make-struct-types (hash-ref h t) stx)))))
 
 (module+ test
-  (hash-count (make-struct-types/rec #'() Stellar-types
-                                     (set "TransactionEnvelope" "TransactionResult" "LedgerEntry"))))
+  (hash-count
+   (make-struct-types/rec
+    #'()
+    Stellar-types
+    (set "TransactionEnvelope" "TransactionResult" "LedgerEntry"))))
 
 ; Next:
 ; Generate rules
@@ -516,7 +525,7 @@
       (hash-ref consts size)
       size))
 (define (make-sequence seq-t elem-type-rule size)
-  ; seq-t is "list" or "vector"
+  ; seq-t is list or vector
   ; size is a numeric value
   #`(#,seq-t
      #,@(for/list ([i (in-range size)]) elem-type-rule)))
@@ -550,11 +559,11 @@
       (format-id stx "~a" v)
       v))
 
-(define built-in-structs
+(define (built-in-structs stx)
   ; we put ":" in the name to avoid clashes with XDR names
-  (list 
-   #'(struct :byte-array: (value) #:transparent)
-   #'(struct :union: (tag value) #:transparent)))
+  (list
+   (make-struct-type stx ":byte-array:" '("value"))
+   (make-struct-type stx ":union:" '("tag" "value"))))
 
 (define-pass make-rule : (L2 Spec) (ir stx type-name consts) -> * (rule)
   (Spec : Spec (ir) -> * (rule)
@@ -571,8 +580,9 @@
          (make-vector consts elem-rule v)]
         [(fixed-length-array ,type-spec ,v)
          (guard (equal? type-spec "opaque"))
-         (let ([n (size->number consts v)])
-           #`(:byte-array: (?? (bitvector #,(* n 8)))))]
+         (let ([n (size->number consts v)]
+               [byte-array (format-id stx "~a" ":byte-array:")])
+           #`(#,byte-array (?? (bitvector #,(* n 8)))))]
         [(fixed-length-array ,[elem-rule] ,v)
          (make-list consts elem-rule v)]
         [(enum (,i* ,c*) ...)
@@ -589,7 +599,8 @@
         [,void #'null])
   (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule)
                    [(,v ,[rule])
-                    #`(:union: (bv #,(value-rule stx v) 32) #,rule)])
+                    (let ([union (format-id stx "~a" ":union:")])
+                    #`(#,union (bv #,(value-rule stx v) 32) #,rule))])
   #`(#,(rule-id type-name) #,(Spec ir)))
 
 (module+ test
@@ -599,10 +610,10 @@
     (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-l0a) )))
 
 ; returns a grammar as a syntax object
-(define (xdr-types->grammar xdr-spec overridess stx ts) ; ts is a set of types
+(define (xdr-types->grammar xdr-spec overrides stx ts) ; ts is a set of types
   (let* ([l0 (throw-if-nested-enum (add-bool (simplify-union (L0-parser xdr-spec))))]
          [l1 (normalize-unions l0 (enum-defs l0))]
-         [l2 (add-path (override-lengths l1 overridess))]
+         [l2 (add-path (override-lengths l1 overrides))]
          [h (collect-types l2)]
          [consts-h (make-consts-hashmap l0)]
          [const-defs (constant-definitions stx consts-h)]
@@ -617,16 +628,16 @@
     #`(begin
         #,@const-defs
         #,@struct-defs
-        #,@built-in-structs
+        #,@(built-in-structs stx)
         (define-grammar
           (#,(format-id stx "~a" "the-grammar")) #,@rules))))
 
-(define (display-grammar xdr-spec overridess types)
+(define (display-grammar xdr-spec overrides types)
   (pretty-print
    (syntax->datum
     (xdr-types->grammar
      xdr-spec
-     overridess
+     overrides
      #'()
      types))))
 
@@ -635,4 +646,4 @@
     '((("Transaction" "operations" "_len") . 1)
       (("TestCase" "ledgerEntries" "_len") . 2)
       (("TestCase" "transactionEnvelopes" "_len") . 1)))
-  (display-grammar Stellar-xdr-types test-overrides (set "TestCase" "TestCaseResult")))
+  (display-grammar Stellar-xdr-types test-overrides (set "TransactionEnvelope" "TestCase" "TestCaseResult")))

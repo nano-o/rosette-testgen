@@ -3,6 +3,8 @@
   syntax/strip-context
   syntax/readerr)
 
+; The eXtented txrep language
+
 #;(define (xdr-identifier? s)
   (regexp-match #rx"^[:alnum:][:alnum:_]*$" s))
 
@@ -16,9 +18,7 @@
                    (if (equal? l "") l (parse-line l))))])
     (strip-context
      #`(module x-txrep-mod racket/base ; the module name seems irrelevant
-         (provide spec)
-         (define spec '#,len-specs)))))
+         (provide overrides)
+         (define overrides '#,len-specs)))))
 
 (provide read-syntax)
-    
-  

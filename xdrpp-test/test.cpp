@@ -46,7 +46,7 @@ int main (int argc, char** argv) {
     inFile = argv[1];
   }
   else {
-    std::cout << "Usage: ./cppfile datafile.bin\n";
+    std::cout << "Usage: ./test datafile.bin\n";
     return 1;
   }
 
