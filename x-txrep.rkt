@@ -10,6 +10,8 @@
   data/monad
   data/applicative)
 
+; TODO report parse errors with location.
+
 (provide read-syntax) ; meant to be used as a reader language
 
 ; The eXtented txrep language
@@ -18,7 +20,7 @@
 ; TODO parse more robustly (e.g. what about comments?)
 ; TODO enable specifying a set of value for a given type
 
-(define-empty-tokens infix-op (gets in dot len space newline pubkey-keyword))
+(define-empty-tokens infix-op (equals in dot len space newline pubkey-keyword))
 (define-tokens id (xdr-id))
 (define-tokens data (pubkey number))
 
@@ -31,11 +33,11 @@
 (define lexer
   (lexer-src-pos
    ["pubkey" (token-pubkey-keyword)]
-   [":=" (token-gets)]
+   ["=" (token-equals)]
    ["in" (token-in)]
    ["." (token-dot)]
    ["_len" (token-len)]
-   [(:+ (:/ "0" "9")) (token-number lexeme)]
+   [(:+ (:/ "0" "9")) (token-number (string->number lexeme))]
    [pubkey (token-pubkey lexeme)]
    [(:&
      (:: (:or alphabetic numeric)
@@ -60,18 +62,21 @@
 (define xdr-array-length/p
   (do [m <- xdr-member/p] (token/p 'dot) (token/p 'len) (pure m)))
 (define len-override/p
-  (do [m <- xdr-array-length/p] (token/p 'gets) [n <- (token/p 'number)] (pure `(,m . ,n))))
+  (do [m <- xdr-array-length/p] (token/p 'equals) [n <- (token/p 'number)] (pure `(,m . (len . ,n)))))
 (define key-override/p
-  (do (token/p 'pubkey-keyword) [m <- xdr-member/p] (token/p 'in) [l <- (many+/p (token/p 'pubkey))] (pure `(,m . ,l))))
-  
-(parse-result! (parse-tokens xdr-member/p (run-lexer (open-input-string "a.b.c"))))
-(parse-result! (parse-tokens xdr-array-length/p (run-lexer (open-input-string "a.b._len"))))
-(parse-result! (parse-tokens len-override/p (run-lexer (open-input-string "a.b._len := 3 ; test"))))
-(parse-result! (parse-tokens key-override/p
-                             (run-lexer (open-input-string "pubkey a.b in GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3 GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL"))))
+  (do (token/p 'pubkey-keyword) [m <- xdr-member/p] (token/p 'in) (token/p 'newline)
+    [l <- (many+/p (token/p 'pubkey) #:sep (token/p 'newline))] (pure `(,m . (key-set . ,l)))))
+(define overrides/p
+  (do
+    (many/p (token/p 'newline))
+    [res <- (many+/p (or/p len-override/p key-override/p) #:sep (noncommittal/p (many/p (token/p 'newline))))]
+    (many/p (token/p 'newline))
+    (pure res)))
 
 (define (parse-overrides port)
-  void)
+  (let* ([tokens (run-lexer port)]
+        #;[_ (println tokens)])
+  (parse-result! (parse-tokens overrides/p tokens))))
 
 (define (read-syntax path port)
   ; TODO set the lexer "file-path" parameter
@@ -82,22 +87,49 @@
 
 (module+ test
   (require rackunit)
-  (define o (open-output-string))
-  (fprintf
-   o
-   (apply string-append
-          '(
-            "Transaction.operations._len = 1\n"
-            "TestCase.ledgerEntries._len = 2\n"
-            "TestCase.transactionEnvelopes._len = 1\n"
-            "TransactionV1Envelope.signatures._len = 0\n")))
-  (define i (open-input-string (get-output-string o)))
+ 
   (define/provide-test-suite parse-overrides/test
     (test-case
-     "basic test"
+     "parsing lines"
      (check-equal?
-      (parse-overrides i)
-      '((("Transaction" "operations" "_len") . 1)
-        (("TestCase" "ledgerEntries" "_len") . 2)
-        (("TestCase" "transactionEnvelopes" "_len") . 1)
-        (("TransactionV1Envelope" "signatures" "_len") . 0))))))
+      (parse-result! (parse-tokens xdr-member/p (run-lexer (open-input-string "a.b.c"))))
+      '("a" "b" "c"))
+     (check-equal?
+      (parse-result! (parse-tokens xdr-array-length/p (run-lexer (open-input-string "a.b._len"))))
+      '("a" "b"))
+     (check-equal?
+      (parse-result! (parse-tokens len-override/p (run-lexer (open-input-string "a.b._len = 3 ; test"))))
+      '(("a" "b") len . 3))
+     (check-equal?
+      (parse-result! (parse-tokens
+                      key-override/p
+                      (run-lexer
+                       (open-input-string
+                        (apply string-append
+                               '("pubkey a.b in ; comment \n"
+                                 "GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3 ; comment \n"
+                                 "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL"))))))
+      '(("a" "b")
+        key-set
+        "GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3"
+        "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
+    (test-case
+   "full test config"  
+   (define i (open-input-string (apply string-append
+           '("\n\nTransaction.operations._len = 1\n"
+             "TestCase.ledgerEntries._len = 2\n"
+             "TestCase.transactionEnvelopes._len = 1\n"
+             "TransactionV1Envelope.signatures._len = 0\n"
+             "pubkey a.b in ; comment \n"
+             "GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3 ; comment \n"
+             "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL"))))
+   (check-equal?
+    (parse-overrides i)
+    '((("Transaction" "operations") len . 1)
+      (("TestCase" "ledgerEntries") len . 2)
+      (("TestCase" "transactionEnvelopes") len . 1)
+      (("TransactionV1Envelope" "signatures") len . 0)
+      (("a" "b")
+       key-set
+       "GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3"
+       "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL"))))))

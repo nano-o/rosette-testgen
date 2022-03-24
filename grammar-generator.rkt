@@ -283,11 +283,13 @@
 
 ; Next we define a pass that changes the length of variable-length arrays as specified by the caller
 
-(define (get-length overridess path len)
-  (let ([key (reverse (cons "_len" path))])
-    (if (dict-has-key? overridess key)
-        (begin
-          (dict-ref overridess key))
+(define (get-length overrides path len)
+  (let ([key (reverse path)])
+    (if (dict-has-key? overrides key)
+        (let ([ov (dict-ref overrides key)])
+          (if (eq? (car ov) 'len)
+              (cdr ov)
+              len))
         len)))
 
 ; overridess must be a dict mapping paths to natural numbers
