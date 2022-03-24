@@ -4,7 +4,11 @@
   parser-tools/lex
   (prefix-in : parser-tools/lex-sre)
   megaparsack
-  syntax/readerr)
+  megaparsack/parser-tools/lex
+  syntax/readerr
+  racket/trace
+  data/monad
+  data/applicative)
 
 (provide read-syntax) ; meant to be used as a reader language
 
@@ -14,7 +18,7 @@
 ; TODO parse more robustly (e.g. what about comments?)
 ; TODO enable specifying a set of value for a given type
 
-(define-empty-tokens infix-op (gets in))
+(define-empty-tokens infix-op (gets in dot len))
 (define-tokens id (xdr-id))
 (define-tokens data (pubkey))
 
@@ -26,16 +30,40 @@
   (lexer-src-pos
    [":=" (token-gets)]
    ["in" (token-in)]
+   ["." (token-dot)]
+   ["_len"(token-len)]
    [pubkey (token-pubkey lexeme)]
    [(:&
-     (:+ (:or alphabetic numeric "_"))
+     (:: (:or alphabetic numeric)
+         (:* (:or alphabetic numeric "_")))
      (complement pubkey))
-    (token-xdr-id lexeme)]))
+    (token-xdr-id lexeme)]
+   [(eof) eof]))
+
+(define (run-lexer in)
+    (port-count-lines! in)
+    (let loop ([v (lexer in)])
+      (cond [(void? (position-token-token v)) (loop (lexer in))]
+            [(eof-object? (position-token-token v)) '()]
+            [else (cons v (loop (lexer in)))])))
+
+
+(define xdr-member/p
+  (many/p (token/p 'xdr-id) #:sep (noncommittal/p (token/p 'dot))))
+(define xdr-array-length/p
+  (do [m <- xdr-member/p] (token/p 'dot) (token/p 'len) (pure m)))
+(define len-override/p
+  (do [m <- xdr-array-length/p] (token/p 'gets) (pure m)))
+  
+(parse-result! (parse-tokens xdr-member/p (run-lexer (open-input-string "a.b.c"))))
+(parse-result! (parse-tokens xdr-array-length/p (run-lexer (open-input-string "a.b._len"))))
+(parse-result! (parse-tokens len-override/p (run-lexer (open-input-string "a.b._len:="))))
 
 (define (parse-overrides port)
-  void) 
+  void)
 
 (define (read-syntax path port)
+  ; TODO set the lexer "file-path" parameter
     (strip-context ; TODO why is this needed?
      #`(module x-txrep-mod racket/base ; the module name seems irrelevant
          (provide overrides)
