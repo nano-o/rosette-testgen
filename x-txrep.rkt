@@ -65,7 +65,7 @@
   (do [m <- xdr-array-length/p] (token/p 'equals) [n <- (token/p 'number)] (pure `(,m . (len . ,n)))))
 (define key-override/p
   (do (token/p 'pubkey-keyword) [m <- xdr-member/p] (token/p 'in) (token/p 'newline)
-    [l <- (many+/p (token/p 'pubkey) #:sep (token/p 'newline))] (pure `(,m . (key-set . ,l)))))
+    [l <- (many+/p (token/p 'pubkey) #:sep (noncommittal/p (token/p 'newline)))] (pure `(,m . (key-set . ,l)))))
 (define overrides/p
   (do
     (many/p (token/p 'newline))

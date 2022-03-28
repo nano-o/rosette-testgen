@@ -606,7 +606,7 @@
                 (dict-has-key? overrides key)
                 (eq? (car (dict-ref overrides key)) 'key-set))
                (let* ([vals (map (λ (s) (bitvector->natural (strkey->bv s))) (cdr (dict-ref overrides key)))]
-                      [vals/syn (map (λ (v) #`(bv #,v 256)) vals)])
+                      [vals/syn (map (λ (v) #`(:byte-array: (bv #,v 256))) vals)])
                  #`(choose #,@vals/syn))
                (case i
                  [("opaque") #'(?? (bitvector 8))]
