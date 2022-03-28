@@ -55,4 +55,5 @@
            #:attr out #`'#,(format-id #'() "~a" (string-replace (syntax->string #'(i)) "_" "-"))])
 
 ;(println (eval-syntax (serialize example-1) ns))
-(println (eval-syntax (serialize example-2) ns))
+;(println (eval-syntax (serialize example-2) ns))
+(println (eval-syntax (serialize example-3) ns))

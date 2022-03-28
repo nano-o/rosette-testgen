@@ -620,7 +620,13 @@
         [(variable-length-array ,p ,[elem-rule] ,v)
          (make-vector consts elem-rule v)]
         [(fixed-length-array ,p ,type-spec ,v)
-         (guard (equal? type-spec "opaque"))
+         ; special case for opaque fixed-length arrays: we use :byte-array:
+         (guard
+          (let ([opaque?
+                 (nanopass-case (L2 Spec) type-spec
+                                [(,p ,i) (equal? i "opaque")]
+                                [else #f])])
+            opaque?))
          (let ([n (size->number consts v)])
            #`(:byte-array: (?? (bitvector #,(* n 8)))))]
         [(fixed-length-array ,p ,[elem-rule] ,v)
