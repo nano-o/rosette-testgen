@@ -609,14 +609,14 @@
                       [vals/syn (map (λ (v) #`(bv #,v 256)) vals)])
                  #`(choose #,@vals/syn))
                (case i
-                 [("opaque") #'(?? bitvector 8)]
-                 [("int" "unsigned int") #'(?? bitvector 32)]
-                 [("hyper" "unsigned hyper") #'(?? bitvector 64)]
+                 [("opaque") #'(?? (bitvector 8))]
+                 [("int" "unsigned int") #'(?? (bitvector 32))]
+                 [("hyper" "unsigned hyper") #'(?? (bitvector 64))]
                  [else (rule-hole i)])))]
         [(struct ,p ,[decl-body*] ...)
          (let ([struct-name (format-id/unique-loc (struct-name p) stx)]) ; TODO unique loc needed?
            #`(#,struct-name #,@decl-body*))]
-        [(string ,p ,c) (make-vector consts #`(?? bitvector 8) c)]
+        [(string ,p ,c) (make-vector consts #`(?? (bitvector 8)) c)]
         [(variable-length-array ,p ,[elem-rule] ,v)
          (make-vector consts elem-rule v)]
         [(fixed-length-array ,p ,type-spec ,v)
