@@ -18,6 +18,8 @@
   racket/generator
   racket/pretty
   graph
+  "key-utils.rkt"
+  (only-in rosette bitvector->natural)
   (for-template ; useful if we were to use the functionality in a macro
    rosette
    rosette/lib/synthax))
@@ -95,6 +97,7 @@
 ; L0a simplifies L0 a bit by removing the superfluous Union-Spec production
 
 (define-language L0a
+  ; TODO how to remove Union-Spec entirely?
   (extends-language L0)
   (Spec (type-spec)
         (- (union union-spec))
@@ -292,6 +295,7 @@
         len)))
 
 ; overridess must be a dict mapping paths to natural numbers
+; NOTE could be done in make-rule instead of rewriting L1
 (define-pass override-lengths : L1 (ir overridess) -> L1 ()
   (Def : Def (ir) -> Def ()
        ((define-type ,i ,[Spec : type-spec (list i) -> type-spec2])
@@ -312,15 +316,25 @@
                    ((,v ,[Decl : decl path -> decl2]) `(,v ,decl2))))
 
 (define-language L2
-  ; add path of a struct in the type hierarchy
-  ; this is to generate unique Racket struct names that represent struct types
+  ; add path field to types
   (extends-language L1)
   (terminals
    (+ (path (p))))
   (Spec (type-spec)
+        (- i)
+        (- (union (i1 i2) union-case-spec* ...))
+        (- (string c))
+        (- (variable-length-array type-spec (maybe v)))
+        (- (fixed-length-array type-spec v))
+        (- (enum (i* c*) ...))
         (- (struct decl* ...))
+        (+ (p i))
+        (+ (union p (i1 i2) union-case-spec* ...))
+        (+ (string p c))
+        (+ (variable-length-array p type-spec (maybe v)))
+        (+ (fixed-length-array p type-spec v))
+        (+ (enum p (i* c*) ...))
         (+ (struct p decl* ...))))
-
 (define path? list?)
 
 (define-pass add-path : L1 (ir) -> L2 ()
@@ -331,10 +345,23 @@
         ((,i ,[Spec : type-spec0 (cons i p) -> type-spec1])
          `(,i ,type-spec1)))
   (Spec : Spec (ir p) -> Spec ()
+        (,i
+         `(,p ,i))
+        ((union (,i1 ,i2) ,[Union-Case-Spec : union-case-spec0* p -> union-case-spec1*] ...)
+         `(union ,p (,i1 ,i2) ,union-case-spec1* ...))
+        ((string ,c)
+         `(string ,p ,c))
+        ((variable-length-array ,[Spec : type-spec0 p -> type-spec1] ,v)
+         `(variable-length-array ,p ,type-spec1 ,v))
+        ((fixed-length-array ,[Spec : type-spec0 p -> type-spec1] ,v)
+         `(fixed-length-array ,p ,type-spec1 ,v))
+        ((enum (,i* ,c*) ...)
+         `(enum ,p (,i* ,c*) ...))
         ((struct ,[Decl : decl0 p -> decl1] ...)
          `(struct ,p ,decl1 ...)))
-  (Union-Spec : Union-Spec (ir p) -> Union-Spec ())  ; NOTE processors with inputs are not auto-generated, but their body is
-  (Union-Case-Spec : Union-Case-Spec (ir p) -> Union-Case-Spec ()))
+  (Union-Case-Spec : Union-Case-Spec (ir p) -> Union-Case-Spec ()
+                   ((,v ,[Decl : decl0 p -> decl1])
+                    `(,v ,decl1))))
 
 (define (l0->l2 overrides l0)
   (let* ([l0a (throw-if-nested-enum (add-bool (simplify-union l0)))]
@@ -383,11 +410,11 @@
 (define-pass immediate-deps : (L2 Spec) (ir) -> * (d)
   ; all the types the given type spec depends on
   (Spec : Spec (ir) -> * (d)
-        (,i (if (base-type? i) (set) (set i)))
-        ((variable-length-array ,[d] ,v) d)
-        ((fixed-length-array ,[d] ,v) d)
+        ((,p ,i) (if (base-type? i) (set) (set i)))
+        ((variable-length-array ,p ,[d] ,v) d)
+        ((fixed-length-array ,p ,[d] ,v) d)
         ((struct ,p ,[d*] ...) (apply set-union d*))
-        ((union (,i1 ,i2) ,[d*] ...) (apply set-union d*))
+        ((union ,p (,i1 ,i2) ,[d*] ...) (apply set-union d*))
         (else (set)))
   (Decl : Decl (ir) -> * (d)
         ((,i ,[d]) d)
@@ -473,12 +500,12 @@
 (define-pass make-struct-types : (L2 Spec) (ir stx) -> * (sts)
   ; NOTE stops at type identifiers
   (Spec : Spec (ir) -> * (sts)
-        (,i (hash))
-        ((string ,c) (hash))
-        ((variable-length-array ,[sts] ,v) sts)
-        ((fixed-length-array ,[sts] ,v) sts)
-        ((enum (,i* ,c*) ...) (hash))
-        ((union (,i1 ,i2) ,[sts*] ...) (apply hash-union sts*))
+        ((,p ,i) (hash))
+        ((string ,p ,c) (hash))
+        ((variable-length-array ,p ,[sts] ,v) sts)
+        ((fixed-length-array ,p ,[sts] ,v) sts)
+        ((enum ,p (,i* ,c*) ...) (hash))
+        ((union ,p (,i1 ,i2) ,[sts*] ...) (apply hash-union sts*))
         ((struct ,p ,decl* ...)
          (let* ([get-decl-pair
                  (λ (decl)
@@ -569,32 +596,41 @@
    (make-struct-type stx ":byte-array:" '("value"))
    (make-struct-type stx ":union:" '("tag" "value"))))
 
+; TODO: when we have an override for a path, apply it
 (define-pass make-rule : (L2 Spec) (ir stx type-name consts overrides) -> * (rule)
   ; TODO: for use as a macro, we need unique source locations for each sub-rule invocation (including e.g. (?? bitvector 32))
   (Spec : Spec (ir) -> * (rule)
-        [,i (case i
-              [("opaque") #'(?? bitvector 8)]
-              [("int" "unsigned int") #'(?? bitvector 32)]
-              [("hyper" "unsigned hyper") #'(?? bitvector 64)]
-              [else (rule-hole i)])]
+        [(,p ,i)
+         (let ([key (reverse p)])
+           (if (and
+                (dict-has-key? overrides key)
+                (eq? (car (dict-ref overrides key)) 'key-set))
+               (let* ([vals (map (λ (s) (bitvector->natural (strkey->bv s))) (cdr (dict-ref overrides key)))]
+                      [vals/syn (map (λ (v) #`(bv #,v 256)) vals)])
+                 #`(choose #,@vals/syn))
+               (case i
+                 [("opaque") #'(?? bitvector 8)]
+                 [("int" "unsigned int") #'(?? bitvector 32)]
+                 [("hyper" "unsigned hyper") #'(?? bitvector 64)]
+                 [else (rule-hole i)])))]
         [(struct ,p ,[decl-body*] ...)
          (let ([struct-name (format-id/unique-loc (struct-name p) stx)]) ; TODO unique loc needed?
            #`(#,struct-name #,@decl-body*))]
-        [(string ,c) (make-vector consts #`(?? bitvector 8) c)]
-        [(variable-length-array ,[elem-rule] ,v)
+        [(string ,p ,c) (make-vector consts #`(?? bitvector 8) c)]
+        [(variable-length-array ,p ,[elem-rule] ,v)
          (make-vector consts elem-rule v)]
-        [(fixed-length-array ,type-spec ,v)
+        [(fixed-length-array ,p ,type-spec ,v)
          (guard (equal? type-spec "opaque"))
          (let ([n (size->number consts v)])
            #`(:byte-array: (?? (bitvector #,(* n 8)))))]
-        [(fixed-length-array ,[elem-rule] ,v)
+        [(fixed-length-array ,p ,[elem-rule] ,v)
          (make-list consts elem-rule v)]
-        [(enum (,i* ,c*) ...)
+        [(enum ,p (,i* ,c*) ...)
          (let ([bv* (map (λ (i) #`(bv #,i 32)) i*)])
            (if (> (length bv*) 1)
                #`(choose #,@bv*)
                (car bv*)))]
-        [(union (,i1 ,i2) ,[rule*] ...)
+        [(union ,p (,i1 ,i2) ,[rule*] ...)
          (if (> (length rule*) 1)
                    #`(choose #,@rule*)
                    (car rule*))])
@@ -645,7 +681,11 @@
 
 (module+ test
   (define test-overrides
-    '((("Transaction" "operations" "_len") . 1)
-      (("TestCase" "ledgerEntries" "_len") . 2)
-      (("TestCase" "transactionEnvelopes" "_len") . 1)))
+    '((("Transaction" "operations") len . 1)
+      (("TestCase" "ledgerEntries") len . 2)
+      (("TestCase" "transactionEnvelopes") len . 1)
+      (("MuxedAccount" "ed25519")
+       key-set
+       "GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3"
+       "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
   (xdr-types->grammar-datum Stellar-xdr-types test-overrides (set "TestCase" "TestCaseResult")))
