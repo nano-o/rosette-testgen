@@ -66,3 +66,6 @@
      (assume (not (bveq (cadr two-ints4) (car two-ints4)))))))
 
 ;(print-forms sol4)
+
+(define-grammar (g5)
+  (rule-1 (list (?? (bitvector 32)) (?? (bitvector 32)))))

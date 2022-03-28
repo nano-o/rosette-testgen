@@ -1,14 +1,15 @@
 #lang racket
 
 (require
-  rosette
+  (only-in rosette bv integer->bitvector bitvector extract concat bveq)
   (only-in list-util zip))
 (provide strkey->bv)
 
 ; NOTE
-; this fails with (require bv)!
+; don't use the bv package, it's buggy:
 ; (bveq (bv #x3f0c34bf93adf121 64)
 ;       (bv #x3f0c34bf93adf121 64))
+; ;=> #f
 
 
 (define value-encoding
@@ -28,7 +29,7 @@
   (require rackunit)
   (define/provide-test-suite strkey->bv/test
     (test-case
-     "from https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0023.md"
+     "example from https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0023.md"
      (begin
        (define test-strkey "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ")
        (check-equal?

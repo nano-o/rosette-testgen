@@ -11,13 +11,13 @@
   data/applicative)
 
 ; TODO report parse errors with location.
+; NOTE all this was not really necessary... why not specify overrides in Racket for now?
 
 (provide read-syntax) ; meant to be used as a reader language
 
 ; The eXtented txrep language
 ; creates a module that provides `overrides`
 
-; TODO parse more robustly (e.g. what about comments?)
 ; TODO enable specifying a set of value for a given type
 
 (define-empty-tokens infix-op (equals in dot len space newline pubkey-keyword))

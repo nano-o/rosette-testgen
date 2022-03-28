@@ -7,6 +7,8 @@
 ; TODO there's pretty much no error checking
 ; TODO write tests
 ; TODO a pass to remove recursion or limit its depth (ClaimPredicate)?
+; TODO using this in a macro to generate a grammar does not work because there's unintended sharing
+; (e.g. to invocation of the same rules are interpreted by Rosette as the same)
 
 (require
   (rename-in nanopass [extends extends-language]) ; conflicts with rosette
@@ -16,12 +18,9 @@
   racket/generator
   racket/pretty
   graph
-  (for-template
-   ;racket
-   #;(only-in rosette bitvector bv)
+  (for-template ; useful if we were to use the functionality in a macro
    rosette
-   rosette/lib/synthax
-   #;(only-in rosette/lib/synthax ?? define-grammar choose)))
+   rosette/lib/synthax))
 
 (provide xdr-types->grammar-datum xdr-types->grammar max-depth)
 
@@ -533,7 +532,7 @@
   ; seq-t is list or vector
   ; size is a numeric value
   #`(#,seq-t
-     #,@(for/list ([i (in-range size)]) elem-type-rule))) ; TODO: here we need different slocs for the rules
+     #,@(for/list ([i (in-range size)]) elem-type-rule))) ; TODO: for use as a macro, we need different slocs for the rules
 (define (make-list consts elem-type-rule size)
   (let ([n (size->number consts size)])
     (make-sequence #'list elem-type-rule n)))
@@ -570,49 +569,48 @@
    (make-struct-type stx ":byte-array:" '("value"))
    (make-struct-type stx ":union:" '("tag" "value"))))
 
-(define-pass make-rule : (L2 Spec) (ir stx type-name consts) -> * (rule)
+(define-pass make-rule : (L2 Spec) (ir stx type-name consts overrides) -> * (rule)
+  ; TODO: for use as a macro, we need unique source locations for each sub-rule invocation (including e.g. (?? bitvector 32))
   (Spec : Spec (ir) -> * (rule)
         [,i (case i
-              [("opaque") #`(#,(format-id/unique-loc "??" stx) (#,(format-id/unique-loc "bitvector" stx) 8))]
-              [("int" "unsigned int") #`(#,(format-id/unique-loc "??" stx) (#,(format-id/unique-loc "bitvector" stx) 32))]
-              [("hyper" "unsigned hyper") #`(#,(format-id/unique-loc "??" stx) (#,(format-id/unique-loc "bitvector" stx) 64))]
+              [("opaque") #'(?? bitvector 8)]
+              [("int" "unsigned int") #'(?? bitvector 32)]
+              [("hyper" "unsigned hyper") #'(?? bitvector 64)]
               [else (rule-hole i)])]
         [(struct ,p ,[decl-body*] ...)
-         (let ([struct-name (format-id/unique-loc (struct-name p) stx)])
+         (let ([struct-name (format-id/unique-loc (struct-name p) stx)]) ; TODO unique loc needed?
            #`(#,struct-name #,@decl-body*))]
-        [(string ,c) (make-vector consts #`(#,(format-id/unique-loc "??" stx) (#,(format-id/unique-loc "bitvector" stx) 8)) c)]
+        [(string ,c) (make-vector consts #`(?? bitvector 8) c)]
         [(variable-length-array ,[elem-rule] ,v)
          (make-vector consts elem-rule v)]
         [(fixed-length-array ,type-spec ,v)
          (guard (equal? type-spec "opaque"))
-         (let ([n (size->number consts v)]
-               [byte-array (format-id/unique-loc ":byte-array:" stx)])
-           #`(#,byte-array (#,(format-id/unique-loc "??" stx) (#,(format-id/unique-loc "bitvector" stx) #,(* n 8)))))]
+         (let ([n (size->number consts v)])
+           #`(:byte-array: (?? (bitvector #,(* n 8)))))]
         [(fixed-length-array ,[elem-rule] ,v)
          (make-list consts elem-rule v)]
         [(enum (,i* ,c*) ...)
-         (let ([bv* (map (λ (i) #`(#,(format-id/unique-loc "bv" stx) #,(format-id/unique-loc i stx) 32)) i*)])
+         (let ([bv* (map (λ (i) #`(bv #,i 32)) i*)])
            (if (> (length bv*) 1)
-               #`(#,(format-id/unique-loc "choose" stx) #,@bv*)
+               #`(choose #,@bv*)
                (car bv*)))]
         [(union (,i1 ,i2) ,[rule*] ...)
          (if (> (length rule*) 1)
-                   #`(#,(format-id/unique-loc "choose" stx) #,@rule*)
+                   #`(choose #,@rule*)
                    (car rule*))])
   (Decl : Decl (ir) -> * (rule)
         [(,i ,[rule]) rule]
         [,void #'null])
   (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule)
                    [(,v ,[rule])
-                    (let ([union (format-id/unique-loc ":union:" stx)])
-                    #`(#,union (#,(format-id/unique-loc "bv" stx) #,(value-rule stx v) 32) #,rule))])
+                    #`(:union: (bv #,(value-rule stx v) 32) #,rule)])
   #`(#,(format-id/unique-loc (string-append type-name "-rule")) #,(Spec ir)))
 
 (module+ test
   (let ([t "SimplePaymentResult"])
-    (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-l0a) ))
+    (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-l0a) null))
   (let ([t "PathPaymentStrictReceiveResult"])
-    (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-l0a) )))
+    (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-l0a) null)))
 
 ; returns a grammar as a syntax object
 (define (xdr-types->grammar xdr-spec overrides stx ts) ; ts is a set of types
@@ -629,7 +627,7 @@
                        (for/list ([t ts])
                          (deps h t))))]
          [rules (for/list ([t deps])
-                  (make-rule (hash-ref h t) stx t consts-h))])
+                  (make-rule (hash-ref h t) stx t consts-h overrides))])
     #`(begin
         #,@const-defs
         #,@struct-defs
