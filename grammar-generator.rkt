@@ -596,7 +596,6 @@
    (make-struct-type stx ":byte-array:" '("value"))
    (make-struct-type stx ":union:" '("tag" "value"))))
 
-; TODO: when we have an override for a path, apply it
 (define-pass make-rule : (L2 Spec) (ir stx type-name consts overrides) -> * (rule)
   ; TODO: for use as a macro, we need unique source locations for each sub-rule invocation (including e.g. (?? bitvector 32))
   (Spec : Spec (ir) -> * (rule)

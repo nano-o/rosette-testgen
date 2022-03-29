@@ -5,6 +5,7 @@
   (submod "grammar-generator.rkt" test)
   (submod "x-txrep.rkt" test)
   (submod "key-utils.rkt" test)
+  (submod "serialize.rkt" test)
   rackunit/text-ui)
 
 (define (get-test-exports m)
@@ -32,3 +33,4 @@
 (run-all "grammar-generator.rkt")
 (run-all "x-txrep.rkt")
 (run-all "key-utils.rkt")
+(run-all "serialize.rkt")

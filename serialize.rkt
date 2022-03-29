@@ -4,26 +4,30 @@
 ; Then serialization can generate the right thing.
 
 (require
-  syntax/parse racket/syntax
+  syntax/parse
+  racket/syntax
   binaryio/integer
-  pretty-format
   syntax/to-string
   "Stellar-grammar.rkt"
   "synthesized-tx-examples.rkt")
 
-; We serialize synthesized transactions and ledger entries to the representation expected by the guile-rpc library
+(provide serialize)
 
-(define (serialize stx) ; generate-forms produces syntax objects
-  (syntax-parse stx
-    [((~datum define) _ d:xdr-rep) #'d.out]))
+; We serialize synthesized transactions and ledger entries to the representation expected by the guile-rpc library
 
 ; we need the current namespace to do reflection on structs with eval
 (define-namespace-anchor a)
 (define ns (namespace-anchor->namespace a))
+
 (define (struct? id)
   (and
    (identifier-binding id)
    (struct-type? (eval-syntax id ns))))
+
+(define (serialize stx) ; generate-forms produces syntax objects
+  (syntax-parse stx
+    [((~datum define) _ d:xdr-rep)
+     (eval-syntax #'d.out ns)]))
 
 (define-syntax-class xdr-rep
   #:datum-literals (list bv vector null bitvector :union: :byte-array:)
@@ -58,6 +62,55 @@
            ; here we need to replace all "_" characters by "-"
            #:attr out #`'#,(format-id #'() "~a" (string-replace (syntax->string #'(i)) "_" "-"))])
 
-;(println (eval-syntax (serialize example-1) ns))
-;(println (eval-syntax (serialize example-2) ns))
-(println (eval-syntax (serialize example-3) ns))
+(module+ test
+  (require rackunit)
+  (define example-1
+    #'(define my-tx
+        (:union:
+         (bv ENVELOPE_TYPE_TX 32)
+         (TransactionV1Envelope
+          (Transaction
+           (:union:
+            (bv KEY_TYPE_MUXED_ED25519 32)
+            (MuxedAccount::med25519
+             (bv #x0000000000000000 64)
+             (:byte-array:
+              (bv
+               29458565313587576488605812219632678825768279426807042594960959184304126581667
+               256))))
+           (bv #x00000000 32)
+           (bv #x0000000000000000 64)
+           (:union: (bv FALSE 32) null)
+           (:union:
+            (bv MEMO_RETURN 32)
+            (:byte-array:
+             (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
+           (vector
+            (Operation
+             (:union: (bv FALSE 32) null)
+             (:union:
+              (bv CREATE_ACCOUNT 32)
+              (CreateAccountOp
+               (:union:
+                (bv PUBLIC_KEY_TYPE_ED25519 32)
+                (:byte-array:
+                 (bv
+                  29458565313587576488605812219632678825768279426807042594960959184304126581667
+                  256)))
+               (bv #x0000000000000000 64)))))
+           (:union: (bv 0 32) null))
+          (vector)))))
+  (define/provide-test-suite serialize/test
+    (test-case
+     "serialize transaction"
+     (check-equal?
+      (serialize example-1)
+      '(ENVELOPE-TYPE-TX
+        ((KEY-TYPE-MUXED-ED25519 0 (65 32 245 4 132 15 130 86 201 188 205 227 214 17 246 138 208 74 110 187 8 101 242 142 164 42 213 13 113 216 91 163))
+         0
+         0
+         (FALSE . void)
+         (MEMO-RETURN 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0)
+         #(((FALSE . void) (CREATE-ACCOUNT (PUBLIC-KEY-TYPE-ED25519 65 32 245 4 132 15 130 86 201 188 205 227 214 17 246 138 208 74 110 187 8 101 242 142 164 42 213 13 113 216 91 163) 0)))
+         (0 . void))
+        #())))))
