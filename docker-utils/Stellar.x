@@ -389,12 +389,14 @@ union ClaimPredicate switch (ClaimPredicateType type)
 {
 case CLAIM_PREDICATE_UNCONDITIONAL:
     void;
+/* We temporary remove the recursion here:
 case CLAIM_PREDICATE_AND:
     ClaimPredicate andPredicates<2>;
 case CLAIM_PREDICATE_OR:
     ClaimPredicate orPredicates<2>;
 case CLAIM_PREDICATE_NOT:
     ClaimPredicate* notPredicate;
+*/
 case CLAIM_PREDICATE_BEFORE_ABSOLUTE_TIME:
     int64 absBefore;
 case CLAIM_PREDICATE_BEFORE_RELATIVE_TIME:
@@ -2441,11 +2443,10 @@ case 0:
     LedgerCloseMetaV0 v0;
 };
 
-struct TestCase
+struct TestLedger
 {
     LedgerHeader ledgerHeader;
     LedgerEntry ledgerEntries<>;
-    TransactionEnvelope transactionEnvelopes<>;
 };
 
 struct TestCaseResult
