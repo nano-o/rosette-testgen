@@ -1,18 +1,18 @@
-#lang reader "x-txrep.rkt"
+#lang racket
 
-Transaction.operations._len = 1
-TestCase.ledgerEntries._len = 2
-TestCase.transactionEnvelopes._len = 1
-TransactionV1Envelope.signatures._len = 0 ; for now we'll sign externally
-pubkey MuxedAccount.ed25519 in
-  GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3
-  GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL
-pubkey MuxedAccount.med25519.ed25519 in
-  GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3
-  GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL
-pubkey PublicKey.ed25519 in
-  GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3
-  GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL
-pubkey SignerKey.ed25519 in
-  GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3
-  GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL
+(provide overrides)
+
+(define keys
+  '(key-set
+    "GA57G3YN5GEA5AF7YI2ZMNCKKAOQNAPYGDDIAVGSH7ILWRET6Y76SEIP"
+    "GCNC3APR4XB64E7XADGU5JJFS7J2WYVJRKU73TYATQXW3LRSPGCIN2PJ"))
+
+(define overrides
+  `((("Transaction" "operations") len . 1)
+    (("TestCase" "ledgerEntries") len . 2)
+    (("TestCase" "transactionEnvelopes") len . 1)
+    (("TransactionV1Envelope" "signatures") len . 0)
+    (("MuxedAccount" "ed25519") ,@keys)
+    (("MuxedAccount" "med25519" "ed25519") ,@keys)
+    (("PublicKey" "ed25519") ,@keys)
+    (("SignerKey" "ed25519") ,@keys)))
