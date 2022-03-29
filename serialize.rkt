@@ -29,9 +29,9 @@
   #:datum-literals (list bv vector null bitvector :union: :byte-array:)
   [pattern (:union: tag:xdr-rep val:xdr-rep)
            #:attr out #`(cons tag.out val.out)]
-  [pattern (:byte-array: (bv n:number size:number))
+  [pattern (:byte-array: (bv val:number size:number))
            ; opaque fixed-sized array -> list of bytes
-           #:attr out #`(bytes->list (integer->bytes n size #f #t))] ; unsigned big-endian
+           #:attr out #`(bytes->list (integer->bytes val (/ size 8) #f #t))] ; unsigned big-endian
   [pattern (bv v:xdr-rep n:number)
            #:attr out #`v.out]
   [pattern (list e*:xdr-rep ...)
@@ -40,6 +40,10 @@
   [pattern (vector e*:xdr-rep ...)
            ; variable-size array
            #:attr out #'`#(,e*.out ...)]
+  [pattern (vector)
+           ; variable-size array of size 0
+           #:do (println "ha")
+           #:attr out #'`#()]
   [pattern (struct-name:id e*:xdr-rep ...)
            #:when (let ([type-id (format-id #'() "struct:~a" #'struct-name)])
                     (and

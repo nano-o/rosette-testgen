@@ -236,33 +236,37 @@
 
 (define example-3
   #'(define my-tx
-      (Transaction
-       (:union:
-        (bv KEY_TYPE_MUXED_ED25519 32)
-        (MuxedAccount::med25519
+      (:union:
+       (bv ENVELOPE_TYPE_TX 32)
+       (TransactionV1Envelope
+        (Transaction
+         (:union:
+          (bv KEY_TYPE_MUXED_ED25519 32)
+          (MuxedAccount::med25519
+           (bv #x0000000000000000 64)
+           (:byte-array:
+            (bv
+             29458565313587576488605812219632678825768279426807042594960959184304126581667
+             256))))
+         (bv #x00000000 32)
          (bv #x0000000000000000 64)
-         (:byte-array:
-          (bv
-           29458565313587576488605812219632678825768279426807042594960959184304126581667
-           256))))
-       (bv #x00000000 32)
-       (bv #x0000000000000000 64)
-       (:union: (bv FALSE 32) null)
-       (:union:
-        (bv MEMO_RETURN 32)
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
-       (vector
-        (Operation
          (:union: (bv FALSE 32) null)
          (:union:
-          (bv CREATE_ACCOUNT 32)
-          (CreateAccountOp
+          (bv MEMO_RETURN 32)
+          (:byte-array:
+           (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
+         (vector
+          (Operation
+           (:union: (bv FALSE 32) null)
            (:union:
-            (bv PUBLIC_KEY_TYPE_ED25519 32)
-            (:byte-array:
-             (bv
-              29458565313587576488605812219632678825768279426807042594960959184304126581667
-              256)))
-           (bv #x0000000000000000 64)))))
-       (:union: (bv 0 32) null))))
+            (bv CREATE_ACCOUNT 32)
+            (CreateAccountOp
+             (:union:
+              (bv PUBLIC_KEY_TYPE_ED25519 32)
+              (:byte-array:
+               (bv
+                29458565313587576488605812219632678825768279426807042594960959184304126581667
+                256)))
+             (bv #x0000000000000000 64)))))
+         (:union: (bv 0 32) null))
+        (vector)))))
