@@ -9,9 +9,8 @@
 
 (define overrides
   `((("Transaction" "operations") len . 1)
-    (("TestCase" "ledgerEntries") len . 2)
-    (("TestCase" "transactionEnvelopes") len . 1)
-    (("TransactionV1Envelope" "signatures") len . 0)
+    (("TestLedger" "ledgerEntries") len . 1)
+    (("TransactionV1Envelope" "signatures") len . 0) ; we'll sign later
     (("MuxedAccount" "ed25519") ,@keys)
     (("MuxedAccount" "med25519" "ed25519") ,@keys)
     (("PublicKey" "ed25519") ,@keys)

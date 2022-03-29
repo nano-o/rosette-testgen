@@ -54,291 +54,6 @@
 (define-type
   "HmacSha256Mac"
   (struct ("mac" (fixed-length-array "opaque" 32))))
-(define-type
-  "Value"
-  (variable-length-array "opaque" #f))
-(define-type
-  "SCPBallot"
-  (struct ("counter" "uint32") ("value" "Value")))
-(define-type
-  "SCPStatementType"
-  (enum ("SCP_ST_PREPARE" 0)
-        ("SCP_ST_CONFIRM" 1)
-        ("SCP_ST_EXTERNALIZE" 2)
-        ("SCP_ST_NOMINATE" 3)))
-(define-type
-  "SCPNomination"
-  (struct
-    ("quorumSetHash" "Hash")
-    ("votes" (variable-length-array "Value" #f))
-    ("accepted" (variable-length-array "Value" #f))))
-(define-type
-  "SCPStatement"
-  (struct
-    ("nodeID" "NodeID")
-    ("slotIndex" "uint64")
-    ("pledges"
-     (union (case ("type" "SCPStatementType")
-              (("SCP_ST_PREPARE")
-               ("prepare"
-                (struct
-                  ("quorumSetHash" "Hash")
-                  ("ballot" "SCPBallot")
-                  ("prepared"
-                   (union (case ("opted" "bool")
-                            (("TRUE") ("value" "SCPBallot"))
-                            (("FALSE") "void"))))
-                  ("preparedPrime"
-                   (union (case ("opted" "bool")
-                            (("TRUE") ("value" "SCPBallot"))
-                            (("FALSE") "void"))))
-                  ("nC" "uint32")
-                  ("nH" "uint32"))))
-              (("SCP_ST_CONFIRM")
-               ("confirm"
-                (struct
-                  ("ballot" "SCPBallot")
-                  ("nPrepared" "uint32")
-                  ("nCommit" "uint32")
-                  ("nH" "uint32")
-                  ("quorumSetHash" "Hash"))))
-              (("SCP_ST_EXTERNALIZE")
-               ("externalize"
-                (struct
-                  ("commit" "SCPBallot")
-                  ("nH" "uint32")
-                  ("commitQuorumSetHash" "Hash"))))
-              (("SCP_ST_NOMINATE")
-               ("nominate" "SCPNomination")))))))
-(define-type
-  "SCPEnvelope"
-  (struct
-    ("statement" "SCPStatement")
-    ("signature" "Signature")))
-(define-type
-  "SCPQuorumSet"
-  (struct
-    ("threshold" "uint32")
-    ("validators"
-     (variable-length-array "NodeID" #f))
-    ("innerSets"
-     (variable-length-array "SCPQuorumSet" #f))))
-(define-type
-  "UpgradeType"
-  (variable-length-array "opaque" 128))
-(define-type
-  "StellarValueType"
-  (enum ("STELLAR_VALUE_BASIC" 0)
-        ("STELLAR_VALUE_SIGNED" 1)))
-(define-type
-  "LedgerCloseValueSignature"
-  (struct
-    ("nodeID" "NodeID")
-    ("signature" "Signature")))
-(define-type
-  "StellarValue"
-  (struct
-    ("txSetHash" "Hash")
-    ("closeTime" "TimePoint")
-    ("upgrades"
-     (variable-length-array "UpgradeType" 6))
-    ("ext"
-     (union (case ("v" "StellarValueType")
-              (("STELLAR_VALUE_BASIC") "void")
-              (("STELLAR_VALUE_SIGNED")
-               ("lcValueSignature" "LedgerCloseValueSignature")))))))
-(define-constant "MASK_LEDGER_HEADER_FLAGS" 7)
-(define-type
-  "LedgerHeaderFlags"
-  (enum ("DISABLE_LIQUIDITY_POOL_TRADING_FLAG" 1)
-        ("DISABLE_LIQUIDITY_POOL_DEPOSIT_FLAG" 2)
-        ("DISABLE_LIQUIDITY_POOL_WITHDRAWAL_FLAG" 4)))
-(define-type
-  "LedgerHeaderExtensionV1"
-  (struct
-    ("flags" "uint32")
-    ("ext" (union (case ("v" "int") ((0) "void"))))))
-(define-type
-  "LedgerHeader"
-  (struct
-    ("ledgerVersion" "uint32")
-    ("previousLedgerHash" "Hash")
-    ("scpValue" "StellarValue")
-    ("txSetResultHash" "Hash")
-    ("bucketListHash" "Hash")
-    ("ledgerSeq" "uint32")
-    ("totalCoins" "int64")
-    ("feePool" "int64")
-    ("inflationSeq" "uint32")
-    ("idPool" "uint64")
-    ("baseFee" "uint32")
-    ("baseReserve" "uint32")
-    ("maxTxSetSize" "uint32")
-    ("skipList" (fixed-length-array "Hash" 4))
-    ("ext"
-     (union (case ("v" "int")
-              ((0) "void")
-              ((1) ("v1" "LedgerHeaderExtensionV1")))))))
-(define-type
-  "LedgerUpgradeType"
-  (enum ("LEDGER_UPGRADE_VERSION" 1)
-        ("LEDGER_UPGRADE_BASE_FEE" 2)
-        ("LEDGER_UPGRADE_MAX_TX_SET_SIZE" 3)
-        ("LEDGER_UPGRADE_BASE_RESERVE" 4)
-        ("LEDGER_UPGRADE_FLAGS" 5)))
-(define-type
-  "LedgerUpgrade"
-  (union (case ("type" "LedgerUpgradeType")
-           (("LEDGER_UPGRADE_VERSION")
-            ("newLedgerVersion" "uint32"))
-           (("LEDGER_UPGRADE_BASE_FEE")
-            ("newBaseFee" "uint32"))
-           (("LEDGER_UPGRADE_MAX_TX_SET_SIZE")
-            ("newMaxTxSetSize" "uint32"))
-           (("LEDGER_UPGRADE_BASE_RESERVE")
-            ("newBaseReserve" "uint32"))
-           (("LEDGER_UPGRADE_FLAGS") ("newFlags" "uint32")))))
-(define-type
-  "BucketEntryType"
-  (enum ("METAENTRY" -1)
-        ("LIVEENTRY" 0)
-        ("DEADENTRY" 1)
-        ("INITENTRY" 2)))
-(define-type
-  "BucketMetadata"
-  (struct
-    ("ledgerVersion" "uint32")
-    ("ext" (union (case ("v" "int") ((0) "void"))))))
-(define-type
-  "BucketEntry"
-  (union (case ("type" "BucketEntryType")
-           (("LIVEENTRY" "INITENTRY")
-            ("liveEntry" "LedgerEntry"))
-           (("DEADENTRY") ("deadEntry" "LedgerKey"))
-           (("METAENTRY") ("metaEntry" "BucketMetadata")))))
-(define-type
-  "TransactionSet"
-  (struct
-    ("previousLedgerHash" "Hash")
-    ("txs"
-     (variable-length-array "TransactionEnvelope" #f))))
-(define-type
-  "TransactionResultPair"
-  (struct
-    ("transactionHash" "Hash")
-    ("result" "TransactionResult")))
-(define-type
-  "TransactionResultSet"
-  (struct
-    ("results"
-     (variable-length-array
-       "TransactionResultPair"
-       #f))))
-(define-type
-  "TransactionHistoryEntry"
-  (struct
-    ("ledgerSeq" "uint32")
-    ("txSet" "TransactionSet")
-    ("ext" (union (case ("v" "int") ((0) "void"))))))
-(define-type
-  "TransactionHistoryResultEntry"
-  (struct
-    ("ledgerSeq" "uint32")
-    ("txResultSet" "TransactionResultSet")
-    ("ext" (union (case ("v" "int") ((0) "void"))))))
-(define-type
-  "LedgerHeaderHistoryEntry"
-  (struct
-    ("hash" "Hash")
-    ("header" "LedgerHeader")
-    ("ext" (union (case ("v" "int") ((0) "void"))))))
-(define-type
-  "LedgerSCPMessages"
-  (struct
-    ("ledgerSeq" "uint32")
-    ("messages"
-     (variable-length-array "SCPEnvelope" #f))))
-(define-type
-  "SCPHistoryEntryV0"
-  (struct
-    ("quorumSets"
-     (variable-length-array "SCPQuorumSet" #f))
-    ("ledgerMessages" "LedgerSCPMessages")))
-(define-type
-  "SCPHistoryEntry"
-  (union (case ("v" "int")
-           ((0) ("v0" "SCPHistoryEntryV0")))))
-(define-type
-  "LedgerEntryChangeType"
-  (enum ("LEDGER_ENTRY_CREATED" 0)
-        ("LEDGER_ENTRY_UPDATED" 1)
-        ("LEDGER_ENTRY_REMOVED" 2)
-        ("LEDGER_ENTRY_STATE" 3)))
-(define-type
-  "LedgerEntryChange"
-  (union (case ("type" "LedgerEntryChangeType")
-           (("LEDGER_ENTRY_CREATED")
-            ("created" "LedgerEntry"))
-           (("LEDGER_ENTRY_UPDATED")
-            ("updated" "LedgerEntry"))
-           (("LEDGER_ENTRY_REMOVED")
-            ("removed" "LedgerKey"))
-           (("LEDGER_ENTRY_STATE") ("state" "LedgerEntry")))))
-(define-type
-  "LedgerEntryChanges"
-  (variable-length-array "LedgerEntryChange" #f))
-(define-type
-  "OperationMeta"
-  (struct ("changes" "LedgerEntryChanges")))
-(define-type
-  "TransactionMetaV1"
-  (struct
-    ("txChanges" "LedgerEntryChanges")
-    ("operations"
-     (variable-length-array "OperationMeta" #f))))
-(define-type
-  "TransactionMetaV2"
-  (struct
-    ("txChangesBefore" "LedgerEntryChanges")
-    ("operations"
-     (variable-length-array "OperationMeta" #f))
-    ("txChangesAfter" "LedgerEntryChanges")))
-(define-type
-  "TransactionMeta"
-  (union (case ("v" "int")
-           ((0)
-            ("operations"
-             (variable-length-array "OperationMeta" #f)))
-           ((1) ("v1" "TransactionMetaV1"))
-           ((2) ("v2" "TransactionMetaV2")))))
-(define-type
-  "TransactionResultMeta"
-  (struct
-    ("result" "TransactionResultPair")
-    ("feeProcessing" "LedgerEntryChanges")
-    ("txApplyProcessing" "TransactionMeta")))
-(define-type
-  "UpgradeEntryMeta"
-  (struct
-    ("upgrade" "LedgerUpgrade")
-    ("changes" "LedgerEntryChanges")))
-(define-type
-  "LedgerCloseMetaV0"
-  (struct
-    ("ledgerHeader" "LedgerHeaderHistoryEntry")
-    ("txSet" "TransactionSet")
-    ("txProcessing"
-     (variable-length-array
-       "TransactionResultMeta"
-       #f))
-    ("upgradesProcessing"
-     (variable-length-array "UpgradeEntryMeta" #f))
-    ("scpInfo"
-     (variable-length-array "SCPHistoryEntry" #f))))
-(define-type
-  "LedgerCloseMeta"
-  (union (case ("v" "int")
-           ((0) ("v0" "LedgerCloseMetaV0")))))
 (define-type "AccountID" "PublicKey")
 (define-type
   "Thresholds"
@@ -1623,13 +1338,296 @@
               (else "void"))))
     ("ext" (union (case ("v" "int") ((0) "void"))))))
 (define-type
-  "TestCase"
+  "Value"
+  (variable-length-array "opaque" #f))
+(define-type
+  "SCPBallot"
+  (struct ("counter" "uint32") ("value" "Value")))
+(define-type
+  "SCPStatementType"
+  (enum ("SCP_ST_PREPARE" 0)
+        ("SCP_ST_CONFIRM" 1)
+        ("SCP_ST_EXTERNALIZE" 2)
+        ("SCP_ST_NOMINATE" 3)))
+(define-type
+  "SCPNomination"
+  (struct
+    ("quorumSetHash" "Hash")
+    ("votes" (variable-length-array "Value" #f))
+    ("accepted" (variable-length-array "Value" #f))))
+(define-type
+  "SCPStatement"
+  (struct
+    ("nodeID" "NodeID")
+    ("slotIndex" "uint64")
+    ("pledges"
+     (union (case ("type" "SCPStatementType")
+              (("SCP_ST_PREPARE")
+               ("prepare"
+                (struct
+                  ("quorumSetHash" "Hash")
+                  ("ballot" "SCPBallot")
+                  ("prepared"
+                   (union (case ("opted" "bool")
+                            (("TRUE") ("value" "SCPBallot"))
+                            (("FALSE") "void"))))
+                  ("preparedPrime"
+                   (union (case ("opted" "bool")
+                            (("TRUE") ("value" "SCPBallot"))
+                            (("FALSE") "void"))))
+                  ("nC" "uint32")
+                  ("nH" "uint32"))))
+              (("SCP_ST_CONFIRM")
+               ("confirm"
+                (struct
+                  ("ballot" "SCPBallot")
+                  ("nPrepared" "uint32")
+                  ("nCommit" "uint32")
+                  ("nH" "uint32")
+                  ("quorumSetHash" "Hash"))))
+              (("SCP_ST_EXTERNALIZE")
+               ("externalize"
+                (struct
+                  ("commit" "SCPBallot")
+                  ("nH" "uint32")
+                  ("commitQuorumSetHash" "Hash"))))
+              (("SCP_ST_NOMINATE")
+               ("nominate" "SCPNomination")))))))
+(define-type
+  "SCPEnvelope"
+  (struct
+    ("statement" "SCPStatement")
+    ("signature" "Signature")))
+(define-type
+  "SCPQuorumSet"
+  (struct
+    ("threshold" "uint32")
+    ("validators"
+     (variable-length-array "NodeID" #f))
+    ("innerSets"
+     (variable-length-array "SCPQuorumSet" #f))))
+(define-type
+  "UpgradeType"
+  (variable-length-array "opaque" 128))
+(define-type
+  "StellarValueType"
+  (enum ("STELLAR_VALUE_BASIC" 0)
+        ("STELLAR_VALUE_SIGNED" 1)))
+(define-type
+  "LedgerCloseValueSignature"
+  (struct
+    ("nodeID" "NodeID")
+    ("signature" "Signature")))
+(define-type
+  "StellarValue"
+  (struct
+    ("txSetHash" "Hash")
+    ("closeTime" "TimePoint")
+    ("upgrades"
+     (variable-length-array "UpgradeType" 6))
+    ("ext"
+     (union (case ("v" "StellarValueType")
+              (("STELLAR_VALUE_BASIC") "void")
+              (("STELLAR_VALUE_SIGNED")
+               ("lcValueSignature" "LedgerCloseValueSignature")))))))
+(define-constant "MASK_LEDGER_HEADER_FLAGS" 7)
+(define-type
+  "LedgerHeaderFlags"
+  (enum ("DISABLE_LIQUIDITY_POOL_TRADING_FLAG" 1)
+        ("DISABLE_LIQUIDITY_POOL_DEPOSIT_FLAG" 2)
+        ("DISABLE_LIQUIDITY_POOL_WITHDRAWAL_FLAG" 4)))
+(define-type
+  "LedgerHeaderExtensionV1"
+  (struct
+    ("flags" "uint32")
+    ("ext" (union (case ("v" "int") ((0) "void"))))))
+(define-type
+  "LedgerHeader"
+  (struct
+    ("ledgerVersion" "uint32")
+    ("previousLedgerHash" "Hash")
+    ("scpValue" "StellarValue")
+    ("txSetResultHash" "Hash")
+    ("bucketListHash" "Hash")
+    ("ledgerSeq" "uint32")
+    ("totalCoins" "int64")
+    ("feePool" "int64")
+    ("inflationSeq" "uint32")
+    ("idPool" "uint64")
+    ("baseFee" "uint32")
+    ("baseReserve" "uint32")
+    ("maxTxSetSize" "uint32")
+    ("skipList" (fixed-length-array "Hash" 4))
+    ("ext"
+     (union (case ("v" "int")
+              ((0) "void")
+              ((1) ("v1" "LedgerHeaderExtensionV1")))))))
+(define-type
+  "LedgerUpgradeType"
+  (enum ("LEDGER_UPGRADE_VERSION" 1)
+        ("LEDGER_UPGRADE_BASE_FEE" 2)
+        ("LEDGER_UPGRADE_MAX_TX_SET_SIZE" 3)
+        ("LEDGER_UPGRADE_BASE_RESERVE" 4)
+        ("LEDGER_UPGRADE_FLAGS" 5)))
+(define-type
+  "LedgerUpgrade"
+  (union (case ("type" "LedgerUpgradeType")
+           (("LEDGER_UPGRADE_VERSION")
+            ("newLedgerVersion" "uint32"))
+           (("LEDGER_UPGRADE_BASE_FEE")
+            ("newBaseFee" "uint32"))
+           (("LEDGER_UPGRADE_MAX_TX_SET_SIZE")
+            ("newMaxTxSetSize" "uint32"))
+           (("LEDGER_UPGRADE_BASE_RESERVE")
+            ("newBaseReserve" "uint32"))
+           (("LEDGER_UPGRADE_FLAGS") ("newFlags" "uint32")))))
+(define-type
+  "BucketEntryType"
+  (enum ("METAENTRY" -1)
+        ("LIVEENTRY" 0)
+        ("DEADENTRY" 1)
+        ("INITENTRY" 2)))
+(define-type
+  "BucketMetadata"
+  (struct
+    ("ledgerVersion" "uint32")
+    ("ext" (union (case ("v" "int") ((0) "void"))))))
+(define-type
+  "BucketEntry"
+  (union (case ("type" "BucketEntryType")
+           (("LIVEENTRY" "INITENTRY")
+            ("liveEntry" "LedgerEntry"))
+           (("DEADENTRY") ("deadEntry" "LedgerKey"))
+           (("METAENTRY") ("metaEntry" "BucketMetadata")))))
+(define-type
+  "TransactionSet"
+  (struct
+    ("previousLedgerHash" "Hash")
+    ("txs"
+     (variable-length-array "TransactionEnvelope" #f))))
+(define-type
+  "TransactionResultPair"
+  (struct
+    ("transactionHash" "Hash")
+    ("result" "TransactionResult")))
+(define-type
+  "TransactionResultSet"
+  (struct
+    ("results"
+     (variable-length-array
+       "TransactionResultPair"
+       #f))))
+(define-type
+  "TransactionHistoryEntry"
+  (struct
+    ("ledgerSeq" "uint32")
+    ("txSet" "TransactionSet")
+    ("ext" (union (case ("v" "int") ((0) "void"))))))
+(define-type
+  "TransactionHistoryResultEntry"
+  (struct
+    ("ledgerSeq" "uint32")
+    ("txResultSet" "TransactionResultSet")
+    ("ext" (union (case ("v" "int") ((0) "void"))))))
+(define-type
+  "LedgerHeaderHistoryEntry"
+  (struct
+    ("hash" "Hash")
+    ("header" "LedgerHeader")
+    ("ext" (union (case ("v" "int") ((0) "void"))))))
+(define-type
+  "LedgerSCPMessages"
+  (struct
+    ("ledgerSeq" "uint32")
+    ("messages"
+     (variable-length-array "SCPEnvelope" #f))))
+(define-type
+  "SCPHistoryEntryV0"
+  (struct
+    ("quorumSets"
+     (variable-length-array "SCPQuorumSet" #f))
+    ("ledgerMessages" "LedgerSCPMessages")))
+(define-type
+  "SCPHistoryEntry"
+  (union (case ("v" "int")
+           ((0) ("v0" "SCPHistoryEntryV0")))))
+(define-type
+  "LedgerEntryChangeType"
+  (enum ("LEDGER_ENTRY_CREATED" 0)
+        ("LEDGER_ENTRY_UPDATED" 1)
+        ("LEDGER_ENTRY_REMOVED" 2)
+        ("LEDGER_ENTRY_STATE" 3)))
+(define-type
+  "LedgerEntryChange"
+  (union (case ("type" "LedgerEntryChangeType")
+           (("LEDGER_ENTRY_CREATED")
+            ("created" "LedgerEntry"))
+           (("LEDGER_ENTRY_UPDATED")
+            ("updated" "LedgerEntry"))
+           (("LEDGER_ENTRY_REMOVED")
+            ("removed" "LedgerKey"))
+           (("LEDGER_ENTRY_STATE") ("state" "LedgerEntry")))))
+(define-type
+  "LedgerEntryChanges"
+  (variable-length-array "LedgerEntryChange" #f))
+(define-type
+  "OperationMeta"
+  (struct ("changes" "LedgerEntryChanges")))
+(define-type
+  "TransactionMetaV1"
+  (struct
+    ("txChanges" "LedgerEntryChanges")
+    ("operations"
+     (variable-length-array "OperationMeta" #f))))
+(define-type
+  "TransactionMetaV2"
+  (struct
+    ("txChangesBefore" "LedgerEntryChanges")
+    ("operations"
+     (variable-length-array "OperationMeta" #f))
+    ("txChangesAfter" "LedgerEntryChanges")))
+(define-type
+  "TransactionMeta"
+  (union (case ("v" "int")
+           ((0)
+            ("operations"
+             (variable-length-array "OperationMeta" #f)))
+           ((1) ("v1" "TransactionMetaV1"))
+           ((2) ("v2" "TransactionMetaV2")))))
+(define-type
+  "TransactionResultMeta"
+  (struct
+    ("result" "TransactionResultPair")
+    ("feeProcessing" "LedgerEntryChanges")
+    ("txApplyProcessing" "TransactionMeta")))
+(define-type
+  "UpgradeEntryMeta"
+  (struct
+    ("upgrade" "LedgerUpgrade")
+    ("changes" "LedgerEntryChanges")))
+(define-type
+  "LedgerCloseMetaV0"
+  (struct
+    ("ledgerHeader" "LedgerHeaderHistoryEntry")
+    ("txSet" "TransactionSet")
+    ("txProcessing"
+     (variable-length-array
+       "TransactionResultMeta"
+       #f))
+    ("upgradesProcessing"
+     (variable-length-array "UpgradeEntryMeta" #f))
+    ("scpInfo"
+     (variable-length-array "SCPHistoryEntry" #f))))
+(define-type
+  "LedgerCloseMeta"
+  (union (case ("v" "int")
+           ((0) ("v0" "LedgerCloseMetaV0")))))
+(define-type
+  "TestLedger"
   (struct
     ("ledgerHeader" "LedgerHeader")
     ("ledgerEntries"
-     (variable-length-array "LedgerEntry" #f))
-    ("transactionEnvelopes"
-     (variable-length-array "TransactionEnvelope" #f))))
+     (variable-length-array "LedgerEntry" #f))))
 (define-type
   "TestCaseResult"
   (struct

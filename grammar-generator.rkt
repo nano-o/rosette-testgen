@@ -687,10 +687,9 @@
 (module+ test
   (define test-overrides
     '((("Transaction" "operations") len . 1)
-      (("TestCase" "ledgerEntries") len . 2)
-      (("TestCase" "transactionEnvelopes") len . 1)
+      (("TestLedger" "ledgerEntries") len . 2)
       (("MuxedAccount" "ed25519")
        key-set
        "GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3"
        "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
-  (xdr-types->grammar-datum Stellar-xdr-types test-overrides (set "TestCase" "TestCaseResult")))
+  (xdr-types->grammar-datum Stellar-xdr-types test-overrides (set "TransactionEnvelope" "TestLedger" "TestCaseResult")))

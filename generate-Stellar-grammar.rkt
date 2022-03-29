@@ -8,7 +8,7 @@
 (define Stellar-xdr-types
   (read-datums "./Stellar.xdr-types"))
 (define grammar
-  (xdr-types->grammar-datum Stellar-xdr-types overrides (set "TestCase" "TestCaseResult")))
+  (xdr-types->grammar-datum Stellar-xdr-types overrides (set "TransactionEnvelope" "TestLedger" "TestCaseResult")))
 
 (define o (open-output-string))
 (fprintf o "#lang rosette\n")

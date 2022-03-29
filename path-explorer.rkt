@@ -10,7 +10,7 @@
 
 (define-syntax-parameter the-generator (lambda (stx) (raise-syntax-error (syntax-e stx) "can only be used inside path-explorer")))
 
-; now let's write a macro that takes a racket definition and creates a Rosette program that follows the path given by a generator
+; Next we write a macro that takes a racket definition and creates a Rosette program that follows the path given by a generator
 
 (begin-for-syntax
   (define debug? #t)
@@ -77,7 +77,7 @@
         ([i (if (not (syntax? i)) (datum->syntax #'() i) i)]
          [c (pretty-format "~a" (syntax->datum c))])
       (if debug?
-          #`((displayln (format "branch number ~a with condition ~a" #,i #,(datum->syntax #'() c))))
+          #`((displayln (format "branch number ~a with condition:\n~a" #,i #,(datum->syntax #'() c))))
           #'())))
 
   (define-syntax-class (has-path-explorer)
@@ -85,7 +85,6 @@
              #:when (set-member? fn-with-explorer (syntax-e #'x))])
     
   (define-syntax-class l1
-    ; TODO "and" and "or"
     #:description "an expression amenable to path-exploration"
     [pattern ((~literal let*) ([x*:id e*:l1] ...) body:l1)
              #:attr res #`(let* ([x* e*.res] ...) body.res)]

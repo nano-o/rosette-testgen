@@ -1,8 +1,5 @@
 #lang racket
 
-; TODO signatures. Could be either invalid or sig(key, payload).
-; Then serialization can generate the right thing.
-
 (require
   syntax/parse
   racket/syntax

@@ -70,23 +70,24 @@
           (list CREATE_ACCOUNT_SUCCESS)))))
 ;) (list #'define/path-explorer))))
 
-; grammar depth can be computed with the "max-depth" function in "nanopass-compiler.rkt"
+; grammar depth (assuming there's no recursion) can be computed with the "max-depth" function in "grammar-generator.rkt"
 
-(define test-case
-  (the-grammar #:depth 16 #:start TestCase-rule))
+(define test-ledger
+  (the-grammar #:depth 9 #:start TestLedger-rule))
+(define test-tx
+  (the-grammar #:depth 15 #:start TransactionEnvelope-rule))
 
 (define (spec gen)
-  (let ([ledger-header (TestCase-ledgerHeader test-case)]
-        [input-ledger (vector->list (TestCase-ledgerEntries test-case))]
-        [input-tx (vector-ref-bv (TestCase-transactionEnvelopes test-case) (bv 0 1))])
-    (base-assumptions ledger-header input-ledger input-tx)
-    (execute-create-account/path-explorer gen ledger-header input-ledger null input-tx)))
+  (let ([ledger-header (TestLedger-ledgerHeader test-ledger)]
+        [input-ledger (vector->list (TestLedger-ledgerEntries test-ledger))])
+    (base-assumptions ledger-header input-ledger test-tx)
+    (execute-create-account/path-explorer gen ledger-header input-ledger null test-tx)))
 
 (define solution-list
   (stream->list
    (all-paths spec)))
 
-(define all-symbolics (symbolics test-case))
+(define all-symbolics (set-union (symbolics test-tx) (symbolics test-ledger)))
 
 (for ([s solution-list])
   (if (sat? s)
