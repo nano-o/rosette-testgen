@@ -7,8 +7,10 @@
 (require
   "Stellar-grammar.rkt"
   "path-explorer.rkt"
+  "serialize.rkt"
   rosette/lib/synthax
   syntax/to-string
+  (only-in list-util zip)
   #;macro-debugger/stepper
   #;macro-debugger/expand)
 
@@ -83,14 +85,39 @@
     (base-assumptions ledger-header input-ledger test-tx)
     (execute-create-account/path-explorer gen ledger-header input-ledger null test-tx)))
 
-(define solution-list
-  (stream->list
-   (all-paths spec)))
+(define solutions
+  (let ([all-symbolics (set-union (symbolics test-tx) (symbolics test-ledger))])
+    (for/list ([s
+                (stream->list
+                 (all-paths spec))])
+      (complete-solution s all-symbolics))))
 
-(define all-symbolics (set-union (symbolics test-tx) (symbolics test-ledger)))
+; display the synthesized tests inputs:
+(for ([s solutions]
+      #:when (sat? s))
+  (for ([f (generate-forms s)])
+    (begin
+      (pretty-display (syntax->datum f))
+      (serialize f))))
 
-(for ([s solution-list])
-  (if (sat? s)
-      (let* ([complete-sol (complete-solution s all-symbolics)])
-        (map (λ (f) (pretty-display (syntax->datum f))) (generate-forms complete-sol)))
-      (displayln "unsat")))
+(define (serialize-tests sols)
+  (for/list ([s sols]
+             #:when (sat? s))
+    (match-let ([(list l tx)
+                 (for/list ([f (generate-forms s)])
+                   (serialize (datum->syntax #'() (syntax->datum f))))])
+      `((test-ledger . ,l)
+        (test-tx . ,tx)))))
+
+; write to "./generated-tests/"
+(define (create-test-files)
+  (let ([tests (serialize-tests solutions)])
+    (for ([test (zip (range (length tests)) tests)])
+      (match-let ([`(,i . ,test-inputs) test])
+        (begin
+          (with-output-to-file (apply string-append `("./generated-tests/test-" ,(number->string i) "-ledger.scm"))
+            #:exists 'replace
+            (λ () (write (dict-ref test-inputs 'test-ledger))))
+          (with-output-to-file (apply string-append `("./generated-tests/test-" ,(number->string i) "-tx.scm"))
+            #:exists 'replace
+            (λ () (write (dict-ref test-inputs 'test-tx)))))))))
