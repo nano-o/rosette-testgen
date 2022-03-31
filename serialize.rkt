@@ -5,7 +5,7 @@
   racket/syntax
   binaryio/integer
   syntax/to-string
-  (only-in rosette bv bitvector bv? bitvector->natural)
+  (only-in rosette bv bitvector bv? bitvector->natural bitvector->bits)
   "Stellar-grammar.rkt"
   "synthesized-tx-examples.rkt")
 
@@ -29,13 +29,24 @@
     [((~datum define) _ d:xdr-rep)
      (eval-syntax #'d.out ns)]))
 
+(define (integer->bytelist val nbytes)
+  (bytes->list (integer->bytes val nbytes #f #t)))
+
 (define-syntax-class xdr-rep
   #:literals (list bv vector null bitvector :union: :byte-array:)
   [pattern (:union: tag:xdr-rep val:xdr-rep)
-           #:attr out #`(cons tag.out val.out)]
+           #:attr out #'(cons tag.out val.out)]
   [pattern (:byte-array: (bv val:number size:number))
            ; opaque fixed-sized array -> list of bytes
-           #:attr out #`(bytes->list (integer->bytes val (/ size 8) #f #t))] ; unsigned big-endian
+           #:attr out #'(integer->bytelist val (/ size 8))] ; unsigned big-endian
+  [pattern (:byte-array: bv-literal)
+           #:when (bv? (syntax-e #'bv-literal))
+           ; opaque fixed-sized array -> list of bytes
+           #:attr out (let* ([the-bv (syntax-e #'bv-literal)]
+                             [val (bitvector->natural the-bv)]
+                             [nbytes (/ (length (bitvector->bits the-bv)) 8)])
+                        #`(integer->bytelist #,val #,nbytes))] ; unsigned big-endian
+  ; bv not wrapped in :byte-array: are ints or hypers, to be serialized to just a literal number
   [pattern (bv v:xdr-rep n:number)
            #:attr out #`v.out]
   [pattern bv-literal
@@ -50,7 +61,7 @@
                      (identifier-binding type-id)
                      (struct-type? (eval-syntax type-id ns))))
            #:attr out #'`(,e*.out ...)]
-  [pattern (e*:xdr-rep ...+)
+  [pattern (list e*:xdr-rep ...+)
            ; fixed-size array
            #:attr out #'`(,e*.out ...)]
   [pattern n:number
@@ -64,7 +75,8 @@
 (module+ test
   (require rackunit)
   (define example-1
-    (let ([my-bv (bv 0 32)])
+    (let ([my-bv-32 (bv 0 32)]
+          [my-bv-256 (bv 0 256)])
       #`(define my-tx
           (:union:
            (bv ENVELOPE_TYPE_TX 32)
@@ -78,13 +90,13 @@
                 (bv
                  29458565313587576488605812219632678825768279426807042594960959184304126581667
                  256))))
-             #,my-bv
+             #,my-bv-32
              (bv #x0000000000000000 64)
              (:union: (bv FALSE 32) null)
              (:union:
               (bv MEMO_RETURN 32)
               (:byte-array:
-               (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
+               #,my-bv-256))
              (vector
               (Operation
                (:union: (bv FALSE 32) null)

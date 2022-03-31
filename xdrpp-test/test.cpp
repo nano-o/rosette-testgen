@@ -50,12 +50,12 @@ int main (int argc, char** argv) {
     return 1;
   }
 
-  TestCase tc;
+  TestLedger tl;
   std::vector<uint8_t> data = readFile(inFile.c_str());
 
   xdr::xdr_get g(&data.front(), &data.back() + 1);
-  xdr::xdr_argpack_archive(g, tc);
+  xdr::xdr_argpack_archive(g, tl);
   g.done();
 
-  std::cout << tc << std::endl;
+  std::cout << tl << std::endl;
 }

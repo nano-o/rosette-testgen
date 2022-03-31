@@ -33,6 +33,9 @@ RUN ./configure --prefix=/home/user
 RUN make install
 WORKDIR /home/user/
 
+# install stc
+ENV PATH=/home/user/go/bin:${PATH}
+RUN GOPROXY=direct go install github.com/xdrpp/stc/...@latest
 # install script xdr_spec_to-sexp.sh:
 
 ENV PATH=/home/user/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -49,6 +52,3 @@ COPY --chown=user:user Stellar.x /home/user/
 COPY --chown=user:user serialize.sh /home/user/bin/
 RUN chmod +x /home/user/bin/serialize.sh
 
-# install stc
-ENV PATH=/home/user/go/bin:${PATH}
-RUN GOPROXY=direct go install github.com/xdrpp/stc/...@latest
