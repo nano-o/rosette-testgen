@@ -10,35 +10,38 @@
 
 (define-syntax-parameter the-generator (lambda (stx) (raise-syntax-error (syntax-e stx) "can only be used inside path-explorer")))
 
-; Next we write a macro that takes a racket definition and creates a Rosette program that follows the path given by a generator
+; We define macro that takes a racket definition and creates a Rosette program that follows the path given by a generator
 
 (begin-for-syntax
   (define debug? #t)
   
   ; First we rewrite "or", "and", "case" to "if" expressions
   (define-syntax-class l0
+    #:literals (begin let let* if or and assume case)
     #:description "the input language"
-    [pattern ((~literal let) ([x*:id e*:l0] ...) body*:l0 ...)
+    [pattern (begin e*:l0 ...)
+             #:attr l1 #`(begin e*.l1 ...)]
+    [pattern (let ([x*:id e*:l0] ...) body*:l0 ...)
              ; TODO: recurse in the bindings
              #:attr l1 #`(let ([x* e*.l1] ...) body*.l1 ...)]
-    [pattern ((~literal let*) ([x*:id e*:l0] ...) body*:l0 ...)
+    [pattern (let* ([x*:id e*:l0] ...) body*:l0 ...)
              ; TODO: recurse in the bindings
              #:attr l1 #`(let* ([x* e*.l1] ...) body*.l1 ...)]
-    [pattern ((~literal if) c:l0 then:l0 else:l0)
+    [pattern (if c:l0 then:l0 else:l0)
              #:attr l1 #'(if c.l1 then.l1 else.l1)]
-    [pattern ((~literal or) e*:l0 ...)
+    [pattern (or e*:l0 ...)
              #:attr l1 (or->ifs (syntax->list #'(e* ...)))]
-    [pattern ((~literal and) e*:l0 ...)
+    [pattern (and e*:l0 ...)
              #:attr l1 (and->ifs (syntax->list #'(e* ...)))]
-    [pattern ((~literal assume) e:expr)
+    [pattern (assume e:expr)
              ; assume expressions are left untouched
              #:attr l1 this-syntax]
-    [pattern ((~literal case) e:l0 [(d**:expr ...) body**:l0 ...] ...)
+    [pattern (case e:l0 [(d**:expr ...) body**:l0 ...] ...)
              #:attr l1 #'(case e.l1 [(d** ...) body**.l1 ...] ...)]
     [pattern (~or _:id _:number _:boolean)
              #:attr l1 this-syntax]
-    [pattern (fn:id arg0:l0 ...)
-             #:attr l1 #'(fn arg0.l1 ...)])
+    [pattern (fn:id arg*:l0 ...)
+             #:attr l1 #'(fn arg*.l1 ...)])
   
   (define (or->ifs e*)
     (if (null? e*)
@@ -86,6 +89,8 @@
     
   (define-syntax-class l1
     #:description "an expression amenable to path-exploration"
+    [pattern ((~literal begin) e*:l1 ...)
+             #:attr res #`(begin e*.res ...)]
     [pattern ((~literal let*) ([x*:id e*:l1] ...) body:l1)
              #:attr res #`(let* ([x* e*.res] ...) body.res)]
     [pattern ((~literal let) ([x*:id e*:l1] ...) body:l1)
@@ -142,7 +147,7 @@
           (define (name arg0 ...)
             body))])])
 
-; all-paths return a stream of solutions
+; all-paths returns a stream of solutions
 (define (all-paths prog) ; prog must take a generator as argument
   (define gen (exhaustive-gen))
   (define (go)
@@ -153,20 +158,22 @@
         (if (equal? (gen 0) 0) (stream-cons solution (go)) (stream-cons solution empty-stream)))))
   (go))
 
-
-;(pretty-display (syntax->datum
-;(expand-only #'
-;             (begin
-(define/path-explorer (test-2 x)
-  (case (< x 3)
-    [(#t) (+ x 1)]
-    [(#f) (- x 1)]))
-(define/path-explorer (test x)
-  (if (< (test-2 x) 0)
-      (void)
-      (void)))
-;) (list #'define/path-explorer))))
-
-(define-symbolic x integer?)
-(for ([m (stream->list (all-paths (λ (gen) (test/path-explorer gen x))))])
-  (displayln m))
+(module+ test
+  (require rackunit)
+  (define/provide-test-suite path-explorer/test
+    (test-case
+     "basic tests"
+     (check-not-exn
+      (λ ()
+        (begin
+          (define/path-explorer (test-2 x)
+            (case (< x 3)
+              [(#t) (+ x 1)]
+              [(#f) (- x 1)]))
+          (define/path-explorer (test x)
+            (if (< (test-2 x) 0)
+                (void)
+                (void)))
+          (define-symbolic x integer?)
+          (for ([m (stream->list (all-paths (λ (gen) (test/path-explorer gen x))))])
+            (displayln m))))))))

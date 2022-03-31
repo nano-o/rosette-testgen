@@ -6,6 +6,7 @@
   (submod "x-txrep.rkt" test)
   (submod "key-utils.rkt" test)
   (submod "serialize.rkt" test)
+  (submod "path-explorer.rkt" test)
   rackunit/text-ui)
 
 (define (get-test-exports m)
@@ -34,3 +35,4 @@
 (run-all "x-txrep.rkt")
 (run-all "key-utils.rkt")
 (run-all "serialize.rkt")
+(run-all "path-explorer.rkt")
