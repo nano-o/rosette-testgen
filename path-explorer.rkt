@@ -1,9 +1,12 @@
 #lang rosette
 
 (require
-  (for-syntax syntax/parse racket/syntax pretty-format)
-  macro-debugger/expand
-  racket/stxparam syntax/parse/define
+  (for-syntax ;syntax/parse
+              racket/syntax
+              pretty-format)
+  ;macro-debugger/expand
+  racket/stxparam
+  syntax/parse/define
   "./generators.rkt")
 
 (provide define/path-explorer all-paths (for-syntax debug?))
@@ -11,28 +14,30 @@
 (define-syntax-parameter the-generator (lambda (stx) (raise-syntax-error (syntax-e stx) "can only be used inside path-explorer")))
 
 ; We define macro that takes a racket definition and creates a Rosette program that follows the path given by a generator
+; TODO should we allow non-determinism in the specs?
+; For example, the error code returns by a transaction could depend on the order in which conditions are checked (if multiple conditions are violated).
+; TODO it might make sense to restrict specs to a total fragment of Racket
 
 (begin-for-syntax
-  (define debug? #t)
+  (define debug? #f)
   
   ; First we rewrite "or", "and", "case" to "if" expressions
+  ; TODO support "cond"
   (define-syntax-class l0
     #:literals (begin let let* if or and assume case)
     #:description "the input language"
     [pattern (begin e*:l0 ...)
              #:attr l1 #`(begin e*.l1 ...)]
     [pattern (let ([x*:id e*:l0] ...) body*:l0 ...)
-             ; TODO: recurse in the bindings
              #:attr l1 #`(let ([x* e*.l1] ...) body*.l1 ...)]
     [pattern (let* ([x*:id e*:l0] ...) body*:l0 ...)
-             ; TODO: recurse in the bindings
              #:attr l1 #`(let* ([x* e*.l1] ...) body*.l1 ...)]
     [pattern (if c:l0 then:l0 else:l0)
              #:attr l1 #'(if c.l1 then.l1 else.l1)]
     [pattern (or e*:l0 ...)
-             #:attr l1 (or->ifs (syntax->list #'(e* ...)))]
+             #:attr l1 (or->ifs (syntax->list #'(e*.l1 ...)))]
     [pattern (and e*:l0 ...)
-             #:attr l1 (and->ifs (syntax->list #'(e* ...)))]
+             #:attr l1 (and->ifs (syntax->list #'(e*.l1 ...)))]
     [pattern (assume e:expr)
              ; assume expressions are left untouched
              #:attr l1 this-syntax]
@@ -42,6 +47,8 @@
              #:attr l1 this-syntax]
     [pattern (fn:id arg*:l0 ...)
              #:attr l1 #'(fn arg*.l1 ...)])
+
+  ; NOTE with "and" and "or" we want to explore the structure of the formula
   
   (define (or->ifs e*)
     (if (null? e*)
@@ -51,13 +58,13 @@
           #`(if #,(car e*)
                 #t
                 rest))))
-
+  
   (define (and->ifs e*)
     (if (null? e*)
         #'#t
         (with-syntax
             ([rest (and->ifs (cdr e*))])
-          #`(if #,(not (car e*))
+          #`(if (not #,(car e*))
                 #f
                 rest))))
   
@@ -89,13 +96,14 @@
     
   (define-syntax-class l1
     #:description "an expression amenable to path-exploration"
-    [pattern ((~literal begin) e*:l1 ...)
+    #:literals (begin let let* if or and assume case)
+    [pattern (begin e*:l1 ...)
              #:attr res #`(begin e*.res ...)]
-    [pattern ((~literal let*) ([x*:id e*:l1] ...) body:l1)
+    [pattern (let* ([x*:id e*:l1] ...) body:l1)
              #:attr res #`(let* ([x* e*.res] ...) body.res)]
-    [pattern ((~literal let) ([x*:id e*:l1] ...) body:l1)
+    [pattern (let ([x*:id e*:l1] ...) body:l1)
              #:attr res #`(let ([x* e*.res] ...) body.res)]
-    [pattern ((~literal if) cond:l1 then:l1 else:l1)
+    [pattern (if cond:l1 then:l1 else:l1)
              #:attr res #`(let ([c cond.res]) ; NOTE it's important to evaluate cond.res first
                             (if (equal? (the-generator 2) 0)
                                 (begin
@@ -108,7 +116,7 @@
                                   else.res)))]
     [pattern (fn:has-path-explorer arg0:l1 ...)
              #:attr res #`(#,(explorer-id #'fn) the-generator arg0.res ...)]
-    [pattern ((~literal case) e:l1 [(d**:expr ...) body**:l1 ...] ...)
+    [pattern (case e:l1 [(d**:expr ...) body**:l1 ...] ...)
              #:attr res (let* ([res** (reverse
                                        (for/fold ([res null])
                                                  ([body* (syntax->list #'((body**.res ...) ...))]
@@ -126,7 +134,7 @@
                             #`(let ([val e.res]
                                     [i (the-generator #,(length res**))])
                                 (case val [(d** ...) body.res** ...] ...))))]
-    [pattern ((~literal assume) e:expr)
+    [pattern (assume e:expr)
              ; assume expressions are left untouched
              #:attr res this-syntax]
     [pattern (~or _:id _:number _:boolean)
@@ -136,16 +144,25 @@
 
 (define-syntax-parser define/path-explorer
   [(_ (name:id arg0:id ...) body:l0)
-   (if debug? (println (format "synthesizing ~a/path-explorer" (syntax->datum #'name))) (void)) ; this runs at compile-time
+   (when debug?
+     (begin
+       (println (format "synthesizing ~a/path-explorer" (syntax->datum #'name))) ; this runs at compile-time
+       #;(displayln "ouput of first pass:")
+       #;(println (pretty-display (syntax->datum #'body.l1)))))
    (set-add! fn-with-explorer (syntax-e #'name))
    (syntax-parse #'body.l1
      [e:l1
+      #;(displayln "ouput of second pass:")
+      #;(println (pretty-display (syntax->datum #'e.res)))
       #`(begin
           (define (#,(explorer-id #'name) gen arg0 ...)
             (syntax-parameterize ([the-generator (make-rename-transformer #'gen)])
               e.res))
           (define (name arg0 ...)
             body))])])
+
+(define-syntax-parser debug?
+  [_ #`#,debug?])
 
 ; all-paths returns a stream of solutions
 (define (all-paths prog) ; prog must take a generator as argument
@@ -154,7 +171,8 @@
     (let ([solution
            (solve (prog gen))])
       (begin
-        (displayln (format "End of execution path; SAT: ~a" (sat? solution)))
+        (when debug?
+            (displayln (format "End of execution path; SAT: ~a" (sat? solution))))
         (if (equal? (gen 0) 0) (stream-cons solution (go)) (stream-cons solution empty-stream)))))
   (go))
 
