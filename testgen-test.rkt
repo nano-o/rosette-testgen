@@ -1,6 +1,5 @@
 #lang rosette
 
-; TODO use a little language that extends txrep to specify constraints
 ; TODO it would be nice to have a rudimentary type checker (e.g. for bv length)
 ; TODO The make-grammar macro does not work. For now we write the generated grammar to a file instead.
 
@@ -42,7 +41,8 @@
 ;(pretty-display (syntax->datum
 ;(expand-only #'
 ;             (begin
-(define/path-explorer (account-exists? ledger account-id)
+(define (account-exists? ledger account-id)
+  ; account-id must be a uint256
   (if (null? ledger)
       #f
       (or
@@ -50,7 +50,8 @@
               [type (:union:-tag (LedgerEntry-data ledger-entry))])
          (and (equal? type (bv ACCOUNT 32))
               (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
-                     [id (AccountEntry-accountID account-entry)])
+                     [id/pubkey (AccountEntry-accountID account-entry)] ; that's a PublicKey
+                     [id (:union:-value id/pubkey)])
                 (equal? id account-id))))
        (account-exists? (cdr ledger) account-id)
        )))
@@ -60,16 +61,22 @@
   ; How are sequence numbers used? Seems like a transaction must use a sequence number one above its source account
   ; What about time bounds?
   (let* ([tx (TransactionV1Envelope-tx (:union:-value tx-envelope))]
-         [op (vector-ref-bv (Transaction-operations tx) (bv 0 1))]
+         [op (vector-ref-bv (Transaction-operations tx) (bv 0 1))] ; the first operation
          [op-type (:union:-tag (Operation-body op))]
-         [account-id (CreateAccountOp-destination (:union:-value (Operation-body op)))] ; a public key
-         )
+         [new-account-id (:union:-value (CreateAccountOp-destination (:union:-value (Operation-body op))))])
     (begin
       ; Assume we have a create-account transaction:
       (assume (equal? op-type (bv CREATE_ACCOUNT 32)))
-      (if (account-exists? ledger-entries account-id)
-          (list CREATE_ACCOUNT_ALREADY_EXIST)
-          (list CREATE_ACCOUNT_SUCCESS)))))
+      (if (account-exists? ledger-entries new-account-id)
+          (bv CREATE_ACCOUNT_ALREADY_EXIST 32)
+          (let* ([source-account (Transaction-sourceAccount tx)]
+                 [source-account-type (:union:-tag source-account)]
+                 [source-account-id (:union:-value source-account)])
+            (begin (assume (equal? source-account-type (bv KEY_TYPE_ED25519 32)))
+                   (if
+                    (account-exists? ledger-entries source-account-id)
+                    (bv CREATE_ACCOUNT_SUCCESS 32)
+                    (bv CREATE_ACCOUNT_UNDERFUNDED 32))))))))
 ;) (list #'define/path-explorer))))
 
 ; grammar depth (assuming there's no recursion) can be computed with the "max-depth" function in "grammar-generator.rkt"
@@ -99,6 +106,7 @@
     (begin
       (pretty-display (syntax->datum f))
       (serialize f))))
+(displayln (format "There are ~a solutions" (length (filter sat? solutions))))
 
 (define (serialize-tests sols)
   (for/list ([s sols]
