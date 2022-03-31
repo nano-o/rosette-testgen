@@ -18,7 +18,9 @@
   (* x 10000000))
 
 (define (min-balance lh) ; first approximation
-  (* 2 (LedgerHeader-baseReserve lh)))
+  ; baseReserve is a unint32
+  ; balances are int64
+  (bvmul (zero-extend (LedgerHeader-baseReserve lh) (bitvector 64)) (bv 2 64)))
 
 (define (base-assumptions ledger-header ledger-entries tx-envelope)
   (assume (equal? (LedgerHeader-ledgerSeq ledger-header) (bv 0 32)))
@@ -38,48 +40,71 @@
 ; - Make sure to only use forms that are supported by Rosette.
 ; - Make sure to understand which forms the path-explorer will consider to be nodes in the control-flow graph.
 
-;(pretty-display (syntax->datum
-;(expand-only #'
-;             (begin
+(define (account-entry? ledger-entry account-id)
+    (let* ([type (:union:-tag (LedgerEntry-data ledger-entry))])
+      (and (equal? type (bv ACCOUNT 32))
+           (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
+                  [id/pubkey (AccountEntry-accountID account-entry)] ; that's a PublicKey
+                  [id (:union:-value id/pubkey)])
+             (equal? id account-id)))))
+
 (define (account-exists? ledger account-id)
   ; account-id must be a uint256
-  (if (null? ledger)
-      #f
-      (or
-       (let* ([ledger-entry (car ledger)]
-              [type (:union:-tag (LedgerEntry-data ledger-entry))])
-         (and (equal? type (bv ACCOUNT 32))
-              (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
-                     [id/pubkey (AccountEntry-accountID account-entry)] ; that's a PublicKey
-                     [id (:union:-value id/pubkey)])
-                (equal? id account-id))))
-       (account-exists? (cdr ledger) account-id)
-       )))
+  (and (not (null? ledger))
+       (or
+        (account-entry? (car ledger) account-id)
+        (account-exists? (cdr ledger) account-id))))
+;)
 
+(define (account-balance ledger account-id)
+  ; account-id must be a uint256
+  (if (null? ledger)
+      (error "account does not exist")
+      (let ([ledger-entry (car ledger)])
+        (if (account-entry? ledger-entry account-id)
+            (let* ([account (:union:-value (LedgerEntry-data ledger-entry))])
+              (AccountEntry-balance account))
+            (account-balance (cdr ledger) account-id)))))
+
+; To debug:
+;(pretty-display (syntax->datum
+;(expand-only #'
+;             (begin ...
 (define/path-explorer (execute-create-account ledger-header ledger-entries current-time tx-envelope)
-  ; We must check that accounts still have enough reserve after execution
-  ; How are sequence numbers used? Seems like a transaction must use a sequence number one above its source account
-  ; What about time bounds?
   (let* ([tx (TransactionV1Envelope-tx (:union:-value tx-envelope))]
          [op (vector-ref-bv (Transaction-operations tx) (bv 0 1))] ; the first operation
-         [op-type (:union:-tag (Operation-body op))]
-         [new-account-id (:union:-value (CreateAccountOp-destination (:union:-value (Operation-body op))))])
+         [op-type (:union:-tag (Operation-body op))])
     (begin
       ; Assume we have a create-account transaction:
       (assume (equal? op-type (bv CREATE_ACCOUNT 32)))
-      (if (account-exists? ledger-entries new-account-id)
-          (bv CREATE_ACCOUNT_ALREADY_EXIST 32)
-          (let* ([source-account (Transaction-sourceAccount tx)]
-                 [source-account-type (:union:-tag source-account)]
-                 [source-account-id (:union:-value source-account)])
-            (begin (assume (equal? source-account-type (bv KEY_TYPE_ED25519 32)))
-                   (if
-                    (account-exists? ledger-entries source-account-id)
-                    (bv CREATE_ACCOUNT_SUCCESS 32)
-                    (bv CREATE_ACCOUNT_UNDERFUNDED 32))))))))
+      (let ([new-account-id (:union:-value (CreateAccountOp-destination (:union:-value (Operation-body op))))]
+            [starting-balance (CreateAccountOp-startingBalance (:union:-value (Operation-body op)))])
+        ; TODO in what order should the possible error conditions be checked?
+        (if (account-exists? ledger-entries new-account-id)
+            (bv CREATE_ACCOUNT_ALREADY_EXIST 32)
+            (let* ([source-account (Transaction-sourceAccount tx)]
+                   [source-account-type (:union:-tag source-account)]
+                   [source-account-id (:union:-value source-account)]
+                   [base-fee (zero-extend (LedgerHeader-baseFee ledger-header) (bitvector 64))])
+              (begin
+                (assume (equal? source-account-type (bv KEY_TYPE_ED25519 32))) ; TODO it could also be KEY_TYPE_MUXED_ED25519
+                  ;(bvsge starting-balance (bv 0 64)))) ; just assume it for now. What error code should it be though?
+                (if
+                 (and
+                  (account-exists? ledger-entries source-account-id)
+                  (bvuge
+                   (bvsub
+                    (account-balance ledger-entries source-account-id)
+                    (bvadd starting-balance base-fee))
+                   (min-balance ledger-header)))
+                 (if (bvsge starting-balance base-fee)
+                     (bv CREATE_ACCOUNT_SUCCESS 32)
+                     (bv CREATE_ACCOUNT_LOW_RESERVE 32))
+                 (bv CREATE_ACCOUNT_UNDERFUNDED 32)))))))))
 ;) (list #'define/path-explorer))))
 
 ; grammar depth (assuming there's no recursion) can be computed with the "max-depth" function in "grammar-generator.rkt"
+
 
 (define test-ledger
   (the-grammar #:depth 9 #:start TestLedger-rule))
@@ -99,14 +124,18 @@
                  (all-paths spec))])
       (complete-solution s all-symbolics))))
 
-; display the synthesized tests inputs:
-(for ([s solutions]
-      #:when (sat? s))
-  (for ([f (generate-forms s)])
-    (begin
-      (pretty-display (syntax->datum f))
-      (serialize f))))
-(displayln (format "There are ~a solutions" (length (filter sat? solutions))))
+; display the synthesized tests inputs for debugging:
+(define (display-test-inputs sols)
+  (for ([s sols]
+        #:when (sat? s))
+    (for ([f (generate-forms s)])
+      (begin
+        (pretty-display (syntax->datum f))
+        (serialize f))))
+  (displayln (format "There are ~a paths" (length solutions)))
+  (displayln (format "There are ~a feasible paths" (length (filter sat? solutions)))))
+
+; TODO get test outputs
 
 (define (serialize-tests sols)
   (for/list ([s sols]
