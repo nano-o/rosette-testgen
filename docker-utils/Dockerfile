@@ -38,7 +38,7 @@ ENV PATH=/home/user/go/bin:${PATH}
 RUN GOPROXY=direct go install github.com/xdrpp/stc/...@latest
 # install script xdr_spec_to-sexp.sh:
 
-ENV PATH=/home/user/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV PATH=/home/user/bin:${PATH}
 RUN grpc-compile --help # force compilation
 COPY --chown=user:user xdr_spec_to_sexp.sh /home/user/bin/
 RUN chmod +x /home/user/bin/xdr_spec_to_sexp.sh
