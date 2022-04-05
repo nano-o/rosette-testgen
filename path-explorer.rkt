@@ -165,15 +165,19 @@
   [_ #`#,debug?])
 
 ; all-paths returns a stream of solutions
-(define (all-paths prog) ; prog must take a generator as argument
+(define (all-paths prog symbols) ; prog must take a generator as argument
   (define gen (exhaustive-gen))
   (define (go)
     (let ([solution
-           (solve (prog gen))])
+           (complete-solution ; we need full solutions to generate test inputs
+            (solve (prog gen))
+            symbols)])
       (begin
         (when debug?
             (displayln (format "End of execution path; SAT: ~a" (sat? solution))))
-        (if (equal? (gen 0) 0) (stream-cons solution (go)) (stream-cons solution empty-stream)))))
+        (if (equal? (gen 0) 0)
+            (stream-cons solution (go))
+            (stream-cons solution empty-stream)))))
   (go))
 
 (module+ test
@@ -193,5 +197,8 @@
                 (void)
                 (void)))
           (define-symbolic x integer?)
-          (for ([m (stream->list (all-paths (λ (gen) (test/path-explorer gen x))))])
+          (for ([m (stream->list
+                    (all-paths
+                     (λ (gen) (test/path-explorer gen x))
+                     (symbolics x)))])
             (displayln m))))))))

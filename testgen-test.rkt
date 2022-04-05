@@ -1,13 +1,13 @@
 #lang rosette
 
 ; TODO define a module that takes a path-explorer procedure and writes XDR tests to files.
-; TODO it would be nice to have a rudimentary type checker (e.g. for bv length)
+; TODO it would be nice to have a rudimentary type checker (e.g. for bv length).
 ; TODO The make-grammar macro does not work. For now we write the generated grammar to a file instead.
 
 (require
   "Stellar-grammar.rkt"
   "path-explorer.rkt"
-  "serialize.rkt"
+  "to-guile-rpc.rkt"
   rosette/lib/synthax
   syntax/to-string
   (only-in list-util zip)
@@ -119,6 +119,8 @@
   (the-grammar #:depth 9 #:start TestLedger-rule))
 (define test-tx
   (the-grammar #:depth 15 #:start TransactionEnvelope-rule))
+(define symbols
+  (set-union (symbolics test-tx) (symbolics test-ledger)))
 
 (define (spec gen)
   (let ([ledger-header (TestLedger-ledgerHeader test-ledger)]
@@ -127,20 +129,14 @@
     (execute-create-account/path-explorer gen ledger-header input-ledger null test-tx)))
 
 (define solutions
-  (let ([all-symbolics (set-union (symbolics test-tx) (symbolics test-ledger))])
-    (for/list ([s
-                (stream->list
-                 (all-paths spec))])
-      (complete-solution s all-symbolics))))
+  (stream->list (all-paths spec symbols)))
 
-; display the synthesized tests inputs for debugging:
+; display the synthesized tests inputs (for debugging):
 (define (display-test-inputs sols)
   (for ([s sols]
         #:when (sat? s))
     (for ([f (generate-forms s)])
-      (begin
-        (pretty-display (syntax->datum f))
-        (serialize f))))
+      (pretty-display (syntax->datum f))))
   (displayln (format "There are ~a paths" (length solutions)))
   (displayln (format "There are ~a feasible paths" (length (filter sat? solutions)))))
 
@@ -151,7 +147,7 @@
              #:when (sat? s))
     (match-let ([(list l tx)
                  (for/list ([f (generate-forms s)])
-                   (serialize (datum->syntax #'() (syntax->datum f))))])
+                   (defn->guile-rpc/xdr (datum->syntax #'() (syntax->datum f))))])
       `((test-ledger . ,l)
         (test-tx . ,tx)))))
 

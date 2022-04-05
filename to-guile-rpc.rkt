@@ -9,7 +9,7 @@
   "Stellar-grammar.rkt"
   "synthesized-tx-examples.rkt")
 
-(provide serialize)
+(provide defn->guile-rpc/xdr)
 
 ; We serialize synthesized transactions and ledger entries to the representation expected by the guile-rpc library
 ; TODO might be easier to eval the received syntax and then use match on the resulting datum
@@ -24,7 +24,7 @@
    (identifier-binding id)
    (struct-type? (eval-syntax id ns))))
 
-(define (serialize stx) ; generate-forms produces syntax objects
+(define (defn->guile-rpc/xdr stx) ; generate-forms produces syntax objects
   (syntax-parse stx
     [((~datum define) _ d:xdr-rep)
      (eval-syntax #'d.out ns)]))
@@ -116,7 +116,7 @@
       (test-case
        "serialize transaction"
        (check-equal?
-        (serialize example-1)
+        (defn->guile-rpc/xdr example-1)
         '(ENVELOPE-TYPE-TX
           ((KEY-TYPE-MUXED-ED25519 0 (65 32 245 4 132 15 130 86 201 188 205 227 214 17 246 138 208 74 110 187 8 101 242 142 164 42 213 13 113 216 91 163))
            0
