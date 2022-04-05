@@ -1,5 +1,6 @@
 #lang rosette
 
+; TODO define a module that takes a path-explorer procedure and writes XDR tests to files.
 ; TODO it would be nice to have a rudimentary type checker (e.g. for bv length)
 ; TODO The make-grammar macro does not work. For now we write the generated grammar to a file instead.
 
@@ -34,13 +35,18 @@
            (λ (e) (equal? (:union:-tag (LedgerEntry-data e)) (bv ACCOUNT 32)))
            ledger-entries))
   ; TransactionEnvelope type:
-  (assume (equal? (:union:-tag tx-envelope) (bv ENVELOPE_TYPE_TX 32))))
+  (assume (equal? (:union:-tag tx-envelope) (bv ENVELOPE_TYPE_TX 32)))
+  (let ([tx (TransactionV1Envelope-tx (:union:-value tx-envelope))]
+        [base-fee (LedgerHeader-baseFee ledger-header)])
+    (assume (equal? (:union:-tag (Transaction-timeBounds tx)) (bv 0 32)))  ; no time bounds
+    (assume (bvuge (Transaction-fee tx) base-fee))  ; assume fee is enough
+    (assume (bveq (Transaction-seqNum tx) (bv 1 64))))) ; set seqNum to 1 to make it valid
 
 ; When defining path explorers:
 ; - Make sure to only use forms that are supported by Rosette.
 ; - Make sure to understand which forms the path-explorer will consider to be nodes in the control-flow graph.
 
-(define (account-entry? ledger-entry account-id)
+(define (account-entry-for? ledger-entry account-id)
     (let* ([type (:union:-tag (LedgerEntry-data ledger-entry))])
       (and (equal? type (bv ACCOUNT 32))
            (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
@@ -52,7 +58,7 @@
   ; account-id must be a uint256
   (and (not (null? ledger))
        (or
-        (account-entry? (car ledger) account-id)
+        (account-entry-for? (car ledger) account-id)
         (account-exists? (cdr ledger) account-id))))
 ;)
 
@@ -61,7 +67,7 @@
   (if (null? ledger)
       (error "account does not exist")
       (let ([ledger-entry (car ledger)])
-        (if (account-entry? ledger-entry account-id)
+        (if (account-entry-for? ledger-entry account-id)
             (let* ([account (:union:-value (LedgerEntry-data ledger-entry))])
               (AccountEntry-balance account))
             (account-balance (cdr ledger) account-id)))))
@@ -71,7 +77,11 @@
 ;(expand-only #'
 ;             (begin ...
 (define/path-explorer (execute-create-account ledger-header ledger-entries current-time tx-envelope)
+  ; TODO Check time bounds. Compare to the ledger close time described in the ledger header
+  ; TODO We need multiple return codes: for the transaction and the operations
+  ; TODO Check sequence number: must be one above the sequence number in the account entry.
   (let* ([tx (TransactionV1Envelope-tx (:union:-value tx-envelope))]
+         [seq-num (Transaction-seqNum tx)]
          [op (vector-ref-bv (Transaction-operations tx) (bv 0 1))] ; the first operation
          [op-type (:union:-tag (Operation-body op))])
     (begin
@@ -84,24 +94,23 @@
             (bv CREATE_ACCOUNT_ALREADY_EXIST 32)
             (let* ([source-account (Transaction-sourceAccount tx)]
                    [source-account-type (:union:-tag source-account)]
-                   [source-account-id (:union:-value source-account)]
                    [base-fee (zero-extend (LedgerHeader-baseFee ledger-header) (bitvector 64))])
               (begin
                 (assume (equal? source-account-type (bv KEY_TYPE_ED25519 32))) ; TODO it could also be KEY_TYPE_MUXED_ED25519
-                  ;(bvsge starting-balance (bv 0 64)))) ; just assume it for now. What error code should it be though?
-                (if
-                 (and
-                  (account-exists? ledger-entries source-account-id)
-                  (bvuge
-                   (bvsub
-                    (account-balance ledger-entries source-account-id)
-                    (bvadd starting-balance base-fee))
-                   (min-balance ledger-header)))
-                 (if (bvsge starting-balance base-fee)
-                     (bv CREATE_ACCOUNT_SUCCESS 32)
-                     (bv CREATE_ACCOUNT_LOW_RESERVE 32))
-                 (bv CREATE_ACCOUNT_UNDERFUNDED 32)))))))))
-;) (list #'define/path-explorer))))
+                (let ([source-account-id (:union:-value source-account)])
+                  (if
+                   (and
+                    (account-exists? ledger-entries source-account-id)
+                    (bvuge
+                     (bvsub
+                      (account-balance ledger-entries source-account-id)
+                      (bvadd starting-balance base-fee))
+                     (min-balance ledger-header)))
+                   (if (bvsge starting-balance (min-balance ledger-header))
+                       (bv CREATE_ACCOUNT_SUCCESS 32)
+                       (bv CREATE_ACCOUNT_LOW_RESERVE 32))
+                   (bv CREATE_ACCOUNT_UNDERFUNDED 32))))))))))
+  ;) (list #'define/path-explorer))))
 
 ; grammar depth (assuming there's no recursion) can be computed with the "max-depth" function in "grammar-generator.rkt"
 
@@ -145,6 +154,8 @@
                    (serialize (datum->syntax #'() (syntax->datum f))))])
       `((test-ledger . ,l)
         (test-tx . ,tx)))))
+
+; TODO sign transactions
 
 ; write to "./generated-tests/"
 (define (create-test-files)
