@@ -24,8 +24,10 @@
    (identifier-binding id)
    (struct-type? (eval-syntax id ns))))
 
-(define (defn->guile-rpc/xdr stx) ; generate-forms produces syntax objects
-  (syntax-parse stx
+(define (defn->guile-rpc/xdr stx)
+  ; stx is supposed to be the output of generate-forms.
+  ; generate-forms produces syntax objects with no bindings, so we do a syntax->datum->syntax round-trip to re-interpret stuff.
+  (syntax-parse (datum->syntax #'() (syntax->datum stx))
     [((~datum define) _ d:xdr-rep)
      (eval-syntax #'d.out ns)]))
 

@@ -77,6 +77,7 @@
 ;(expand-only #'
 ;             (begin ...
 (define/path-explorer (execute-create-account ledger-header ledger-entries current-time tx-envelope)
+  ; TODO add a separate list of signatures, which will just be public keys; then, upon serialization, call stc to sign for real.
   ; TODO Check time bounds. Compare to the ledger close time described in the ledger header
   ; TODO We need multiple return codes: for the transaction and the operations
   ; TODO Check sequence number: must be one above the sequence number in the account entry.
@@ -140,14 +141,14 @@
   (displayln (format "There are ~a paths" (length solutions)))
   (displayln (format "There are ~a feasible paths" (length (filter sat? solutions)))))
 
-; TODO get test outputs
+; TODO generate fully-signed test-case files; for now, sign with all keys available.
 
 (define (serialize-tests sols)
   (for/list ([s sols]
              #:when (sat? s))
     (match-let ([(list l tx)
-                 (for/list ([f (generate-forms s)])
-                   (defn->guile-rpc/xdr (datum->syntax #'() (syntax->datum f))))])
+                 (for/list ([f (generate-forms s)]) ; TODO can this be moved out of this file?
+                   (defn->guile-rpc/xdr f))])
       `((test-ledger . ,l)
         (test-tx . ,tx)))))
 
