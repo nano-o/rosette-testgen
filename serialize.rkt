@@ -2,8 +2,11 @@
 
 ; TODO rename this file
 
-(require shell/pipeline)
-(provide sign tx/guile-rpc->base64  ledger/guile-rpc->base64)
+(require
+  shell/pipeline
+  "./to-guile-rpc.rkt"
+  "./Stellar-overrides.rkt")
+(provide serialize-tx serialize-ledger)
 
 (define docker-image "testgen-utils:latest")
 
@@ -15,12 +18,6 @@
    `(,(λ () (write datum))) ; write as datum that can be read back by a guile script
    `(,@docker-run-prefix serialize.sh ,type)))
 
-(define (tx/guile-rpc->base64 tx)
-  (xdr/guile-rpc->base64 tx "TransactionEnvelope"))
-
-(define (ledger/guile-rpc->base64 ledger)
-  (xdr/guile-rpc->base64 ledger "TestLedger"))
-
 ; Sign a transaction using stc in a ephemeral docker container
 (define (sign base64-tx private-key)
   (let ([output
@@ -29,15 +26,41 @@
            `(,@docker-run-prefix sign.sh ,private-key))])
     (string-trim output "\n")))
 
+(define (defn->base64 defn type)
+  (let ([guile-rep
+         (defn->guile-rpc/xdr defn)])
+    (xdr/guile-rpc->base64 guile-rep type)))
+
+(define (sign-all tx/base64 keys)
+  (for/fold ([acc tx/base64])
+            ([(k v) (in-dict keys)])
+    (sign acc v)))
+
+(define (serialize-tx tx-defn)
+  (let ([tx/base64 (defn->base64 tx-defn "TransactionEnvelope")])
+    (sign-all tx/base64 pub-priv-dict)))
+
+(define (serialize-ledger ledger-defn)
+  (defn->base64 ledger-defn "TestLedger"))
+  
 (module+ test
   (require rackunit)
+  (define keys
+  '(("GCNC3APR4XB64E7XADGU5JJFS7J2WYVJRKU73TYATQXW3LRSPGCIN2PJ" . "SAQ33Q6B22DXMYUXXYGUUIO56YBRAAY47KTYJ4J55MW5J3TYYZFU4N4J")
+    ("GA57G3YN5GEA5AF7YI2ZMNCKKAOQNAPYGDDIAVGSH7ILWRET6Y76SEIP" . "SCYRMXBWVYYI2XAU5PJ6MDDEUVKNJGJJVQKEBZLS4WK6NL7OHKC6OBLP")
+    ("GAWHIZOTTEDZDRPXIJPMPHPDPNW3NKSYMNJX7SMNCTMKATQQVX6VJFNV" . "SCI3M6F4CNX6A4RBPGZDJDYZGZSEF7ILYZJRT2FMXH3IYEQAHGYPWSBU")))
+  (define scm-tx '(ENVELOPE-TYPE-TX ((KEY-TYPE-ED25519 44 116 101 211 153 7 145 197 247 66 94 199 157 227 123 109 182 170 88 99 83 127 201 141 20 216 160 78 16 173 253 84) 0 0 (FALSE . void) (MEMO-RETURN 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0) #(((FALSE . void) (CREATE-ACCOUNT (PUBLIC-KEY-TYPE-ED25519 154 45 129 241 229 195 238 19 247 0 205 78 165 37 151 211 171 98 169 138 169 253 207 0 156 47 109 174 50 121 132 134) 10000000))) (0 . void)) #()))
   (define/provide-test-suite sign/test
     (test-case
      "serialize and sign a transaction"
      ; some test data
      (define priv "SCI3M6F4CNX6A4RBPGZDJDYZGZSEF7ILYZJRT2FMXH3IYEQAHGYPWSBU")
-     (define scm-tx '(ENVELOPE-TYPE-TX ((KEY-TYPE-ED25519 44 116 101 211 153 7 145 197 247 66 94 199 157 227 123 109 182 170 88 99 83 127 201 141 20 216 160 78 16 173 253 84) 0 0 (FALSE . void) (MEMO-RETURN 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0) #(((FALSE . void) (CREATE-ACCOUNT (PUBLIC-KEY-TYPE-ED25519 154 45 129 241 229 195 238 19 247 0 205 78 165 37 151 211 171 98 169 138 169 253 207 0 156 47 109 174 50 121 132 134) 10000000))) (0 . void)) #()))
      (define signed-tx "AAAAAgAAAAAsdGXTmQeRxfdCXsed43tttqpYY1N/yY0U2KBOEK39VAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAmi2B8eXD7hP3AM1OpSWX06tiqYqp/c8AnC9trjJ5hIYAAAAAAJiWgAAAAAAAAAABEK39VAAAAECgKT1XbANJwFUUG7wUc2szI6JrJNMWtWKCGoEkVBZHNSCpXUmFkyP5TiIADnQHaVGvM59ixpIqNE/YP6MMYu8D")
      (check-equal?
-      (sign (tx/guile-rpc->base64 scm-tx) priv) signed-tx))))
-      
+      (sign (xdr/guile-rpc->base64 scm-tx "TransactionEnvelope") priv) signed-tx))
+    (test-case
+     "serialize and sign all"
+     (define signed "AAAAAgAAAAAsdGXTmQeRxfdCXsed43tttqpYY1N/yY0U2KBOEK39VAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAmi2B8eXD7hP3AM1OpSWX06tiqYqp/c8AnC9trjJ5hIYAAAAAAJiWgAAAAAAAAAADMnmEhgAAAECdCKoIqJg+L2PPXCS65vu3U/2GXMiVr338giidkRwS7nM6vtE1Q0fzuEm10+4PzvDHiwP27RtRdI2zAdsmrB4Ok/Y/6QAAAEBYQVjrGHTmq1qNoVzBkrwTaxLE1hxIAhrsim0Rvt/9hQK6nhpDjPGoCXG07Mk7U1IEq/NmJgj1ZtNJ9/UbbtkDEK39VAAAAECgKT1XbANJwFUUG7wUc2szI6JrJNMWtWKCGoEkVBZHNSCpXUmFkyP5TiIADnQHaVGvM59ixpIqNE/YP6MMYu8D")
+     (check-equal?
+      (sign-all (xdr/guile-rpc->base64 scm-tx "TransactionEnvelope") keys)
+      signed))))

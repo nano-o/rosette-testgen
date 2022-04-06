@@ -7,12 +7,9 @@
 (require
   "Stellar-grammar.rkt"
   "path-explorer.rkt"
-  "to-guile-rpc.rkt"
+  "serialize.rkt"
   rosette/lib/synthax
-  syntax/to-string
-  (only-in list-util zip)
-  #;macro-debugger/stepper
-  #;macro-debugger/expand)
+  (only-in list-util zip))
 
 ; 10 millon stroops = 1 XLM
 (define (xlm->stroop x)
@@ -115,7 +112,6 @@
 
 ; grammar depth (assuming there's no recursion) can be computed with the "max-depth" function in "grammar-generator.rkt"
 
-
 (define test-ledger
   (the-grammar #:depth 9 #:start TestLedger-rule))
 (define test-tx
@@ -129,7 +125,7 @@
     (base-assumptions ledger-header input-ledger test-tx)
     (execute-create-account/path-explorer gen ledger-header input-ledger null test-tx)))
 
-(define solutions
+(define (solutions)
   (stream->list (all-paths spec symbols)))
 
 ; display the synthesized tests inputs (for debugging):
@@ -138,31 +134,29 @@
         #:when (sat? s))
     (for ([f (generate-forms s)])
       (pretty-display (syntax->datum f))))
-  (displayln (format "There are ~a paths" (length solutions)))
-  (displayln (format "There are ~a feasible paths" (length (filter sat? solutions)))))
+  (displayln (format "There are ~a paths" (length sols)))
+  (displayln (format "There are ~a feasible paths" (length (filter sat? sols)))))
 
 ; TODO generate fully-signed test-case files; for now, sign with all keys available.
 
 (define (serialize-tests sols)
   (for/list ([s sols]
              #:when (sat? s))
-    (match-let ([(list l tx)
-                 (for/list ([f (generate-forms s)]) ; TODO can this be moved out of this file?
-                   (defn->guile-rpc/xdr f))])
-      `((test-ledger . ,l)
-        (test-tx . ,tx)))))
+    (match-let ([(list l-defn tx-defn) (generate-forms s)])
+      `((test-ledger . ,(serialize-ledger l-defn))
+        (test-tx . ,(serialize-tx tx-defn))))))
 
 ; TODO sign transactions
 
 ; write to "./generated-tests/"
 (define (create-test-files)
-  (let ([tests (serialize-tests solutions)])
+  (let ([tests (serialize-tests (solutions))])
     (for ([test (zip (range (length tests)) tests)])
       (match-let ([`(,i . ,test-inputs) test])
         (begin
-          (with-output-to-file (apply string-append `("./generated-tests/test-" ,(number->string i) "-ledger.scm"))
+          (with-output-to-file (apply string-append `("./generated-tests/test-" ,(number->string i) "-ledger.base64"))
             #:exists 'replace
-            (λ () (write (dict-ref test-inputs 'test-ledger))))
-          (with-output-to-file (apply string-append `("./generated-tests/test-" ,(number->string i) "-tx.scm"))
+            (λ () (printf "~a" (dict-ref test-inputs 'test-ledger))))
+          (with-output-to-file (apply string-append `("./generated-tests/test-" ,(number->string i) "-tx.base64"))
             #:exists 'replace
-            (λ () (write (dict-ref test-inputs 'test-tx)))))))))
+            (λ () (printf "~a" (dict-ref test-inputs 'test-tx)))))))))
