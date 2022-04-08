@@ -3,7 +3,7 @@
 (require
   (only-in rosette bv integer->bitvector bitvector extract concat bveq)
   (only-in list-util zip))
-(provide strkey->bv)
+(provide strkey->bv get-private-key)
 
 ; NOTE
 ; don't use the bv package, it's buggy:
@@ -32,6 +32,20 @@
            (apply concat
                   (map char->bv (string->list k)))))
 
+(define (get-private-key d pub/bv)
+  ; given a dict mapping public strkeys to private strkeys
+  ; given a bitvector d of size 256
+  ; return the corresponding private strkey
+  (let ([res
+         (for/list
+             ([(pub/strkey priv/strkey) (in-dict d)]
+              #:when (equal? (strkey->bv pub/strkey) pub/bv))
+           priv/strkey)])
+    (match res
+      [(list r) r]
+      [else (error "no match or multiple matches")])))
+    
+
 (module+ test
   (require rackunit)
   (define/provide-test-suite strkey->bv/test
@@ -43,4 +57,13 @@
         (bveq
          (strkey->bv test-strkey)
          (bv #x3f0c34bf93ad0d9971d04ccc90f705511c838aad9734a4a2fb0d7a03fc7fe89a 256))
-        #t)))))
+        #t)))
+    (test-case
+     "get private-key"     
+     (define pub-priv-dict
+       '(("GA57G3YN5GEA5AF7YI2ZMNCKKAOQNAPYGDDIAVGSH7ILWRET6Y76SEIP" . "SCYRMXBWVYYI2XAU5PJ6MDDEUVKNJGJJVQKEBZLS4WK6NL7OHKC6OBLP")
+         ("GCNC3APR4XB64E7XADGU5JJFS7J2WYVJRKU73TYATQXW3LRSPGCIN2PJ" . "SAQ33Q6B22DXMYUXXYGUUIO56YBRAAY47KTYJ4J55MW5J3TYYZFU4N4J")
+         ("GAWHIZOTTEDZDRPXIJPMPHPDPNW3NKSYMNJX7SMNCTMKATQQVX6VJFNV" . "SCI3M6F4CNX6A4RBPGZDJDYZGZSEF7ILYZJRT2FMXH3IYEQAHGYPWSBU")))
+     (check-equal?
+      (get-private-key pub-priv-dict (strkey->bv "GCNC3APR4XB64E7XADGU5JJFS7J2WYVJRKU73TYATQXW3LRSPGCIN2PJ"))
+      "SAQ33Q6B22DXMYUXXYGUUIO56YBRAAY47KTYJ4J55MW5J3TYYZFU4N4J"))))
