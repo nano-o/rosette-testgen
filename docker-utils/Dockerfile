@@ -51,5 +51,7 @@ RUN guile serialize.scm # force compilation
 COPY --chown=user:user Stellar.x /home/user/
 COPY --chown=user:user serialize.sh /home/user/bin/
 COPY --chown=user:user sign.sh /home/user/bin/
+COPY --chown=user:user run-test.sh /home/user/bin/
 RUN chmod +x /home/user/bin/serialize.sh
 RUN chmod +x /home/user/bin/sign.sh
+RUN chmod +x /home/user/bin/run-test.sh
