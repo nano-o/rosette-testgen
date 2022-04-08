@@ -2,6 +2,15 @@
 
 ; Generate a Rosette grammar corresponding to an XDR specification
 ; Reads an input specification in guile-rpc AST format
+; XDR structs become Racket structs
+; XDR opaque fixed-length arrays become instances of :byte-array: struct (TODO: create a new struct based on the type name)
+; XDR non-opaque fixed-length arrays become Racket lists
+; XDR variable-length arrays become Racket vectors
+; XDR enums become Racket 32-bit bitvectors
+; XDR unions become instances of the :union: struct (TODO: create a new struct based on the type name)
+; XDR constants get an associated symbol
+; Some of those representations were chosen for compatibility with the guile-rpc representation.
+
 ; We use the nanopass compiler framework
 
 ; TODO there's pretty much no error checking
@@ -18,7 +27,7 @@
   racket/generator
   racket/pretty
   graph
-  "key-utils.rkt"
+  "strkey-utils.rkt"
   (only-in rosette bitvector->natural)
   (for-template ; useful if we were to use the functionality in a macro
    rosette

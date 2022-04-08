@@ -12,6 +12,8 @@
 ; ;=> #f
 
 
+; Stellar's strkey relies on base32 encoding
+
 (define value-encoding
   (zip
    '(#\A #\B #\C #\D #\E #\F #\G #\H #\I #\J #\K #\L #\M #\N #\O #\P #\Q #\R #\S #\T #\U #\V #\W #\X #\Y #\Z #\2 #\3 #\4 #\5 #\6 #\7)
@@ -21,6 +23,11 @@
   (integer->bitvector (dict-ref value-encoding c) (bitvector 5)))
 
 (define (strkey->bv k)
+  ; A strkey string consists of 56 characters, each encoding a 5-bit word.
+  ; The first byte of the decoded bitvector encodes the key type and the last 2 bytes are checksum bytes.
+  ; So, to obtain the key bits, we remove the first and last 2 bytes.
+  ; Note that bit 0 is the least-significant bit in rosette's bitvector library.
+  ; TODO: this is wrong for multiplexed addresses
   (extract (- 280 9) 16
            (apply concat
                   (map char->bv (string->list k)))))
