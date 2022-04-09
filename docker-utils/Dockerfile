@@ -36,8 +36,11 @@ WORKDIR /home/user/
 # install stc
 ENV PATH=/home/user/go/bin:${PATH}
 RUN GOPROXY=direct go install github.com/xdrpp/stc/...@latest
-# install script xdr_spec_to-sexp.sh:
+RUN mkdir /home/user/.stc/
+ENV STCDIR=/home/user/.stc/
+COPY --chown=user:user test.net ${STCDIR}
 
+# install script xdr_spec_to-sexp.sh:
 ENV PATH=/home/user/bin:${PATH}
 RUN grpc-compile --help # force compilation
 COPY --chown=user:user xdr_spec_to_sexp.sh /home/user/bin/
