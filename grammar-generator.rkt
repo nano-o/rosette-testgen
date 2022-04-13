@@ -15,9 +15,11 @@
 
 ; TODO there's pretty much no error checking
 ; TODO write tests
-; TODO a pass to remove recursion or limit its depth (ClaimPredicate)?
+; TODO a pass to remove recursion or limit its depth (ClaimPredicate)? For now I manually removed the recursion from the XDR spec.
 ; TODO using this in a macro to generate a grammar does not work because there's unintended sharing
-; (e.g. to invocation of the same rules are interpreted by Rosette as the same)
+; (e.g. two invocation of the same rules are interpreted by Rosette as the same)
+; TODO for variable length arrays (like signers), allow specifying a length range
+; TODO create union struct named after the each union type instead of the generic :union: (for readability)
 
 (require
   (rename-in nanopass [extends extends-language]) ; conflicts with rosette
@@ -514,7 +516,7 @@
         ((variable-length-array ,p ,[sts] ,v) sts)
         ((fixed-length-array ,p ,[sts] ,v) sts)
         ((enum ,p (,i* ,c*) ...) (hash))
-        ((union ,p (,i1 ,i2) ,[sts*] ...) (apply hash-union sts*))
+        ((union ,p (,i1 ,i2) ,[sts*] ...) (apply hash-union sts*)) ; TODO make type for union (for readability)
         ((struct ,p ,decl* ...)
          (let* ([get-decl-pair
                  (λ (decl)
@@ -564,81 +566,96 @@
   (if (string? size)
       (hash-ref consts size)
       size))
-(define (make-sequence seq-t elem-type-rule size)
+(define (make-sequence stx seq-t elem-type-rule size)
   ; seq-t is list or vector
+  ; elem-type-rule is syntax or string
   ; size is a numeric value
   #`(#,seq-t
-     #,@(for/list ([i (in-range size)]) elem-type-rule))) ; TODO: for use as a macro, we need different slocs for the rules
-(define (make-list consts elem-type-rule size)
+     #,@(for/list ([i (in-range size)]) (instantiate-rule stx elem-type-rule))))
+(define (make-list stx consts elem-type-rule size)
   (let ([n (size->number consts size)])
-    (make-sequence #'list elem-type-rule n)))
-;struct union (tag value) #:transparent)
-(define max-seq-len 2)
-(define (make-vector consts elem-type-rule size) ; variable-size array
+    (make-sequence stx #'list elem-type-rule n)))
+(define max-seq-len 2) ; we never make variable-length sequences bigger than that
+(define (make-vector stx consts elem-type-rule size) ; variable-size array
   (let ([n (size->number consts size)])
     (let ([m (if (or (not n) (> n max-seq-len)) max-seq-len n)])
-      (make-sequence #'vector elem-type-rule m))))
+      (make-sequence stx #'vector elem-type-rule m))))
+
+; generate unique indices (used to generate unique slocs)
+(define get-index!
+  (generator
+   ()
+   (let loop ([index 0])
+     (yield index)
+     (loop (+ index 1)))))
 
 ; generate an identifier for a grammar rule:
 (define (format-id/unique-loc str [stx #f])
-  ; generate unique indices
-  (define get-index! (generator ()
-                                (let loop ([index 0])
-                                  (yield index)
-                                  (loop (+ index 1)))))
   ; Rosette seems to be relying on source-location information to create symbolic variable names.
   ; Since we want all grammar holes to be independent, we need to use a unique location each time.
   ; This is only useful if using the grammar generator in a macro.
-  (format-id stx "~a" str #:source (make-srcloc (format "~a:~a" str (get-index!)) 1 0 1 0)))
+  (format-id stx "~a" str #:source (make-srcloc (format "generated-sloc:~a" (get-index!)) 1 0 1 0)))
 
+; make a hole for a particular type name (provided as a string)
 (define (rule-hole str)
-  #`(#,(format-id/unique-loc (string-append str "-rule"))))
+  #`(#,(format-id/unique-loc (string-append str "-rule")))) ; TODO: unique-loc not needed anymore since we call instantiate-rule later?
+
+(define (instantiate-rule stx-context r/stx)
+  ; assign a fresh sloc to r/stx using a datum->syntax . syntax->datum round-trip
+  ; TODO: this does not work
+  (datum->syntax stx-context (syntax->datum r/stx) (make-srcloc (format "generated-sloc:~a" (get-index!)) 1 0 1 0)))
 
 (define (value-rule stx v)
   (if (string? v)
-      (format-id/unique-loc v stx)
+      (format-id/unique-loc v stx) ; TODO unique-loc needed?
       v))
 
 (define (built-in-structs stx)
   ; we put ":" in the name to avoid clashes with XDR names
+  ; TODO ":" is really ugly
   (list
    (make-struct-type stx ":byte-array:" '("value"))
    (make-struct-type stx ":union:" '("tag" "value"))))
 
 (define-pass make-rule : (L2 Spec) (ir stx type-name consts overrides) -> * (rule)
-  ; TODO: for use as a macro, we need unique source locations for each sub-rule invocation (including e.g. (?? bitvector 32))
+  ; TODO could stx be a parameter somehow?
+  ; TODO: for use as a macro, we need unique source locations for each sub-rule invocation
+  ; This does include rules of the form (?? bitvector 32)
   (Spec : Spec (ir) -> * (rule)
         [(,p ,i)
          (let ([key (reverse p)])
-           (if (and
-                (dict-has-key? overrides key)
-                (eq? (car (dict-ref overrides key)) 'key-set))
-               (let* ([vals (map (λ (s) (bitvector->natural (strkey->bv s))) (cdr (dict-ref overrides key)))]
-                      [vals/syn (map (λ (v) #`(:byte-array: (bv #,v 256))) vals)])
-                 #`(choose #,@vals/syn))
-               (case i
-                 [("opaque") #'(?? (bitvector 8))]
-                 [("int" "unsigned int") #'(?? (bitvector 32))]
-                 [("hyper" "unsigned hyper") #'(?? (bitvector 64))]
-                 [else (rule-hole i)])))]
+           (if
+            (and
+             (dict-has-key? overrides key)
+             (eq? (car (dict-ref overrides key)) 'key-set))
+            (let* ([vals (map (λ (s) (bitvector->natural (strkey->bv s))) (cdr (dict-ref overrides key)))]
+                   [vals/syn (map (λ (v) #`(#,(format-id stx "~a" ":byte-array:") (bv #,v 256))) vals)])
+              #`(choose #,@vals/syn))
+            (case i
+              [("opaque") #'(?? (bitvector 8))]
+              [("int" "unsigned int") #'(?? (bitvector 32))]
+              [("hyper" "unsigned hyper") #'(?? (bitvector 64))]
+              [else (rule-hole i)])))]
         [(struct ,p ,[decl-body*] ...)
-         (let ([struct-name (format-id/unique-loc (struct-name p) stx)]) ; TODO unique loc needed?
+         (let ([struct-name (format-id/unique-loc (struct-name p) stx)]) ; TODO unique loc needed? probably not
            #`(#,struct-name #,@decl-body*))]
-        [(string ,p ,c) (make-vector consts #`(?? (bitvector 8)) c)]
+        [(string ,p ,c) (make-vector stx consts #`(?? (bitvector 8)) c)]
         [(variable-length-array ,p ,[elem-rule] ,v)
-         (make-vector consts elem-rule v)]
+         (make-vector stx consts elem-rule v)]
         [(fixed-length-array ,p ,type-spec ,v)
          ; special case for opaque fixed-length arrays: we use :byte-array:
          (guard
           (let ([opaque?
-                 (nanopass-case (L2 Spec) type-spec
-                                [(,p ,i) (equal? i "opaque")]
-                                [else #f])])
+                 (nanopass-case
+                  (L2 Spec)
+                  type-spec
+                  [(,p ,i) (equal? i "opaque")]
+                  [else #f])])
             opaque?))
          (let ([n (size->number consts v)])
-           #`(:byte-array: (?? (bitvector #,(* n 8)))))]
+           #`(#,(format-id stx "~a" ":byte-array:") (?? (bitvector #,(* n 8)))))]
         [(fixed-length-array ,p ,[elem-rule] ,v)
-         (make-list consts elem-rule v)]
+         (make-list stx consts elem-rule v)]
         [(enum ,p (,i* ,c*) ...)
          (let ([bv* (map (λ (i) #`(bv #,i 32)) i*)])
            (if (> (length bv*) 1)
@@ -646,14 +663,14 @@
                (car bv*)))]
         [(union ,p (,i1 ,i2) ,[rule*] ...)
          (if (> (length rule*) 1)
-                   #`(choose #,@rule*)
-                   (car rule*))])
+                   #`(choose #,@(map (λ (x) (instantiate-rule stx x)) rule*))
+                   (instantiate-rule stx (car rule*)))])
+  (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule)
+                   [(,v ,[rule])
+                    #`(#,(format-id stx "~a" ":union:") (bv #,(value-rule stx v) 32) #,(instantiate-rule stx rule))])
   (Decl : Decl (ir) -> * (rule)
         [(,i ,[rule]) rule]
         [,void #'null])
-  (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule)
-                   [(,v ,[rule])
-                    #`(:union: (bv #,(value-rule stx v) 32) #,rule)])
   #`(#,(format-id/unique-loc (string-append type-name "-rule")) #,(Spec ir)))
 
 (module+ test

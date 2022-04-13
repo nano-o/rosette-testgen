@@ -7,8 +7,10 @@
 ; Does Rosette support the required primitives (seems so, it has map and flatten on lists)
 ; Or maybe we just use plain state? set! is lifted...
 
+
 (require
-  "Stellar-grammar.rkt"
+  ;"Stellar-grammar.rkt"
+  (for-syntax "grammar-generator.rkt" "read-datums.rkt" "Stellar-overrides.rkt" syntax/parse)
   "path-explorer.rkt"
   "generate-tests.rkt"
   (only-in list-util zip)
@@ -16,6 +18,20 @@
   #;"serialize.rkt"
   #;rosette/lib/synthax
   #;(only-in list-util zip))
+
+(define-for-syntax Stellar-xdr-types
+  (read-datums "./Stellar.xdr-types"))
+
+(define-syntax (generate-grammar stx)
+  (syntax-parse stx
+    [((~literal generate-grammar))
+     (xdr-types->grammar
+      Stellar-xdr-types
+      overrides
+      stx
+      (set "TransactionEnvelope" "TestLedger" "TestCaseResult"))]))
+
+(generate-grammar)
 
 ; 10 millon stroops = 1 XLM
 (define (xlm->stroop x)
@@ -32,7 +48,6 @@
         [i (- 31 (* n 8))]
         [j (- 32 (* (+ n 1) 8))])
     (extract i j b)))
-
 
 ; spec could be a function from ledger state to ledger state + codes,
 ; like a state monad, but a non-success code aborts the execution
@@ -78,12 +93,13 @@
 ; - Make sure to understand which forms the path-explorer will consider to be nodes in the control-flow graph.
 
 (define (account-entry-for? ledger-entry account-id)
-    (let* ([type (:union:-tag (LedgerEntry-data ledger-entry))])
-      (and (equal? type (bv ACCOUNT 32))
-           (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
-                  [id/pubkey (AccountEntry-accountID account-entry)] ; that's a PublicKey
-                  [id (:union:-value id/pubkey)])
-             (equal? id account-id)))))
+  ; true iff the ledger entry is an account entry with the given account ID.
+  (let* ([type (:union:-tag (LedgerEntry-data ledger-entry))])
+    (and (equal? type (bv ACCOUNT 32))
+         (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
+                [id/pubkey (AccountEntry-accountID account-entry)] ; that's a PublicKey
+                [id (:union:-value id/pubkey)])
+           (equal? id account-id)))))
 
 (define (account-exists? ledger-entries account-id)
   ; account-id is a be a uint256
@@ -97,7 +113,7 @@
 (define (account-balance ledger-entries account-id)
   ; account-id must be a uint256
   (if (null? ledger-entries)
-      (error "account does not exist")
+      (error "account not found")
       (let ([ledger-entry (car ledger-entries)])
         (if (account-entry-for? ledger-entry account-id)
             (let* ([account (:union:-value (LedgerEntry-data ledger-entry))])
@@ -122,7 +138,6 @@
       (assume (equal? op-type (bv CREATE_ACCOUNT 32)))
       (let ([new-account-id (:union:-value (CreateAccountOp-destination (:union:-value (Operation-body op))))]
             [starting-balance (CreateAccountOp-startingBalance (:union:-value (Operation-body op)))])
-        ; TODO in what order should the possible error conditions be checked?
         (if (account-exists? ledger-entries new-account-id)
             (bv CREATE_ACCOUNT_ALREADY_EXIST 32)
             (let* ([source-account (Transaction-sourceAccount tx)]
