@@ -33,7 +33,6 @@
     (xdr/guile-rpc->base64 guile-rep type)))
 
 (define (sign-all tx/base64 signers/bv keys)
-  ; this will not be usefull because once the signing threshold is met, the transaction fails if there are more signatures.
   (for/fold ([acc tx/base64])
             ([k/bv signers/bv])
     (sign acc (get-private-key keys k/bv))))
@@ -59,12 +58,12 @@
      "serialize and sign a transaction"
      ; some test data
      (define priv "SCI3M6F4CNX6A4RBPGZDJDYZGZSEF7ILYZJRT2FMXH3IYEQAHGYPWSBU")
-     (define signed-tx "AAAAAgAAAAAsdGXTmQeRxfdCXsed43tttqpYY1N/yY0U2KBOEK39VAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAmi2B8eXD7hP3AM1OpSWX06tiqYqp/c8AnC9trjJ5hIYAAAAAAJiWgAAAAAAAAAABEK39VAAAAECgKT1XbANJwFUUG7wUc2szI6JrJNMWtWKCGoEkVBZHNSCpXUmFkyP5TiIADnQHaVGvM59ixpIqNE/YP6MMYu8D")
+     (define signed-tx "AAAAAgAAAAAsdGXTmQeRxfdCXsed43tttqpYY1N/yY0U2KBOEK39VAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAmi2B8eXD7hP3AM1OpSWX06tiqYqp/c8AnC9trjJ5hIYAAAAAAJiWgAAAAAAAAAABEK39VAAAAECtyD3qqWTm7SQ52uvlofetjivROnBB4baD66iUpOjSNlva+YKEFW6QP0CYm4rO9y8T6eWemJbEInUjUnZn9NoL")
      (check-equal?
       (sign (xdr/guile-rpc->base64 scm-tx "TransactionEnvelope") priv) signed-tx))
     (test-case
      "serialize and sign all"
-     (define signed "AAAAAgAAAAAsdGXTmQeRxfdCXsed43tttqpYY1N/yY0U2KBOEK39VAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAmi2B8eXD7hP3AM1OpSWX06tiqYqp/c8AnC9trjJ5hIYAAAAAAJiWgAAAAAAAAAACMnmEhgAAAECdCKoIqJg+L2PPXCS65vu3U/2GXMiVr338giidkRwS7nM6vtE1Q0fzuEm10+4PzvDHiwP27RtRdI2zAdsmrB4OEK39VAAAAECgKT1XbANJwFUUG7wUc2szI6JrJNMWtWKCGoEkVBZHNSCpXUmFkyP5TiIADnQHaVGvM59ixpIqNE/YP6MMYu8D")
+     (define signed "AAAAAgAAAAAsdGXTmQeRxfdCXsed43tttqpYY1N/yY0U2KBOEK39VAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAmi2B8eXD7hP3AM1OpSWX06tiqYqp/c8AnC9trjJ5hIYAAAAAAJiWgAAAAAAAAAACMnmEhgAAAEDGPvS6/iK65PPq7tk/2dCKmJ5y1dvKW5c+ZRE+yl0roP95gnxk7hyTc3ot7Ndvx9JowiljBAg1Wh7LOZ5Z+FwIEK39VAAAAECtyD3qqWTm7SQ52uvlofetjivROnBB4baD66iUpOjSNlva+YKEFW6QP0CYm4rO9y8T6eWemJbEInUjUnZn9NoL")
      (check-equal?
-      (sign-all (xdr/guile-rpc->base64 scm-tx "TransactionEnvelope") signers keys)
+      (sign-all (xdr/guile-rpc->base64 scm-tx "TransactionEnvelope") (map strkey->bv signers) keys)
       signed))))
