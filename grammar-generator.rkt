@@ -20,6 +20,7 @@
 ; (e.g. two invocation of the same rules are interpreted by Rosette as the same)
 ; TODO for variable length arrays (like signers), allow specifying a length range
 ; TODO create union struct named after the each union type instead of the generic :union: (for readability)
+; TODO clean up make-rule
 
 (require
   (rename-in nanopass [extends extends-language]) ; conflicts with rosette
@@ -27,7 +28,7 @@
   (only-in list-util zip)
   racket/syntax
   racket/generator
-  racket/pretty
+  ;racket/pretty
   graph
   "strkey-utils.rkt"
   (only-in rosette bitvector->natural)
@@ -566,20 +567,20 @@
   (if (string? size)
       (hash-ref consts size)
       size))
-(define (make-sequence stx seq-t elem-type-rule size)
+(define (make-sequence stx seq-t elem-type-rule-thunk size)
   ; seq-t is list or vector
   ; elem-type-rule is syntax or string
   ; size is a numeric value
   #`(#,seq-t
-     #,@(for/list ([i (in-range size)]) (instantiate-rule stx elem-type-rule))))
-(define (make-list stx consts elem-type-rule size)
+     #,@(for/list ([i (in-range size)]) (elem-type-rule-thunk))))
+(define (make-list stx consts elem-type-rule-thunk size)
   (let ([n (size->number consts size)])
-    (make-sequence stx #'list elem-type-rule n)))
+    (make-sequence stx #'list elem-type-rule-thunk n)))
 (define max-seq-len 2) ; we never make variable-length sequences bigger than that
-(define (make-vector stx consts elem-type-rule size) ; variable-size array
+(define (make-vector stx consts elem-type-rule-thunk size) ; variable-size array
   (let ([n (size->number consts size)])
     (let ([m (if (or (not n) (> n max-seq-len)) max-seq-len n)])
-      (make-sequence stx #'vector elem-type-rule m))))
+      (make-sequence stx #'vector elem-type-rule-thunk m))))
 
 ; generate unique indices (used to generate unique slocs)
 (define get-index!
@@ -590,7 +591,7 @@
      (loop (+ index 1)))))
 
 ; generate an identifier for a grammar rule:
-(define (format-id/unique-loc str [stx #f])
+(define (format-id/unique-sloc str [stx #f])
   ; Rosette seems to be relying on source-location information to create symbolic variable names.
   ; Since we want all grammar holes to be independent, we need to use a unique location each time.
   ; This is only useful if using the grammar generator in a macro.
@@ -598,16 +599,11 @@
 
 ; make a hole for a particular type name (provided as a string)
 (define (rule-hole str)
-  #`(#,(format-id/unique-loc (string-append str "-rule")))) ; TODO: unique-loc not needed anymore since we call instantiate-rule later?
-
-(define (instantiate-rule stx-context r/stx)
-  ; assign a fresh sloc to r/stx using a datum->syntax . syntax->datum round-trip
-  ; TODO: this does not work
-  (datum->syntax stx-context (syntax->datum r/stx) (make-srcloc (format "generated-sloc:~a" (get-index!)) 1 0 1 0)))
+  #`(#,(format-id/unique-sloc (string-append str "-rule")))) ; TODO: unique-loc not needed anymore since we call instantiate-rule later?
 
 (define (value-rule stx v)
   (if (string? v)
-      (format-id/unique-loc v stx) ; TODO unique-loc needed?
+      (format-id/unique-sloc v stx) ; TODO unique-loc needed?
       v))
 
 (define (built-in-structs stx)
@@ -617,11 +613,11 @@
    (make-struct-type stx ":byte-array:" '("value"))
    (make-struct-type stx ":union:" '("tag" "value"))))
 
-(define-pass make-rule : (L2 Spec) (ir stx type-name consts overrides) -> * (rule)
-  ; TODO could stx be a parameter somehow?
+(define-pass make-rule : (L2 Spec) (ir stx type-name consts overrides) -> * (rule-thunk)
+  ; TODO could stx and overrides be a parameters?
   ; TODO: for use as a macro, we need unique source locations for each sub-rule invocation
   ; This does include rules of the form (?? bitvector 32)
-  (Spec : Spec (ir) -> * (rule)
+  (Spec : Spec (ir) -> * (rule-thunk)
         [(,p ,i)
          (let ([key (reverse p)])
            (if
@@ -630,18 +626,18 @@
              (eq? (car (dict-ref overrides key)) 'key-set))
             (let* ([vals (map (λ (s) (bitvector->natural (strkey->bv s))) (cdr (dict-ref overrides key)))]
                    [vals/syn (map (λ (v) #`(#,(format-id stx "~a" ":byte-array:") (bv #,v 256))) vals)])
-              #`(choose #,@vals/syn))
+              (λ () #`(choose #,@vals/syn)))
             (case i
-              [("opaque") #'(?? (bitvector 8))]
-              [("int" "unsigned int") #'(?? (bitvector 32))]
-              [("hyper" "unsigned hyper") #'(?? (bitvector 64))]
-              [else (rule-hole i)])))]
-        [(struct ,p ,[decl-body*] ...)
-         (let ([struct-name (format-id/unique-loc (struct-name p) stx)]) ; TODO unique loc needed? probably not
-           #`(#,struct-name #,@decl-body*))]
-        [(string ,p ,c) (make-vector stx consts #`(?? (bitvector 8)) c)]
-        [(variable-length-array ,p ,[elem-rule] ,v)
-         (make-vector stx consts elem-rule v)]
+              [("opaque") (λ () #`(#,(format-id/unique-sloc "??" stx) (bitvector 8)))]
+              [("int" "unsigned int") (λ () #`(#,(format-id/unique-sloc "??" stx) (bitvector 32)))]
+              [("hyper" "unsigned hyper") (λ () #`(#,(format-id/unique-sloc "??" stx) (bitvector 64)))]
+              [else (λ () (rule-hole i))])))]
+        [(struct ,p ,[rule-thunk*] ...)
+         (let ([struct-name (format-id/unique-sloc (struct-name p) stx)]) ; TODO unique loc needed? probably not
+           (λ () #`(#,struct-name #,@(map (λ (f) (f)) rule-thunk*))))]
+        [(string ,p ,c) (λ () (make-vector stx consts (λ () #`(#,(format-id/unique-sloc "??" stx) (bitvector 8))) c))]
+        [(variable-length-array ,p ,[elem-rule-thunk] ,v)
+         (λ () (make-vector stx consts elem-rule-thunk v))]
         [(fixed-length-array ,p ,type-spec ,v)
          ; special case for opaque fixed-length arrays: we use :byte-array:
          (guard
@@ -653,25 +649,26 @@
                   [else #f])])
             opaque?))
          (let ([n (size->number consts v)])
-           #`(#,(format-id stx "~a" ":byte-array:") (?? (bitvector #,(* n 8)))))]
-        [(fixed-length-array ,p ,[elem-rule] ,v)
-         (make-list stx consts elem-rule v)]
+           (λ () #`(#,(format-id stx "~a" ":byte-array:") (#,(format-id/unique-sloc "??" stx) (bitvector #,(* n 8))))))]
+        [(fixed-length-array ,p ,[elem-rule-thunk] ,v)
+         (λ () (make-list stx consts elem-rule-thunk v))]
         [(enum ,p (,i* ,c*) ...)
          (let ([bv* (map (λ (i) #`(bv #,i 32)) i*)])
            (if (> (length bv*) 1)
                #`(choose #,@bv*)
                (car bv*)))]
-        [(union ,p (,i1 ,i2) ,[rule*] ...)
-         (if (> (length rule*) 1)
-                   #`(choose #,@(map (λ (x) (instantiate-rule stx x)) rule*))
-                   (instantiate-rule stx (car rule*)))])
-  (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule)
-                   [(,v ,[rule])
-                    #`(#,(format-id stx "~a" ":union:") (bv #,(value-rule stx v) 32) #,(instantiate-rule stx rule))])
-  (Decl : Decl (ir) -> * (rule)
-        [(,i ,[rule]) rule]
-        [,void #'null])
-  #`(#,(format-id/unique-loc (string-append type-name "-rule")) #,(Spec ir)))
+        [(union ,p (,i1 ,i2) ,[rule-thunk*] ...)
+         (λ ()
+           (if (> (length rule-thunk*) 1)
+               #`(choose #,@(map (λ (x) (x)) rule-thunk*))
+               ((car rule-thunk*))))])
+  (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule-thunk)
+                   [(,v ,[rule-thunk])
+                    (λ () #`(#,(format-id stx "~a" ":union:") (bv #,(value-rule stx v) 32) #,(rule-thunk)))])
+  (Decl : Decl (ir) -> * (rule-thunk)
+        [(,i ,[rule-thunk]) rule-thunk]
+        [,void (λ () #'null)])
+  #`(#,(format-id/unique-sloc (string-append type-name "-rule")) #,((Spec ir)))) ; TODO unique-sloc needed?
 
 (module+ test
   (let ([t "SimplePaymentResult"])

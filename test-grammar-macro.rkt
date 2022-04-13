@@ -14,7 +14,7 @@
      (assume (bvuge (car two-ints) (bv 1 32)))
      (assume (bveq (cadr two-ints) (bv 2 32))))))
 
-(print-forms sol)
+;(print-forms sol)
 
 (define-syntax-parser gen-g2
   ([_] (let ([bv32-hole #'(?? (bitvector 32))])
@@ -31,7 +31,7 @@
    (begin
      (assume (not (bveq (cadr two-ints2) (car two-ints2)))))))
 
-(print-forms sol2)
+;(print-forms sol2)
 
 (define-syntax-parser gen-g3
   ([_] (let ([bv32-hole #'(?? (bitvector 32))])
@@ -67,5 +67,30 @@
 
 ;(print-forms sol4)
 
-(define-grammar (g5)
-  (rule-1 (list (?? (bitvector 32)) (?? (bitvector 32)))))
+(require 
+  (for-syntax racket/generator))
+
+(define-for-syntax get-index!
+  (generator
+   ()
+   (let loop ([index 0])
+     (yield index)
+     (loop (+ index 1)))))
+
+(define-syntax-parser gen-g5
+  ([_] (let ([make-hole
+              (λ ()
+                #`(#,(format-id this-syntax "~a" "??" #:source (make-srcloc (format "generated-sloc:~a" (get-index!)) 1 0 1 0)) (bitvector 32)))])
+         #`(define-grammar (#,(format-id this-syntax "g5"))
+             (rule-1 (list #,(make-hole) #,(make-hole)))))))
+
+(gen-g5)
+
+(define two-ints5 (g5 #:depth 1))
+
+(define sol5
+  (solve
+   (begin
+     (assume (not (bveq (cadr two-ints5) (car two-ints5)))))))
+
+(print-forms sol5)

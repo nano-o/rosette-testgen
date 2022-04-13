@@ -18,6 +18,7 @@
     (("TestLedger" "ledgerEntries") len . 1)
     (("TransactionV1Envelope" "signatures") len . 0) ; we'll sign later
     (("AccountEntry" "signers") len . 0) ; no extra signers for now
+    ; TODO allow using a list, e.g. '(0 1) for 0 or 1 signers
     (("MuxedAccount" "ed25519") ,@keys)
     (("MuxedAccount" "med25519" "ed25519") ,@keys)
     (("PublicKey" "ed25519") ,@keys)
