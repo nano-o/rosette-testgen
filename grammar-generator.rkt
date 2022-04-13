@@ -16,12 +16,11 @@
 ; TODO there's pretty much no error checking
 ; TODO write tests
 ; TODO a pass to remove recursion or limit its depth (ClaimPredicate)? For now I manually removed the recursion from the XDR spec.
-; TODO using this in a macro to generate a grammar does not work because there's unintended sharing
-; (e.g. two invocation of the same rules are interpreted by Rosette as the same)
 ; TODO for variable length arrays (like signers), allow specifying a length range
 ; TODO create union struct named after the each union type instead of the generic :union: (for readability)
 ; TODO clean up make-rule
 ; TODO add tests to make sure the grammar macro is working...
+; TODO now that we have a working grammar macro, how do we use (e.g. we have several modules which depend on it...)
 
 (require
   (rename-in nanopass [extends extends-language]) ; conflicts with rosette
@@ -309,6 +308,7 @@
 
 ; overridess must be a dict mapping paths to natural numbers
 ; NOTE could be done in make-rule instead of rewriting L1
+; TODO move to make-rule in order to support ranges
 (define-pass override-lengths : L1 (ir overridess) -> L1 ()
   (Def : Def (ir) -> Def ()
        ((define-type ,i ,[Spec : type-spec (list i) -> type-spec2])

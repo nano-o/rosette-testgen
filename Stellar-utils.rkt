@@ -1,14 +1,17 @@
 #lang rosette
 
 (require
-  "Stellar-grammar.rkt"
+  "Stellar-grammar-merge-sponsored-demo.rkt"
   rosette/lib/destruct)
 
-(provide (all-defined-out))
+(provide (all-defined-out) (all-from-out "Stellar-grammar-merge-sponsored-demo.rkt"))
 
 ; 10 millon stroops = 1 XLM
 (define (xlm->stroop x)
   (* x 10000000))
+
+(define (to-uint64 bitvect)
+  (zero-extend bitvect (bitvector 64)))
 
 (define (source-account tx-envelope)
   ; returns the ed25519 public key of this account (as a bitvector)
@@ -46,3 +49,9 @@
 
 (define (master-key-threshold account-entry) ; get the master key threshold
   (thresholds-ref (AccountEntry-thresholds account-entry) 0))
+
+(define (min-balance/32 lh)
+  ; for now: 2 times the base reserve
+  ; baseReserve is a uint32
+  ; we return a uint64 result
+  (bvmul (LedgerHeader-baseReserve lh)) (bv 2 32))

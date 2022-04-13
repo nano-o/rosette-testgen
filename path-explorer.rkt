@@ -17,6 +17,8 @@
 ; TODO should we allow non-determinism in the specs?
 ; For example, the error code returns by a transaction could depend on the order in which conditions are checked (if multiple conditions are violated).
 ; TODO it might make sense to restrict specs to a total fragment of Racket
+; TODO it might be better to explicitly mark the control-flow nodes that are subject to exhaustive exploration
+; e.g. we could have if/e, and/e, or/e etc.
 
 (begin-for-syntax
   (define debug? #f)

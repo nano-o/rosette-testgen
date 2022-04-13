@@ -7,20 +7,20 @@
 ; Does Rosette support the required primitives (seems so, it has map and flatten on lists)
 ; Or maybe we just use plain state? set! is lifted...
 
+; NOTE: pick the right grammar in Stellar-utils.rkt
 
 (require
-  ;"Stellar-grammar.rkt"
-  (for-syntax "grammar-generator.rkt" "read-datums.rkt" "Stellar-overrides.rkt" syntax/parse)
+  "Stellar-utils.rkt"
+  ;(for-syntax "grammar-generator.rkt" "read-datums.rkt" "Stellar-overrides.rkt" syntax/parse)
   "path-explorer.rkt"
   "generate-tests.rkt"
   (only-in list-util zip)
-  macro-debugger/expand
-  #;rosette/lib/synthax)
+  macro-debugger/expand)
 
-(define-for-syntax Stellar-xdr-types
+#;(define-for-syntax Stellar-xdr-types
   (read-datums "./Stellar.xdr-types"))
 
-(define-syntax (generate-grammar stx)
+#;(define-syntax (generate-grammar stx)
   (syntax-parse stx
     [((~literal generate-grammar))
      (xdr-types->grammar
@@ -29,7 +29,7 @@
       stx
       (set "TransactionEnvelope" "TestLedger" "TestCaseResult"))]))
 
-(generate-grammar)
+#;(generate-grammar)
 
 ; 10 millon stroops = 1 XLM
 (define (xlm->stroop x)

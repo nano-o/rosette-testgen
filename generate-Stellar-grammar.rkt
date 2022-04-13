@@ -17,7 +17,7 @@
 (pretty-write grammar o)
 
 ; write to file
-(with-output-to-file "Stellar-grammar.rkt"
+(with-output-to-file "Stellar-grammar-merge-sponsored-demo.rkt"
   #:exists 'replace
   (λ ()
     (printf (get-output-string o))))
