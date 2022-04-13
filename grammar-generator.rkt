@@ -21,6 +21,7 @@
 ; TODO for variable length arrays (like signers), allow specifying a length range
 ; TODO create union struct named after the each union type instead of the generic :union: (for readability)
 ; TODO clean up make-rule
+; TODO add tests to make sure the grammar macro is working...
 
 (require
   (rename-in nanopass [extends extends-language]) ; conflicts with rosette
@@ -628,14 +629,14 @@
                    [vals/syn (map (λ (v) #`(#,(format-id stx "~a" ":byte-array:") (bv #,v 256))) vals)])
               (λ () #`(choose #,@vals/syn)))
             (case i
-              [("opaque") (λ () #`(#,(format-id/unique-sloc "??" stx) (bitvector 8)))]
-              [("int" "unsigned int") (λ () #`(#,(format-id/unique-sloc "??" stx) (bitvector 32)))]
-              [("hyper" "unsigned hyper") (λ () #`(#,(format-id/unique-sloc "??" stx) (bitvector 64)))]
+              [("opaque") (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 8)))]
+              [("int" "unsigned int") (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 32)))]
+              [("hyper" "unsigned hyper") (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 64)))]
               [else (λ () (rule-hole i))])))]
         [(struct ,p ,[rule-thunk*] ...)
          (let ([struct-name (format-id/unique-sloc (struct-name p) stx)]) ; TODO unique loc needed? probably not
            (λ () #`(#,struct-name #,@(map (λ (f) (f)) rule-thunk*))))]
-        [(string ,p ,c) (λ () (make-vector stx consts (λ () #`(#,(format-id/unique-sloc "??" stx) (bitvector 8))) c))]
+        [(string ,p ,c) (λ () (make-vector stx consts (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 8))) c))]
         [(variable-length-array ,p ,[elem-rule-thunk] ,v)
          (λ () (make-vector stx consts elem-rule-thunk v))]
         [(fixed-length-array ,p ,type-spec ,v)
@@ -649,7 +650,7 @@
                   [else #f])])
             opaque?))
          (let ([n (size->number consts v)])
-           (λ () #`(#,(format-id stx "~a" ":byte-array:") (#,(format-id/unique-sloc "??" stx) (bitvector #,(* n 8))))))]
+           (λ () #`(#,(format-id stx "~a" ":byte-array:") (#,(format-id/unique-sloc "??" #'()) (bitvector #,(* n 8))))))]
         [(fixed-length-array ,p ,[elem-rule-thunk] ,v)
          (λ () (make-list stx consts elem-rule-thunk v))]
         [(enum ,p (,i* ,c*) ...)

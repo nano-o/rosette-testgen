@@ -15,7 +15,7 @@
   "generate-tests.rkt"
   (only-in list-util zip)
   macro-debugger/expand
-  rosette/lib/synthax)
+  #;rosette/lib/synthax)
 
 (define-for-syntax Stellar-xdr-types
   (read-datums "./Stellar.xdr-types"))
