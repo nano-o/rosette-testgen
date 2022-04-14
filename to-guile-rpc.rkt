@@ -36,7 +36,8 @@
 
 (define-syntax-class xdr-rep
   #:literals (list bv vector null bitvector :union: :byte-array:)
-  [pattern (:union: tag:xdr-rep val:xdr-rep)
+  #:commit ; no backtracking
+  [pattern (:union: tag:xdr-rep val:xdr-rep #;(~do (println this-syntax)))
            #:attr out #'(cons tag.out val.out)]
   [pattern (:byte-array: (bv val:number size:number))
            ; opaque fixed-sized array -> list of bytes
@@ -57,14 +58,14 @@
   [pattern (vector e*:xdr-rep ...)
            ; variable-size array
            #:attr out #'`#(,e*.out ...)]
+  [pattern (list e*:xdr-rep ...+)
+           ; fixed-size array
+           #:attr out #'`(,e*.out ...)]
   [pattern (struct-name:id e*:xdr-rep ...)
            #:when (let ([type-id (format-id #'() "struct:~a" #'struct-name)])
                     (and
                      (identifier-binding type-id)
                      (struct-type? (eval-syntax type-id ns))))
-           #:attr out #'`(,e*.out ...)]
-  [pattern (list e*:xdr-rep ...+)
-           ; fixed-size array
            #:attr out #'`(,e*.out ...)]
   [pattern n:number
            #:attr out #'n]

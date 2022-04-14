@@ -21,7 +21,6 @@
 ; The variable part of the test is the ledger state in which this operation is applied and the contents of the ACCOUNT_MERGE operation.
 
 ; NOTE: see Stellar-overrides.rkt for constraints on array sizes (e.g. num sponsors)
-; NOTE: I edited the grammar file by hand to have from 1 to 3 ledger entries and from 0 to 2 SponsorshipDescriptors in an AccountEntry.
 
 ; First, we establish some base assumptions.
 (define (account-okay? account-entry ledger-header)
@@ -33,7 +32,7 @@
    ; numSubEntries equals the number of signers (in this case 1)
    (bveq (AccountEntry-numSubEntries account-entry) (bv 1 32))
    ; balance is sufficient to pay the fee for one operation and maintain the base reserve:
-   (bvsge (AccountEntry-balance account-entry)
+   (bveq (AccountEntry-balance account-entry)
           (to-uint64
            (bvadd
             (LedgerHeader-baseFee ledger-header)
@@ -55,8 +54,16 @@
         (bveq (entry-type e) (bv ACCOUNT 32))
         ; it has a v1 extension:
         (bveq (:union:-tag (LedgerEntry-ext e)) (bv 1 32))
+        ; sponsoring ID is not self:
+        (let ([entry-sponsor (LedgerEntryExtensionV1-sponsoringID (:union:-value (LedgerEntry-ext e)))]
+              [account-id (AccountEntry-accountID (:union:-value (LedgerEntry-data e)))])
+          (if (bveq (:union:-tag entry-sponsor) (bv 1 32)) ; if it has a non-null sponsor
+              (not (PublicKey-equal?
+                    (:union:-value entry-sponsor)
+                    account-id))
+              #t))
         ; satisfies the account-okay? predicate:
-        (account-okay? (:union:-value (LedgerEntry-data e)) ledger-header))) 
+        (account-okay? (:union:-value (LedgerEntry-data e)) ledger-header)))
      ledger-entries)
     ; there are no duplicate accounts in the ledger:
     (not (duplicate-accounts? ledger-entries))
@@ -138,6 +145,10 @@
    (λ (gen) (test-spec/path-explorer gen symbolic-ledger symbolic-tx-envelope))
    symbols)
   (define ts (get-test-inputs))
-  #;(display-test-inputs)
+  (displayln (format "there are ~a test cases" (length ts)))
+  (for ([(i t)  (in-dict (zip (range (length ts)) ts))])
+    (let ([output (run-test t)])
+      (displayln (format "test number ~a returned ~a" i output)))
+    (newline))
   (create-test-files)
   (displayln (format "finished generating ~a tests" (length ts))))

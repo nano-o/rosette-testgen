@@ -19,6 +19,7 @@
 ; TODO it might make sense to restrict specs to a total fragment of Racket
 ; TODO it might be better to explicitly mark the control-flow nodes that are subject to exhaustive exploration
 ; e.g. we could have if/e, and/e, or/e etc.
+; TODO this whole thing only works if we have no symbolic unions (e.g. if a list can have different length we're in trouble). This is because Rosette will execute the same code multiple times for each union member.
 
 (begin-for-syntax
   (define debug? #f)
@@ -99,6 +100,7 @@
   (define-syntax-class l1
     #:description "an expression amenable to path-exploration"
     #:literals (begin let let* if or and assume case)
+    #:commit ; no bactracking
     [pattern (begin e*:l1 ...)
              #:attr res #`(begin e*.res ...)]
     [pattern (let* ([x*:id e*:l1] ...) body:l1)

@@ -91,3 +91,8 @@
                  [entry-id/bv (:byte-array:-value (:union:-value entry-pubkey))])
             (account-exists? (cdr ledger-entries)  entry-id/bv))))
        (duplicate-accounts? (cdr ledger-entries)))))
+
+(define (PublicKey-equal? k1 k2)
+  (bveq
+   (:byte-array:-value (:union:-value k1))
+   (:byte-array:-value (:union:-value k2))))

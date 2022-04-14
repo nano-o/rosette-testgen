@@ -506,7 +506,9 @@
    (Memo-rule
     (choose
      (:union: (bv MEMO_NONE 32) null)
-     (:union: (bv MEMO_TEXT 32) (vector (?? (bitvector 8)) (?? (bitvector 8))))
+     (:union:
+      (bv MEMO_TEXT 32)
+      (vector (?? (bitvector 8)) (?? (bitvector 8)) (?? (bitvector 8))))
      (:union: (bv MEMO_ID 32) (uint64-rule))
      (:union: (bv MEMO_HASH 32) (Hash-rule))
      (:union: (bv MEMO_RETURN 32) (Hash-rule))))
@@ -583,7 +585,7 @@
     (CreateClaimableBalanceOp
      (Asset-rule)
      (int64-rule)
-     (vector (Claimant-rule) (Claimant-rule))))
+     (vector (Claimant-rule) (Claimant-rule) (Claimant-rule))))
    (LedgerEntryChange-rule
     (choose
      (:union: (bv LEDGER_ENTRY_CREATED 32) (LedgerEntry-rule))
@@ -594,7 +596,7 @@
     (StellarValue
      (Hash-rule)
      (TimePoint-rule)
-     (vector (UpgradeType-rule) (UpgradeType-rule))
+     (vector (UpgradeType-rule) (UpgradeType-rule) (UpgradeType-rule))
      (choose
       (:union: (bv STELLAR_VALUE_BASIC 32) null)
       (:union:
@@ -613,7 +615,7 @@
      (:union: (bv CHANGE_TRUST_MALFORMED 32) null)))
    (ManageOfferSuccessResult-rule
     (ManageOfferSuccessResult
-     (vector (ClaimAtom-rule) (ClaimAtom-rule))
+     (vector (ClaimAtom-rule) (ClaimAtom-rule) (ClaimAtom-rule))
      (choose
       (:union: (bv MANAGE_OFFER_CREATED 32) (OfferEntry-rule))
       (:union: (bv MANAGE_OFFER_UPDATED 32) (OfferEntry-rule))
@@ -626,9 +628,10 @@
      (MuxedAccount-rule)
      (Asset-rule)
      (int64-rule)
-     (vector (Asset-rule) (Asset-rule))))
+     (vector (Asset-rule) (Asset-rule) (Asset-rule))))
    (TimeBounds-rule (TimeBounds (TimePoint-rule) (TimePoint-rule)))
-   (string64-rule (vector (?? (bitvector 8)) (?? (bitvector 8))))
+   (string64-rule
+    (vector (?? (bitvector 8)) (?? (bitvector 8)) (?? (bitvector 8))))
    (DataEntry-rule
     (DataEntry
      (AccountID-rule)
@@ -642,7 +645,8 @@
      (int64-rule)
      (Price-rule)
      (int64-rule)))
-   (DataValue-rule (vector (?? (bitvector 8)) (?? (bitvector 8))))
+   (DataValue-rule
+    (vector (?? (bitvector 8)) (?? (bitvector 8)) (?? (bitvector 8))))
    (LiquidityPoolWithdrawResult-rule
     (choose
      (:union: (bv LIQUIDITY_POOL_WITHDRAW_SUCCESS 32) null)
@@ -655,11 +659,7 @@
    (TestLedger-rule
     (TestLedger
      (LedgerHeader-rule)
-     (choose
-      #;(vector (LedgerEntry-rule))
-      #;(vector (LedgerEntry-rule) (LedgerEntry-rule))
-      (vector (LedgerEntry-rule) (LedgerEntry-rule) (LedgerEntry-rule))
-      #;(vector (LedgerEntry-rule) (LedgerEntry-rule) (LedgerEntry-rule) (LedgerEntry-rule)))))
+     (vector (LedgerEntry-rule) (LedgerEntry-rule) (LedgerEntry-rule))))
    (Transaction-rule
     (Transaction
      (MuxedAccount-rule)
@@ -690,7 +690,8 @@
          (:union: (bv 2 32) (TrustLineEntryExtensionV2-rule))))))))
    (BeginSponsoringFutureReservesOp-rule
     (BeginSponsoringFutureReservesOp (AccountID-rule)))
-   (string32-rule (vector (?? (bitvector 8)) (?? (bitvector 8))))
+   (string32-rule
+    (vector (?? (bitvector 8)) (?? (bitvector 8)) (?? (bitvector 8))))
    (LedgerEntry-rule
     (LedgerEntry
      (uint32-rule)
@@ -707,7 +708,7 @@
    (ClaimableBalanceEntry-rule
     (ClaimableBalanceEntry
      (ClaimableBalanceID-rule)
-     (vector (Claimant-rule) (Claimant-rule))
+     (vector (Claimant-rule) (Claimant-rule) (Claimant-rule))
      (Asset-rule)
      (int64-rule)
      (choose
@@ -717,7 +718,10 @@
     (choose
      (:union:
       (bv INFLATION_SUCCESS 32)
-      (vector (InflationPayout-rule) (InflationPayout-rule)))
+      (vector
+       (InflationPayout-rule)
+       (InflationPayout-rule)
+       (InflationPayout-rule)))
      (:union: (bv INFLATION_NOT_TIME 32) null)))
    (CreateAccountResult-rule
     (choose
@@ -726,8 +730,10 @@
      (:union: (bv CREATE_ACCOUNT_LOW_RESERVE 32) null)
      (:union: (bv CREATE_ACCOUNT_UNDERFUNDED 32) null)
      (:union: (bv CREATE_ACCOUNT_MALFORMED 32) null)))
-   (UpgradeType-rule (vector (?? (bitvector 8)) (?? (bitvector 8))))
-   (Signature-rule (vector (?? (bitvector 8)) (?? (bitvector 8))))
+   (UpgradeType-rule
+    (vector (?? (bitvector 8)) (?? (bitvector 8)) (?? (bitvector 8))))
+   (Signature-rule
+    (vector (?? (bitvector 8)) (?? (bitvector 8)) (?? (bitvector 8))))
    (BeginSponsoringFutureReservesResult-rule
     (choose
      (:union: (bv BEGIN_SPONSORING_FUTURE_RESERVES_SUCCESS 32) null)
@@ -849,10 +855,7 @@
     (AccountEntryExtensionV2
      (uint32-rule)
      (uint32-rule)
-     (choose
-      (vector)
-      (vector (SponsorshipDescriptor-rule))
-      (vector (SponsorshipDescriptor-rule) (SponsorshipDescriptor-rule)))
+     (vector (SponsorshipDescriptor-rule))
      (:union: (bv 0 32) null)))
    (TransactionResult-rule
     (TransactionResult
@@ -866,10 +869,16 @@
        (InnerTransactionResultPair-rule))
       (:union:
        (bv txSUCCESS 32)
-       (vector (OperationResult-rule) (OperationResult-rule)))
+       (vector
+        (OperationResult-rule)
+        (OperationResult-rule)
+        (OperationResult-rule)))
       (:union:
        (bv txFAILED 32)
-       (vector (OperationResult-rule) (OperationResult-rule)))
+       (vector
+        (OperationResult-rule)
+        (OperationResult-rule)
+        (OperationResult-rule)))
       (:union: (bv txBAD_SPONSORSHIP 32) null)
       (:union: (bv txNOT_SUPPORTED 32) null)
       (:union: (bv txINTERNAL_ERROR 32) null)
@@ -950,7 +959,10 @@
    (TransactionV0Envelope-rule
     (TransactionV0Envelope
      (TransactionV0-rule)
-     (vector (DecoratedSignature-rule) (DecoratedSignature-rule))))
+     (vector
+      (DecoratedSignature-rule)
+      (DecoratedSignature-rule)
+      (DecoratedSignature-rule))))
    (NodeID-rule (PublicKey-rule))
    (InflationPayout-rule (InflationPayout (AccountID-rule) (int64-rule)))
    (PathPaymentStrictReceiveOp-rule
@@ -960,7 +972,7 @@
      (MuxedAccount-rule)
      (Asset-rule)
      (int64-rule)
-     (vector (Asset-rule) (Asset-rule))))
+     (vector (Asset-rule) (Asset-rule) (Asset-rule))))
    (ClawbackResult-rule
     (choose
      (:union: (bv CLAWBACK_SUCCESS 32) null)
@@ -1036,6 +1048,14 @@
        (:byte-array:
         (bv
          20107422378223680793318253626581655234449074639411281108518901311494939344212
+         256))
+       (:byte-array:
+        (bv
+         49166209458710071424414736409196130673409488517642576509960436728726704682176
+         256))
+       (:byte-array:
+        (bv
+         108205676556803834101400802467028767347767640515723398855284276626900440813927
          256))))
      (:union:
       (bv KEY_TYPE_MUXED_ED25519 32)
@@ -1053,6 +1073,14 @@
         (:byte-array:
          (bv
           20107422378223680793318253626581655234449074639411281108518901311494939344212
+          256))
+        (:byte-array:
+         (bv
+          49166209458710071424414736409196130673409488517642576509960436728726704682176
+          256))
+        (:byte-array:
+         (bv
+          108205676556803834101400802467028767347767640515723398855284276626900440813927
           256)))))))
    (SignerKey-rule
     (choose
@@ -1070,6 +1098,14 @@
        (:byte-array:
         (bv
          20107422378223680793318253626581655234449074639411281108518901311494939344212
+         256))
+       (:byte-array:
+        (bv
+         49166209458710071424414736409196130673409488517642576509960436728726704682176
+         256))
+       (:byte-array:
+        (bv
+         108205676556803834101400802467028767347767640515723398855284276626900440813927
          256))))
      (:union: (bv SIGNER_KEY_TYPE_PRE_AUTH_TX 32) (uint256-rule))
      (:union: (bv SIGNER_KEY_TYPE_HASH_X 32) (uint256-rule))))
@@ -1099,7 +1135,7 @@
      (:union:
       (bv PATH_PAYMENT_STRICT_SEND_SUCCESS 32)
       (PathPaymentStrictSendResult::success
-       (vector (ClaimAtom-rule) (ClaimAtom-rule))
+       (vector (ClaimAtom-rule) (ClaimAtom-rule) (ClaimAtom-rule))
        (SimplePaymentResult-rule)))
      (:union: (bv PATH_PAYMENT_STRICT_SEND_NO_ISSUER 32) (Asset-rule))
      (:union: (bv PATH_PAYMENT_STRICT_SEND_UNDER_DESTMIN 32) null)
@@ -1174,17 +1210,26 @@
    (FeeBumpTransactionEnvelope-rule
     (FeeBumpTransactionEnvelope
      (FeeBumpTransaction-rule)
-     (vector (DecoratedSignature-rule) (DecoratedSignature-rule))))
+     (vector
+      (DecoratedSignature-rule)
+      (DecoratedSignature-rule)
+      (DecoratedSignature-rule))))
    (InnerTransactionResult-rule
     (InnerTransactionResult
      (int64-rule)
      (choose
       (:union:
        (bv txSUCCESS 32)
-       (vector (OperationResult-rule) (OperationResult-rule)))
+       (vector
+        (OperationResult-rule)
+        (OperationResult-rule)
+        (OperationResult-rule)))
       (:union:
        (bv txFAILED 32)
-       (vector (OperationResult-rule) (OperationResult-rule)))
+       (vector
+        (OperationResult-rule)
+        (OperationResult-rule)
+        (OperationResult-rule)))
       (:union: (bv txTOO_EARLY 32) null)
       (:union: (bv txTOO_LATE 32) null)
       (:union: (bv txMISSING_OPERATION 32) null)
@@ -1213,6 +1258,14 @@
       (:byte-array:
        (bv
         20107422378223680793318253626581655234449074639411281108518901311494939344212
+        256))
+      (:byte-array:
+       (bv
+        49166209458710071424414736409196130673409488517642576509960436728726704682176
+        256))
+      (:byte-array:
+       (bv
+        108205676556803834101400802467028767347767640515723398855284276626900440813927
         256)))))
    (Asset-rule
     (choose
@@ -1251,7 +1304,7 @@
      (:union:
       (bv PATH_PAYMENT_STRICT_RECEIVE_SUCCESS 32)
       (PathPaymentStrictReceiveResult::success
-       (vector (ClaimAtom-rule) (ClaimAtom-rule))
+       (vector (ClaimAtom-rule) (ClaimAtom-rule) (ClaimAtom-rule))
        (SimplePaymentResult-rule)))
      (:union: (bv PATH_PAYMENT_STRICT_RECEIVE_NO_ISSUER 32) (Asset-rule))
      (:union: (bv PATH_PAYMENT_STRICT_RECEIVE_OVER_SENDMAX 32) null)
@@ -1344,8 +1397,14 @@
     (:union: (bv CLAIMABLE_BALANCE_ID_TYPE_V0 32) (Hash-rule)))
    (TestCaseResult-rule
     (TestCaseResult
-     (vector (TransactionResult-rule) (TransactionResult-rule))
-     (vector (LedgerEntryChange-rule) (LedgerEntryChange-rule))))
+     (vector
+      (TransactionResult-rule)
+      (TransactionResult-rule)
+      (TransactionResult-rule))
+     (vector
+      (LedgerEntryChange-rule)
+      (LedgerEntryChange-rule)
+      (LedgerEntryChange-rule))))
    (Liabilities-rule (Liabilities (int64-rule) (int64-rule)))
    (TransactionV0-rule
     (TransactionV0
@@ -1356,7 +1415,7 @@
       (:union: (bv TRUE 32) (TimeBounds-rule))
       (:union: (bv FALSE 32) null))
      (Memo-rule)
-     (vector (Operation-rule) (Operation-rule))
+     (vector (Operation-rule) (Operation-rule) (Operation-rule))
      (:union: (bv 0 32) null)))
    (TrustLineEntryExtensionV2-rule
     (TrustLineEntryExtensionV2 (int32-rule) (:union: (bv 0 32) null)))))
