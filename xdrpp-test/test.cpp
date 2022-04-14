@@ -41,21 +41,30 @@ std::vector<uint8_t> readFile(const char* filename)
 
 
 int main (int argc, char** argv) {
-  std::string inFile = "";
-  if( argc == 2 ) {
-    inFile = argv[1];
+  std::string inFile;
+  std::string type;
+  if( argc == 3 ) {
+    type = argv[1];
+    inFile = argv[2];
   }
   else {
-    std::cout << "Usage: ./test datafile.bin\n";
+    std::cout << "Usage: ./test [ledger|tx-envelope] datafile.bin\n";
     return 1;
   }
 
-  TestLedger tl;
   std::vector<uint8_t> data = readFile(inFile.c_str());
-
   xdr::xdr_get g(&data.front(), &data.back() + 1);
-  xdr::xdr_argpack_archive(g, tl);
+  if (type == "ledger") {
+    TestLedger tl;
+    xdr::xdr_argpack_archive(g, tl);
+    std::cout << tl << std::endl;
+  }
+  else {
+    if (type == "tx-envelope") {
+      TransactionEnvelope txe;
+      xdr::xdr_argpack_archive(g, txe);
+      std::cout << txe << std::endl;
+    }
+  }
   g.done();
-
-  std::cout << tl << std::endl;
 }

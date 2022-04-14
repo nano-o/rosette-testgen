@@ -6,10 +6,10 @@ LDFLAGS=-L/home/nano/lib -no-pie
 SRCS=test.cpp
 OBJS=$(subst .cpp,.o,$(SRCS))
 
-all: test
+all: print
 
-test: $(OBJS)
-	$(CXX) $(LDFLAGS) -o test $(OBJS) $(LDLIBS)
+print: $(OBJS)
+	$(CXX) $(LDFLAGS) -o print $(OBJS) $(LDLIBS)
 
 test.o: test.cpp Stellar.hh
 
