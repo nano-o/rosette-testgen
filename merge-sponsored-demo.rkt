@@ -6,36 +6,38 @@
   "generate-tests.rkt"
   "Stellar-utils.rkt"
   rosette/lib/destruct
-  (only-in list-util zip))
+  (only-in list-util zip)
+  macro-debugger/expand)
 
-(define test-ledger
+(define symbolic-ledger
   (the-grammar #:depth 9 #:start TestLedger-rule))
-(define test-tx-envelope
+(define symbolic-tx-envelope
   (the-grammar #:depth 15 #:start TransactionEnvelope-rule))
 (define symbols
-  (set-union (symbolics test-tx-envelope) (symbolics test-ledger)))
+  (set-union (symbolics symbolic-tx-envelope) (symbolics symbolic-ledger)))
 
 ; Here the goal is to test various scenarios in which an account is merged with another account and there are some sponsored-reserve relationship involved.
 ; The tests will consist of a single ACCOUNT_MERGE operation.
-; The variable part of the test is the ledger state in which this operation is applied.
+; The variable part of the test is the ledger state in which this operation is applied and the contents of the ACCOUNT_MERGE operation.
 
 ; NOTE: see Stellar-overrides.rkt for constraints on array sizes (e.g. num sponsors)
+; NOTE: I edited the grammar file by hand to have from 1 to 3 ledger entries and from 0 to 2 SponsorshipDescriptors in an AccountEntry.
 
 ; First, we establish some base assumptions.
-; TODO we have an ACCOUNT_MERGE transaction.
-
 (define (account-okay? account-entry ledger-header)
   (and
    ; seq-num is 1:
    (bveq (AccountEntry-seqNum account-entry) (bv 1 64))
    ; master key has threshold 1
    (bveq (thresholds-ref (AccountEntry-thresholds account-entry) 0) (bv 1 8))
+   ; numSubEntries equals the number of signers (in this case 1)
+   (bveq (AccountEntry-numSubEntries account-entry) (bv 1 32))
    ; balance is sufficient to pay the fee for one operation and maintain the base reserve:
-   (bvuge (AccountEntry-balance account-entry)
+   (bvsge (AccountEntry-balance account-entry)
           (to-uint64
            (bvadd
             (LedgerHeader-baseFee ledger-header)
-            (min-balance/32 ledger-header))))))
+            (min-balance/32 ledger-header 1)))))) ; 1 sub-entry
 
 (define (establish-preconditions ledger-header ledger-entries tx-envelope)
   (assume
@@ -51,9 +53,13 @@
        (and
         ; it's an account entry:
         (bveq (entry-type e) (bv ACCOUNT 32))
+        ; it has a v1 extension:
+        (bveq (:union:-tag (LedgerEntry-ext e)) (bv 1 32))
         ; satisfies the account-okay? predicate:
         (account-okay? (:union:-value (LedgerEntry-data e)) ledger-header))) 
      ledger-entries)
+    ; there are no duplicate accounts in the ledger:
+    (not (duplicate-accounts? ledger-entries))
     ; the transaction
     (destruct tx-envelope
       [(:union: tag val)
@@ -65,8 +71,12 @@
            (destruct tx
              [(Transaction src fee seq-num time-bounds _ ops _)
               (and
+               ; sequence number is 2:
+               (bveq seq-num (bv 2 64))
                ; not muxed:
                (bveq (:union:-tag src) (bv KEY_TYPE_ED25519 32))
+               ; the source account exists:
+               (account-exists? ledger-entries (account-ed25519/bv src))
                ; no time bounds:
                (bveq (:union:-tag time-bounds) (bv 0 32))
                ; fee is equal to base fee:
@@ -83,22 +93,51 @@
 
 (define/path-explorer (test-case ledger-header ledger-entries tx-envelope)
   (begin
+    ; we have version 14 or 18:
     (let ([version (LedgerHeader-ledgerVersion ledger-header)])
-      (if ; TODO a better way to do this
-       (or
-        ; we test both versions 14 and 18:
-        (bveq version (bv 14 32))
-        (bveq version (bv 18 32)))
-       (assume #t)
-       (assume #f)))))
+      (if (bveq version (bv 14 32))
+          (assume #t)
+          (if 
+           (bveq version (bv 18 32))
+           (assume #t)
+           (assume #f))))
+    ; ledger entries may or may not have a sponsor:
+    (for-each
+     (λ (e) ; NOTE: we assumed they all have a v1 extension
+       (let ([ext (:union:-value (LedgerEntry-ext e))])
+         (if
+          (bveq
+           (:union:-tag (LedgerEntryExtensionV1-sponsoringID ext))
+           (bv 0 32))
+          (assume #t)
+          (assume #t))))
+     ledger-entries)
+    (let* ([tx-src (source-account/bv tx-envelope)]
+           [tx (TransactionV1Envelope-tx (:union:-value tx-envelope))]
+           [op (vector-ref-bv (Transaction-operations tx) (bv 0 1))]
+           [dst (account-ed25519/bv (:union:-value (Operation-body op)))])
+      (if (bveq tx-src dst)
+          ACCOUNT_MERGE_MALFORMED
+          (if (not (account-exists? ledger-entries dst))
+              ACCOUNT_MERGE_NO_ACCOUNT
+              'TODO)))))
 
-(define (test-spec gen)
+(define/path-explorer (test-spec test-ledger test-tx-envelope)
   (let ([test-header (TestLedger-ledgerHeader test-ledger)]
         [test-entries (vector->list (TestLedger-ledgerEntries test-ledger))])
     (begin
      (establish-preconditions test-header test-entries test-tx-envelope)
-     (test-case/path-explorer gen test-header test-entries test-tx-envelope))))
+     (test-case test-header test-entries test-tx-envelope))))
+
+(define (run-test t)
+  (match-let* ([(list tl tx) t])
+    (test-spec tl tx)))
 
 (define (go)
-  (compute-solutions test-spec symbols)
-  (display-test-inputs))
+  (compute-solutions
+   (λ (gen) (test-spec/path-explorer gen symbolic-ledger symbolic-tx-envelope))
+   symbols)
+  (define ts (get-test-inputs))
+  #;(display-test-inputs)
+  (create-test-files)
+  (displayln (format "finished generating ~a tests" (length ts))))
