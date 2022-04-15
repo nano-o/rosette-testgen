@@ -20,10 +20,12 @@
 ; The tests will consist of a single ACCOUNT_MERGE operation.
 ; The variable part of the test is the ledger state in which this operation is applied and the contents of the ACCOUNT_MERGE operation.
 
-; NOTE: see Stellar-overrides.rkt for constraints on array sizes (e.g. num sponsors)
+; NOTE: see Stellar-overrides.rkt for constraints on array sizes (e.g. num signers is set to 1)
 
 ; First, we establish some base assumptions.
 (define (account-okay? account-entry ledger-header)
+  ; TODO signer wheight should probably not be zero
+  ; TODO numSponsored and numSponsoring should reflect sponsoring relationships
   (and
    ; seq-num is 1:
    (bveq (AccountEntry-seqNum account-entry) (bv 1 64))
@@ -31,12 +33,16 @@
    (bveq (thresholds-ref (AccountEntry-thresholds account-entry) 0) (bv 1 8))
    ; numSubEntries equals the number of signers (in this case 1)
    (bveq (AccountEntry-numSubEntries account-entry) (bv 1 32))
-   ; balance is sufficient to pay the fee for one operation and maintain the base reserve:
+   ; has a v2 extension:
+   (bveq (:union:-tag (AccountEntry-ext account-entry)) (bv 1 32))
+   (let ([ext-v1 (:union:-value (AccountEntry-ext account-entry))])
+     (bveq (:union:-tag (AccountEntryExtensionV1-ext ext-v1)) (bv 2 32)))
+   ; balance is sufficient to pay the base fee and maintain the base reserve:
    (bveq (AccountEntry-balance account-entry)
           (to-uint64
            (bvadd
             (LedgerHeader-baseFee ledger-header)
-            (min-balance/32 ledger-header 1)))))) ; 1 sub-entry
+            (min-balance/32 ledger-header 10)))))) ; 10 sub-entries to be safe
 
 (define (establish-preconditions ledger-header ledger-entries tx-envelope)
   (assume
@@ -100,7 +106,7 @@
 
 (define/path-explorer (test-case ledger-header ledger-entries tx-envelope)
   (begin
-    ; we have version 14 or 18:
+    ; version is 14 or 18:
     (let ([version (LedgerHeader-ledgerVersion ledger-header)])
       (if (bveq version (bv 14 32))
           (assume #t)
@@ -119,6 +125,7 @@
           (assume #t)
           (assume #t))))
      ledger-entries)
+    ; TODO sponsoring stuff
     (let* ([tx-src (source-account/bv tx-envelope)]
            [tx (TransactionV1Envelope-tx (:union:-value tx-envelope))]
            [op (vector-ref-bv (Transaction-operations tx) (bv 0 1))]
