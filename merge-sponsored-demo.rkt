@@ -6,6 +6,7 @@
   "generate-tests.rkt"
   "Stellar-utils.rkt"
   rosette/lib/destruct
+  ;racket/trace
   (only-in list-util zip)
   macro-debugger/expand)
 
@@ -23,26 +24,60 @@
 ; NOTE: see Stellar-overrides.rkt for constraints on array sizes (e.g. num signers is set to 1)
 
 ; First, we establish some base assumptions.
-(define (account-okay? account-entry ledger-header)
-  ; TODO signer wheight should probably not be zero
-  ; TODO numSponsored and numSponsoring should reflect sponsoring relationships
-  (and
-   ; seq-num is 1:
-   (bveq (AccountEntry-seqNum account-entry) (bv 1 64))
-   ; master key has threshold 1
-   (bveq (thresholds-ref (AccountEntry-thresholds account-entry) 0) (bv 1 8))
-   ; numSubEntries equals the number of signers (in this case 1)
-   (bveq (AccountEntry-numSubEntries account-entry) (bv 1 32))
-   ; has a v2 extension:
-   (bveq (:union:-tag (AccountEntry-ext account-entry)) (bv 1 32))
-   (let ([ext-v1 (:union:-value (AccountEntry-ext account-entry))])
-     (bveq (:union:-tag (AccountEntryExtensionV1-ext ext-v1)) (bv 2 32)))
-   ; balance is sufficient to pay the base fee and maintain the base reserve:
-   (bveq (AccountEntry-balance account-entry)
-          (to-uint64
-           (bvadd
-            (LedgerHeader-baseFee ledger-header)
-            (min-balance/32 ledger-header 10)))))) ; 10 sub-entries to be safe
+(define (account-okay? ledger-entry ledger-header ledger-entries)
+  (let ([account-entry (:union:-value (LedgerEntry-data ledger-entry))])
+    (and
+     ; version is 14:
+     (let ([version (LedgerHeader-ledgerVersion ledger-header)])
+       (bveq version (bv 14 32)))
+     ; seq-num is 1:
+     (bveq (AccountEntry-seqNum account-entry) (bv 1 64))
+     ; master key has threshold 1
+     (bveq (thresholds-ref (AccountEntry-thresholds account-entry) 0) (bv 1 8))
+     (andmap ; signers
+      (λ (signer)
+        (and
+         ; signer key type is SIGNER_KEY_TYPE_ED25519:
+         (bveq (:union:-tag (Signer-key signer)) (bv SIGNER_KEY_TYPE_ED25519 32)) 
+         ; signer exists:
+         (account-exists? ledger-entries (:byte-array:-value (:union:-value (Signer-key signer))))
+         ; signer cannot be self
+         (not (PublicKey-equal? (Signer-key signer) (AccountEntry-accountID account-entry)))
+         ; signer has weight 1:
+         (bveq (Signer-weight signer) (bv 1 32))))
+      (vector->list (AccountEntry-signers account-entry)))
+     ; numSubEntries equals the number of signers (in this case 1)
+     (bveq (AccountEntry-numSubEntries account-entry) (bv 1 32))
+     ; has a v2 extension:
+     (account-has-v2? account-entry)
+     (let* ([account-id (AccountEntry-accountID account-entry)])
+       (and
+        ; sponsoring ID is not self:
+        (not (sponsors-entry? ledger-entry account-id))
+        (let* ([actually-sponsoring (num-sponsoring ledger-entries account-id)]
+               [actually-sponsored (num-sponsored ledger-entry)]
+               [ext-v1 (:union:-value (AccountEntry-ext account-entry))]
+               [ext-v2 (:union:-value (AccountEntryExtensionV1-ext ext-v1))]
+               [num-sponsoring (AccountEntryExtensionV2-numSponsoring ext-v2)]
+               [num-sponsored (AccountEntryExtensionV2-numSponsored ext-v2)])
+          (and
+           ; sponsors exist:
+           (andmap
+            (λ (s-descr)
+              (if (bveq (:union:-tag s-descr) (bv 1 32))
+                  (account-exists? ledger-entries (:byte-array:-value (:union:-value (:union:-value s-descr))))
+                  #t))
+            (vector->list (AccountEntryExtensionV2-signerSponsoringIDs ext-v2)))
+           ; numSponsoring is correct:
+           (bveq actually-sponsoring num-sponsoring)
+           ; numSponsored is correct:
+           (bveq actually-sponsored num-sponsored)))))
+     ; balance is sufficient to pay the base fee and maintain the base reserve:
+     (bveq (AccountEntry-balance account-entry)
+           (to-uint64
+            (bvadd
+             (LedgerHeader-baseFee ledger-header)
+             (min-balance/32 ledger-header 10))))))) ; 10 sub-entries to be safe
 
 (define (establish-preconditions ledger-header ledger-entries tx-envelope)
   (assume
@@ -60,16 +95,21 @@
         (bveq (entry-type e) (bv ACCOUNT 32))
         ; it has a v1 extension:
         (bveq (:union:-tag (LedgerEntry-ext e)) (bv 1 32))
-        ; sponsoring ID is not self:
-        (let ([entry-sponsor (LedgerEntryExtensionV1-sponsoringID (:union:-value (LedgerEntry-ext e)))]
-              [account-id (AccountEntry-accountID (:union:-value (LedgerEntry-data e)))])
-          (if (bveq (:union:-tag entry-sponsor) (bv 1 32)) ; if it has a non-null sponsor
-              (not (PublicKey-equal?
-                    (:union:-value entry-sponsor)
-                    account-id))
-              #t))
         ; satisfies the account-okay? predicate:
-        (account-okay? (:union:-value (LedgerEntry-data e)) ledger-header)))
+        (account-okay? e ledger-header ledger-entries)
+        ; entry sponsor must exist:
+        (let ([has-ext-v1?
+               (bveq
+                (:union:-tag (LedgerEntry-ext e))
+                (bv 1 32))])
+          (if has-ext-v1?
+              (let* ([ext-v1 (:union:-value (LedgerEntry-ext e))]
+                     [sponsorship-descriptor (LedgerEntryExtensionV1-sponsoringID ext-v1)]
+                     [is-sponsored? (bveq (:union:-tag sponsorship-descriptor) (bv 1 32))])
+                (if is-sponsored?
+                    (account-exists? ledger-entries (:byte-array:-value (:union:-value (:union:-value sponsorship-descriptor))))
+                    #t))
+              #t))))
      ledger-entries)
     ; there are no duplicate accounts in the ledger:
     (not (duplicate-accounts? ledger-entries))
@@ -107,7 +147,7 @@
 (define/path-explorer (test-case ledger-header ledger-entries tx-envelope)
   (begin
     ; version is 14 or 18:
-    (let ([version (LedgerHeader-ledgerVersion ledger-header)])
+    #;(let ([version (LedgerHeader-ledgerVersion ledger-header)])
       (if (bveq version (bv 14 32))
           (assume #t)
           (if 
