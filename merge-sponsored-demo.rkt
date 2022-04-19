@@ -1,6 +1,5 @@
 #lang rosette
 
-
 (require
   "path-explorer.rkt"
   "generate-tests.rkt"
@@ -34,22 +33,10 @@
      (bveq (AccountEntry-seqNum account-entry) (bv 1 64))
      ; master key has threshold 1
      (bveq (thresholds-ref (AccountEntry-thresholds account-entry) 0) (bv 1 8))
-     (andmap ; signers
-      (λ (signer)
-        (and
-         ; signer key type is SIGNER_KEY_TYPE_ED25519:
-         (bveq (:union:-tag (Signer-key signer)) (bv SIGNER_KEY_TYPE_ED25519 32)) 
-         ; signer exists:
-         (account-exists? ledger-entries (:byte-array:-value (:union:-value (Signer-key signer))))
-         ; signer cannot be self
-         (not (PublicKey-equal? (Signer-key signer) (AccountEntry-accountID account-entry)))
-         ; signer has weight 1:
-         (bveq (Signer-weight signer) (bv 1 32))))
-      (vector->list (AccountEntry-signers account-entry)))
-     ; numSubEntries equals the number of signers (in this case 1)
-     (bveq (AccountEntry-numSubEntries account-entry) (bv 1 32))
+     (signers-valid? account-entry ledger-entries)
+     (num-subentries-valid? account-entry ledger-entries)
      ; has a v2 extension:
-     (account-has-v2? account-entry)
+     (account-has-v2-ext? account-entry)
      (let* ([account-id (AccountEntry-accountID account-entry)])
        (and
         ; sponsoring ID is not self:
@@ -73,11 +60,12 @@
            ; numSponsored is correct:
            (bveq actually-sponsored num-sponsored)))))
      ; balance is sufficient to pay the base fee and maintain the base reserve:
+     ; TODO move to utils
      (bveq (AccountEntry-balance account-entry)
-           (to-uint64
+           (bv->bv64
             (bvadd
              (LedgerHeader-baseFee ledger-header)
-             (min-balance/32 ledger-header 10))))))) ; 10 sub-entries to be safe
+             (min-balance/bv32 ledger-header 10))))))) ; 10 sub-entries to be safe
 
 (define (establish-preconditions ledger-header ledger-entries tx-envelope)
   (assume
@@ -129,7 +117,7 @@
                ; not muxed:
                (bveq (:union:-tag src) (bv KEY_TYPE_ED25519 32))
                ; the source account exists:
-               (account-exists? ledger-entries (account-ed25519/bv src))
+               (account-exists? ledger-entries (muxed-account->bv256 src))
                ; no time bounds:
                (bveq (:union:-tag time-bounds) (bv 0 32))
                ; fee is equal to base fee:
@@ -166,10 +154,10 @@
           (assume #t))))
      ledger-entries)
     ; TODO sponsoring stuff
-    (let* ([tx-src (source-account/bv tx-envelope)]
+    (let* ([tx-src (source-account/bv256 tx-envelope)]
            [tx (TransactionV1Envelope-tx (:union:-value tx-envelope))]
            [op (vector-ref-bv (Transaction-operations tx) (bv 0 1))]
-           [dst (account-ed25519/bv (:union:-value (Operation-body op)))])
+           [dst (muxed-account->bv256 (:union:-value (Operation-body op)))])
       (if (bveq tx-src dst)
           ACCOUNT_MERGE_MALFORMED
           (if (not (account-exists? ledger-entries dst))

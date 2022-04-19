@@ -141,7 +141,7 @@
   ; how many entries and sub-entries is sponsor-id sponsoring?
   (let ([proc
          (λ (e count)
-           (let ([sponsors-entry
+           (let ([sponsors-entry?/bv32
                   (if (sponsors-entry? e sponsor-id/pubkey)
                       (bv 1 32)
                       (bv 0 32))]
@@ -153,7 +153,7 @@
                               (num-signers-sponsored-by ids sponsor-id/pubkey))
                             (bv 0 32)))
                       (bv 0 32))])
-             (bvadd count (bvadd sponsors-entry sponsored-signers))))])
+             (bvadd count (bvadd sponsors-entry?/bv32 sponsored-signers))))])
     (foldl proc (bv 0 32) ledger-entries)))
 
 (define (non-null-count l)
@@ -172,6 +172,7 @@
       (bv 0 32)))
 
 (define (num-sponsored ledger-entry)
+  ; computes the numbers of sponsors that this ledger-entry has
   (let ([entry-sponsor ; 1 if entry is sponsored, 0 otherwise
          (if
           (and
@@ -200,14 +201,40 @@
       (not (bveq (Signer-weight signer) (bv 0 32)))))
    (vector->list (AccountEntry-signers account-entry))))
 
-(define (num-subentries-valid? account-entry)
-  'TODO)
+(define (num-subentries-valid? account-entry ledger-entries)
+  ; TODO count other types of subentries
+  (let ([num-signers/bv32
+         (vector-length-bv (AccountEntry-signers account-entry) (bitvector 32))])
+    (bveq (AccountEntry-numSubEntries account-entry) num-signers/bv32)))
 
-(define (num-sponsored-valid? account-entry)
-  'TODO)
+(define (num-sponsored-valid? ledger-entry ledger-entries)
+  (if (account-entry? ledger-entry)
+      (let ([account-entry (:union:-value (LedgerEntry-data ledger-entry))])
+        (if (account-has-v2-ext? account-entry)
+            (let* ([ext-v1 (:union:-value (AccountEntry-ext account-entry))]
+                   [ext-v2 (:union:-value (AccountEntryExtensionV1-ext ext-v1))])
+              (bveq (num-sponsored ledger-entry) (AccountEntryExtensionV2-numSponsored ext-v2)))
+            #t))
+      #t))
 
 (define (num-sponsoring-valid? account-entry ledger-entries)
-  'TODO)
+  (if (account-has-v2-ext? account-entry)
+      (let* ([account-id (AccountEntry-accountID account-entry)]
+             [ext-v1 (:union:-value (AccountEntry-ext account-entry))]
+             [ext-v2 (:union:-value (AccountEntryExtensionV1-ext ext-v1))])
+        (bveq (num-sponsoring ledger-entries account-id) (AccountEntryExtensionV2-numSponsored ext-v2)))
+      #t))
+
+(define (sponsoring-data-valid? ledger-entry ledger-entries)
+  (and
+   (or
+    (not (account-entry? ledger-entry))
+    (and
+     (let ([account-entry (:union:-value (LedgerEntry-data ledger-entry))])
+       (num-sponsoring-valid? account-entry ledger-entries)
+       (let ([account-id/pubkey (AccountEntry-accountID account-entry)])
+         (not (sponsors-entry? ledger-entry account-id/pubkey)))))) ; not sponsored by self
+   (num-sponsored-valid? ledger-entry ledger-entries)))
 
 ; tests:
 
@@ -216,860 +243,100 @@
   (enter! (submod "./Stellar-utils.rkt" test)))
 
 (module+ test
-  (require rackunit)
-  (define (compute-num-sponsoring t)
-    ; TODO iteration pattern
+  (require
+    rackunit
+    "Stellar-utils-test-data.rkt")
+
+  ; first we define a few iteration primitives:
+
+  (define (for-each-ledger-entry proc t)
     (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))])
-      (for/list ([e ledger-entries]
-                 #:when (bveq (:union:-tag (LedgerEntry-data e)) (bv ACCOUNT 32)))
-        (let ([account-id/pubkey (AccountEntry-accountID (:union:-value (LedgerEntry-data e)))])
-          (num-sponsoring ledger-entries account-id/pubkey)))))
-  (define (compute-num-sponsored t)
+      (for ([e ledger-entries])
+        (proc e ledger-entries))))
+  
+  (define (for-each-entry/list proc t)
     (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))])
       (for/list ([e ledger-entries])
-        (num-sponsored e))))
-  (define (check-signers-valid t)
+        (proc e ledger-entries))))
+  
+  (define (for-each-account-entry proc t)
+    (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))])
+      (for ([e ledger-entries]
+            #:when (bveq (:union:-tag (LedgerEntry-data e)) (bv ACCOUNT 32)))
+        (proc (:union:-value (LedgerEntry-data e)) ledger-entries))))
+  
+  (define (for-account-entry/list proc t)
     (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))])
       (for/list ([e ledger-entries]
                  #:when (bveq (:union:-tag (LedgerEntry-data e)) (bv ACCOUNT 32)))
-        (check-not-exn
-         (λ () (signers-valid? (:union:-value (LedgerEntry-data e)) ledger-entries))))))
-  (define test-1
-    (list
-     (TestLedger
-      (LedgerHeader
-       (bv #x0000000e 32)
-       (:byte-array:
-        (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-       (StellarValue
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (bv #x0000000000000000 64)
-        (vector
-         (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-         (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-         (vector (bv #x00 8) (bv #x00 8) (bv #x00 8)))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerCloseValueSignature
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array:
-            (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8)))))
-       (:byte-array:
-        (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-       (:byte-array:
-        (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-       (bv #x00000001 32)
-       (bv #x0000000000000000 64)
-       (bv #x0000000000000000 64)
-       (bv #x00000000 32)
-       (bv #x0000000000000000 64)
-       (bv #x00000064 32)
-       (bv #x004c4b40 32)
-       (bv #x00000000 32)
-       (list
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
-       (:union:
-        (bv #x00000001 32)
-        (LedgerHeaderExtensionV1
-         (bv #x00000000 32)
-         (:union: (bv #x00000000 32) '()))))
-      (vector
-       (LedgerEntry
-        (bv #x00000000 32)
-        (:union:
-         (bv #x00000000 32)
-         (AccountEntry
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array:
-            (bv #x3bf36f0de9880e80bfc23596344a501d0681f830c68054d23fd0bb4493f63fe9 256)))
-          (bv #x0000000003938764 64)
-          (bv #x0000000000000001 64)
-          (bv #x00000001 32)
-          (:union: (bv #x00000000 32) '())
-          (bv #x00000000 32)
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-          (:byte-array: (bv #x01000000 32))
-          (vector
-           (Signer
-            (:union:
-             (bv #x00000002 32)
-             (:byte-array:
-              (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
-            (bv #x00000001 32)))
-          (:union:
-           (bv #x00000001 32)
-           (AccountEntryExtensionV1
-            (Liabilities
-             (bv #x0000000000000000 64)
-             (bv #x0000000000000000 64))
-            (:union:
-             (bv #x00000002 32)
-             (AccountEntryExtensionV2
-              (bv #x00000000 32)
-              (bv #x00000000 32)
-              (vector (:union: (bv #x00000000 32) '()))
-              (:union: (bv #x00000000 32) '())))))))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerEntryExtensionV1
-          (:union: (bv #x00000000 32) '())
-          (:union: (bv #x00000000 32) '()))))
-       (LedgerEntry
-        (bv #x00000000 32)
-        (:union:
-         (bv #x00000000 32)
-         (AccountEntry
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array:
-            (bv #x2c7465d3990791c5f7425ec79de37b6db6aa5863537fc98d14d8a04e10adfd54 256)))
-          (bv #x0000000003938764 64)
-          (bv #x0000000000000001 64)
-          (bv #x00000001 32)
-          (:union: (bv #x00000000 32) '())
-          (bv #x00000000 32)
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-          (:byte-array: (bv #x01000000 32))
-          (vector
-           (Signer
-            (:union:
-             (bv #x00000002 32)
-             (:byte-array:
-              (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
-            (bv #x00000001 32)))
-          (:union:
-           (bv #x00000001 32)
-           (AccountEntryExtensionV1
-            (Liabilities
-             (bv #x0000000000000000 64)
-             (bv #x0000000000000000 64))
-            (:union:
-             (bv #x00000002 32)
-             (AccountEntryExtensionV2
-              (bv #x00000000 32)
-              (bv #x00000000 32)
-              (vector (:union: (bv #x00000000 32) '()))
-              (:union: (bv #x00000000 32) '())))))))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerEntryExtensionV1
-          (:union: (bv #x00000000 32) '())
-          (:union: (bv #x00000000 32) '()))))
-       (LedgerEntry
-        (bv #x00000000 32)
-        (:union:
-         (bv #x00000000 32)
-         (AccountEntry
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array:
-            (bv #x6cb316a14d65cedf9d804e9ee570b2492cf7b01532f487199d5eba313590f4c0 256)))
-          (bv #x0000000003938764 64)
-          (bv #x0000000000000001 64)
-          (bv #x00000001 32)
-          (:union: (bv #x00000000 32) '())
-          (bv #x00000000 32)
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-          (:byte-array: (bv #x01000000 32))
-          (vector
-           (Signer
-            (:union:
-             (bv #x00000002 32)
-             (:byte-array:
-              (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
-            (bv #x00000001 32)))
-          (:union:
-           (bv #x00000001 32)
-           (AccountEntryExtensionV1
-            (Liabilities
-             (bv #x0000000000000000 64)
-             (bv #x0000000000000000 64))
-            (:union:
-             (bv #x00000002 32)
-             (AccountEntryExtensionV2
-              (bv #x00000000 32)
-              (bv #x00000000 32)
-              (vector (:union: (bv #x00000000 32) '()))
-              (:union: (bv #x00000000 32) '())))))))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerEntryExtensionV1
-          (:union:
-           (bv #x00000001 32)
-           (:union:
-            (bv #x00000000 32)
-            (:byte-array:
-             (bv #x9a2d81f1e5c3ee13f700cd4ea52597d3ab62a98aa9fdcf009c2f6dae32798486 256))))
-          (:union: (bv #x00000000 32) '()))))))
-     (:union:
-      (bv #x00000002 32)
-      (TransactionV1Envelope
-       (Transaction
-        (:union:
-         (bv #x00000000 32)
-         (:byte-array:
-          (bv #x3bf36f0de9880e80bfc23596344a501d0681f830c68054d23fd0bb4493f63fe9 256)))
-        (bv #x00000064 32)
-        (bv #x0000000000000002 64)
-        (:union: (bv #x00000000 32) '())
-        (:union:
-         (bv #x00000004 32)
-         (:byte-array:
-          (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
-        (vector
-         (Operation
-          (:union: (bv #x00000000 32) '())
-          (:union:
-           (bv #x00000008 32)
-           (:union:
-            (bv #x00000100 32)
-            (MuxedAccount::med25519
-             (bv #x0000000000000000 64)
-             (:byte-array:
-              (bv #x3bf36f0de9880e80bfc23596344a501d0681f830c68054d23fd0bb4493f63fe9 256)))))))
-        (:union: (bv #x00000000 32) '()))
-       '#()))))
-  (define test-2
-    (list
-     (TestLedger
-      (LedgerHeader
-       (bv #x0000000e 32)
-       (:byte-array: (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-       (StellarValue
-        (:byte-array: (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (bv #x0000000000000000 64)
-        (vector
-         (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-         (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-         (vector (bv #x00 8) (bv #x00 8) (bv #x00 8)))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerCloseValueSignature
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array: (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8)))))
-       (:byte-array: (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-       (:byte-array: (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-       (bv #x00000001 32)
-       (bv #x0000000000000000 64)
-       (bv #x0000000000000000 64)
-       (bv #x00000000 32)
-       (bv #x0000000000000000 64)
-       (bv #x00000064 32)
-       (bv #x004c4b40 32)
-       (bv #x00000000 32)
-       (list
-        (:byte-array: (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (:byte-array: (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (:byte-array: (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (:byte-array: (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
-       (:union: (bv #x00000001 32) (LedgerHeaderExtensionV1 (bv #x00000000 32) (:union: (bv #x00000000 32) '()))))
-      (vector
-       (LedgerEntry
-        (bv #x00000000 32)
-        (:union:
-         (bv #x00000000 32)
-         (AccountEntry
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array: (bv #x6cb316a14d65cedf9d804e9ee570b2492cf7b01532f487199d5eba313590f4c0 256)))
-          (bv #x0000000003938764 64)
-          (bv #x0000000000000001 64)
-          (bv #x00000001 32)
-          (:union: (bv #x00000000 32) '())
-          (bv #x00000000 32)
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-          (:byte-array: (bv #x01000000 32))
-          (vector
-           (Signer
-            (:union:
-             (bv #x00000000 32)
-             (:byte-array: (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-            (bv #x00000001 32)))
-          (:union:
-           (bv #x00000001 32)
-           (AccountEntryExtensionV1
-            (Liabilities (bv #x0000000000000000 64) (bv #x0000000000000000 64))
-            (:union:
-             (bv #x00000002 32)
-             (AccountEntryExtensionV2
-              (bv #x00000000 32)
-              (bv #x00000002 32)
-              (vector
-               (:union:
-                (bv #x00000001 32)
-                (:union:
-                 (bv #x00000000 32)
-                 (:byte-array: (bv #x6cb316a14d65cedf9d804e9ee570b2492cf7b01532f487199d5eba313590f4c0 256)))))
-              (:union: (bv #x00000000 32) '())))))))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerEntryExtensionV1
-          (:union:
-           (bv #x00000001 32)
-           (:union:
-            (bv #x00000000 32)
-            (:byte-array: (bv #x9a2d81f1e5c3ee13f700cd4ea52597d3ab62a98aa9fdcf009c2f6dae32798486 256))))
-          (:union: (bv #x00000000 32) '()))))
-       (LedgerEntry
-        (bv #x00000000 32)
-        (:union:
-         (bv #x00000000 32)
-         (AccountEntry
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array: (bv #x3bf36f0de9880e80bfc23596344a501d0681f830c68054d23fd0bb4493f63fe9 256)))
-          (bv #x0000000003938764 64)
-          (bv #x0000000000000001 64)
-          (bv #x00000001 32)
-          (:union: (bv #x00000000 32) '())
-          (bv #x00000000 32)
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-          (:byte-array: (bv #x01000000 32))
-          (vector
-           (Signer
-            (:union:
-             (bv #x00000000 32)
-             (:byte-array: (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-            (bv #x00000001 32)))
-          (:union:
-           (bv #x00000001 32)
-           (AccountEntryExtensionV1
-            (Liabilities (bv #x0000000000000000 64) (bv #x0000000000000000 64))
-            (:union:
-             (bv #x00000002 32)
-             (AccountEntryExtensionV2
-              (bv #x00000000 32)
-              (bv #x00000002 32)
-              (vector
-               (:union:
-                (bv #x00000001 32)
-                (:union:
-                 (bv #x00000000 32)
-                 (:byte-array: (bv #x3bf36f0de9880e80bfc23596344a501d0681f830c68054d23fd0bb4493f63fe9 256)))))
-              (:union: (bv #x00000000 32) '())))))))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerEntryExtensionV1
-          (:union:
-           (bv #x00000001 32)
-           (:union:
-            (bv #x00000000 32)
-            (:byte-array: (bv #x6cb316a14d65cedf9d804e9ee570b2492cf7b01532f487199d5eba313590f4c0 256))))
-          (:union: (bv #x00000000 32) '()))))
-       (LedgerEntry
-        (bv #x00000000 32)
-        (:union:
-         (bv #x00000000 32)
-         (AccountEntry
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array: (bv #x9a2d81f1e5c3ee13f700cd4ea52597d3ab62a98aa9fdcf009c2f6dae32798486 256)))
-          (bv #x0000000003938764 64)
-          (bv #x0000000000000001 64)
-          (bv #x00000001 32)
-          (:union: (bv #x00000000 32) '())
-          (bv #x00000000 32)
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-          (:byte-array: (bv #x01000000 32))
-          (vector
-           (Signer
-            (:union:
-             (bv #x00000000 32)
-             (:byte-array: (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-            (bv #x00000001 32)))
-          (:union:
-           (bv #x00000001 32)
-           (AccountEntryExtensionV1
-            (Liabilities (bv #x0000000000000000 64) (bv #x0000000000000000 64))
-            (:union:
-             (bv #x00000002 32)
-             (AccountEntryExtensionV2
-              (bv #x00000000 32)
-              (bv #x00000001 32)
-              (vector
-               (:union:
-                (bv #x00000001 32)
-                (:union:
-                 (bv #x00000000 32)
-                 (:byte-array: (bv #x3bf36f0de9880e80bfc23596344a501d0681f830c68054d23fd0bb4493f63fe9 256)))))
-              (:union: (bv #x00000000 32) '())))))))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerEntryExtensionV1
-          (:union:
-           (bv #x00000001 32)
-           (:union:
-            (bv #x00000000 32)
-            (:byte-array: (bv #x2c7465d3990791c5f7425ec79de37b6db6aa5863537fc98d14d8a04e10adfd54 256))))
-          (:union: (bv #x00000000 32) '()))))))
-     (:union:
-      (bv #x00000002 32)
-      (TransactionV1Envelope
-       (Transaction
-        (:union:
-         (bv #x00000000 32)
-         (:byte-array: (bv #x6cb316a14d65cedf9d804e9ee570b2492cf7b01532f487199d5eba313590f4c0 256)))
-        (bv #x00000064 32)
-        (bv #x0000000000000002 64)
-        (:union: (bv #x00000000 32) '())
-        (:union:
-         (bv #x00000004 32)
-         (:byte-array: (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
-        (vector
-         (Operation
-          (:union: (bv #x00000000 32) '())
-          (:union:
-           (bv #x00000008 32)
-           (:union:
-            (bv #x00000000 32)
-            (:byte-array: (bv #x6cb316a14d65cedf9d804e9ee570b2492cf7b01532f487199d5eba313590f4c0 256))))))
-        (:union: (bv #x00000000 32) '()))
-       '#()))))
-  (define test-3
-    (list
-     (TestLedger
-      (LedgerHeader
-       (bv #x0000000e 32)
-       (:byte-array:
-        (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-       (StellarValue
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (bv #x0000000000000000 64)
-        (vector
-         (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-         (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-         (vector (bv #x00 8) (bv #x00 8) (bv #x00 8)))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerCloseValueSignature
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array:
-            (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8)))))
-       (:byte-array:
-        (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-       (:byte-array:
-        (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-       (bv #x00000001 32)
-       (bv #x0000000000000000 64)
-       (bv #x0000000000000000 64)
-       (bv #x00000000 32)
-       (bv #x0000000000000000 64)
-       (bv #x00000064 32)
-       (bv #x004c4b40 32)
-       (bv #x00000000 32)
-       (list
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
-       (:union:
-        (bv #x00000001 32)
-        (LedgerHeaderExtensionV1 (bv #x00000000 32) (:union: (bv #x00000000 32) '()))))
-      (vector
-       (LedgerEntry
-        (bv #x00000000 32)
-        (:union:
-         (bv #x00000000 32)
-         (AccountEntry
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array:
-            (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-          (bv #x0000000003938764 64)
-          (bv #x0000000000000001 64)
-          (bv #x00000001 32)
-          (:union: (bv #x00000000 32) '())
-          (bv #x00000000 32)
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-          (:byte-array: (bv #x01000000 32))
-          (vector
-           (Signer
-            (:union:
-             (bv #x00000000 32)
-             (:byte-array:
-              (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-            (bv #x00000001 32)))
-          (:union:
-           (bv #x00000001 32)
-           (AccountEntryExtensionV1
-            (Liabilities (bv #x0000000000000000 64) (bv #x0000000000000000 64))
-            (:union:
-             (bv #x00000002 32)
-             (AccountEntryExtensionV2
-              (bv #x00000000 32)
-              (bv #x00000000 32)
-              (vector
-               (:union:
-                (bv #x00000001 32)
-                (:union:
-                 (bv #x00000000 32)
-                 (:byte-array:
-                  (bv #x9a2d81f1e5c3ee13f700cd4ea52597d3ab62a98aa9fdcf009c2f6dae32798486 256)))))
-              (:union: (bv #x00000000 32) '())))))))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerEntryExtensionV1
-          (:union: (bv #x00000000 32) '())
-          (:union: (bv #x00000000 32) '()))))
-       (LedgerEntry
-        (bv #x00000000 32)
-        (:union:
-         (bv #x00000000 32)
-         (AccountEntry
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array:
-            (bv #x9a2d81f1e5c3ee13f700cd4ea52597d3ab62a98aa9fdcf009c2f6dae32798486 256)))
-          (bv #x0000000003938764 64)
-          (bv #x0000000000000001 64)
-          (bv #x00000001 32)
-          (:union: (bv #x00000000 32) '())
-          (bv #x00000000 32)
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-          (:byte-array: (bv #x01000000 32))
-          (vector
-           (Signer
-            (:union:
-             (bv #x00000000 32)
-             (:byte-array:
-              (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-            (bv #x00000001 32)))
-          (:union:
-           (bv #x00000001 32)
-           (AccountEntryExtensionV1
-            (Liabilities (bv #x0000000000000000 64) (bv #x0000000000000000 64))
-            (:union:
-             (bv #x00000002 32)
-             (AccountEntryExtensionV2
-              (bv #x00000001 32)
-              (bv #x00000000 32)
-              (vector (:union: (bv #x00000000 32) '()))
-              (:union: (bv #x00000000 32) '())))))))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerEntryExtensionV1
-          (:union:
-           (bv #x00000001 32)
-           (:union:
-            (bv #x00000000 32)
-            (:byte-array:
-             (bv #x6cb316a14d65cedf9d804e9ee570b2492cf7b01532f487199d5eba313590f4c0 256))))
-          (:union: (bv #x00000000 32) '()))))
-       (LedgerEntry
-        (bv #x00000000 32)
-        (:union:
-         (bv #x00000000 32)
-         (AccountEntry
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array:
-            (bv #x6cb316a14d65cedf9d804e9ee570b2492cf7b01532f487199d5eba313590f4c0 256)))
-          (bv #x0000000003938764 64)
-          (bv #x0000000000000001 64)
-          (bv #x00000001 32)
-          (:union: (bv #x00000000 32) '())
-          (bv #x00000000 32)
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-          (:byte-array: (bv #x01000000 32))
-          (vector
-           (Signer
-            (:union:
-             (bv #x00000000 32)
-             (:byte-array:
-              (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-            (bv #x00000001 32)))
-          (:union:
-           (bv #x00000001 32)
-           (AccountEntryExtensionV1
-            (Liabilities (bv #x0000000000000000 64) (bv #x0000000000000000 64))
-            (:union:
-             (bv #x00000002 32)
-             (AccountEntryExtensionV2
-              (bv #x00000001 32)
-              (bv #x00000000 32)
-              (vector
-               (:union:
-                (bv #x00000001 32)
-                (:union:
-                 (bv #x00000000 32)
-                 (:byte-array:
-                  (bv #x9a2d81f1e5c3ee13f700cd4ea52597d3ab62a98aa9fdcf009c2f6dae32798486 256)))))
-              (:union: (bv #x00000000 32) '())))))))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerEntryExtensionV1
-          (:union:
-           (bv #x00000001 32)
-           (:union:
-            (bv #x00000000 32)
-            (:byte-array:
-             (bv #x9a2d81f1e5c3ee13f700cd4ea52597d3ab62a98aa9fdcf009c2f6dae32798486 256))))
-          (:union: (bv #x00000000 32) '()))))))
-     (:union:
-      (bv #x00000002 32)
-      (TransactionV1Envelope
-       (Transaction
-        (:union:
-         (bv #x00000000 32)
-         (:byte-array:
-          (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-        (bv #x00000064 32)
-        (bv #x0000000000000002 64)
-        (:union: (bv #x00000000 32) '())
-        (:union:
-         (bv #x00000004 32)
-         (:byte-array:
-          (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
-        (vector
-         (Operation
-          (:union: (bv #x00000000 32) '())
-          (:union:
-           (bv #x00000008 32)
-           (:union:
-            (bv #x00000100 32)
-            (MuxedAccount::med25519
-             (bv #x0000000000000000 64)
-             (:byte-array:
-              (bv #x9a2d81f1e5c3ee13f700cd4ea52597d3ab62a98aa9fdcf009c2f6dae32798486 256)))))))
-        (:union: (bv #x00000000 32) '()))
-       '#()))))
-  (define test-4
-    (list
-     (TestLedger
-      (LedgerHeader
-       (bv #x0000000e 32)
-       (:byte-array:
-        (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-       (StellarValue
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (bv #x0000000000000000 64)
-        (vector
-         (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-         (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-         (vector (bv #x00 8) (bv #x00 8) (bv #x00 8)))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerCloseValueSignature
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array:
-            (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8)))))
-       (:byte-array:
-        (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-       (:byte-array:
-        (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-       (bv #x00000001 32)
-       (bv #x0000000000000000 64)
-       (bv #x0000000000000000 64)
-       (bv #x00000000 32)
-       (bv #x0000000000000000 64)
-       (bv #x00000064 32)
-       (bv #x004c4b40 32)
-       (bv #x00000000 32)
-       (list
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
-        (:byte-array:
-         (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
-       (:union:
-        (bv #x00000001 32)
-        (LedgerHeaderExtensionV1 (bv #x00000000 32) (:union: (bv #x00000000 32) '()))))
-      (vector
-       (LedgerEntry
-        (bv #x00000000 32)
-        (:union:
-         (bv #x00000000 32)
-         (AccountEntry
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array:
-            (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-          (bv #x0000000003938764 64)
-          (bv #x0000000000000001 64)
-          (bv #x00000001 32)
-          (:union: (bv #x00000000 32) '())
-          (bv #x00000000 32)
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-          (:byte-array: (bv #x01000000 32))
-          (vector
-           (Signer
-            (:union:
-             (bv #x00000000 32)
-             (:byte-array:
-              (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-            (bv #x00000001 32)))
-          (:union:
-           (bv #x00000001 32)
-           (AccountEntryExtensionV1
-            (Liabilities (bv #x0000000000000000 64) (bv #x0000000000000000 64))
-            (:union:
-             (bv #x00000002 32)
-             (AccountEntryExtensionV2
-              (bv #x00000000 32)
-              (bv #x00000000 32)
-              (vector (:union: (bv #x00000000 32) '()))
-              (:union: (bv #x00000000 32) '())))))))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerEntryExtensionV1
-          (:union: (bv #x00000000 32) '())
-          (:union: (bv #x00000000 32) '()))))
-       (LedgerEntry
-        (bv #x00000000 32)
-        (:union:
-         (bv #x00000000 32)
-         (AccountEntry
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array:
-            (bv #x2c7465d3990791c5f7425ec79de37b6db6aa5863537fc98d14d8a04e10adfd54 256)))
-          (bv #x0000000003938764 64)
-          (bv #x0000000000000001 64)
-          (bv #x00000001 32)
-          (:union: (bv #x00000000 32) '())
-          (bv #x00000000 32)
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-          (:byte-array: (bv #x01000000 32))
-          (vector
-           (Signer
-            (:union:
-             (bv #x00000000 32)
-             (:byte-array:
-              (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-            (bv #x00000001 32)))
-          (:union:
-           (bv #x00000001 32)
-           (AccountEntryExtensionV1
-            (Liabilities (bv #x0000000000000000 64) (bv #x0000000000000000 64))
-            (:union:
-             (bv #x00000002 32)
-             (AccountEntryExtensionV2
-              (bv #x00000000 32)
-              (bv #x00000000 32)
-              (vector (:union: (bv #x00000000 32) '()))
-              (:union: (bv #x00000000 32) '())))))))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerEntryExtensionV1
-          (:union: (bv #x00000000 32) '())
-          (:union: (bv #x00000000 32) '()))))
-       (LedgerEntry
-        (bv #x00000000 32)
-        (:union:
-         (bv #x00000000 32)
-         (AccountEntry
-          (:union:
-           (bv #x00000000 32)
-           (:byte-array:
-            (bv #x6cb316a14d65cedf9d804e9ee570b2492cf7b01532f487199d5eba313590f4c0 256)))
-          (bv #x0000000003938764 64)
-          (bv #x0000000000000001 64)
-          (bv #x00000001 32)
-          (:union: (bv #x00000000 32) '())
-          (bv #x00000000 32)
-          (vector (bv #x00 8) (bv #x00 8) (bv #x00 8))
-          (:byte-array: (bv #x01000000 32))
-          (vector
-           (Signer
-            (:union:
-             (bv #x00000000 32)
-             (:byte-array:
-              (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))
-            (bv #x00000001 32)))
-          (:union:
-           (bv #x00000001 32)
-           (AccountEntryExtensionV1
-            (Liabilities (bv #x0000000000000000 64) (bv #x0000000000000000 64))
-            (:union:
-             (bv #x00000002 32)
-             (AccountEntryExtensionV2
-              (bv #x00000001 32)
-              (bv #x00000000 32)
-              (vector (:union: (bv #x00000000 32) '()))
-              (:union: (bv #x00000000 32) '())))))))
-        (:union:
-         (bv #x00000001 32)
-         (LedgerEntryExtensionV1
-          (:union:
-           (bv #x00000001 32)
-           (:union:
-            (bv #x00000000 32)
-            (:byte-array:
-             (bv #x2c7465d3990791c5f7425ec79de37b6db6aa5863537fc98d14d8a04e10adfd54 256))))
-          (:union: (bv #x00000000 32) '()))))))
-     (:union:
-      (bv #x00000002 32)
-      (TransactionV1Envelope
-       (Transaction
-        (:union:
-         (bv #x00000000 32)
-         (:byte-array:
-          (bv #x6cb316a14d65cedf9d804e9ee570b2492cf7b01532f487199d5eba313590f4c0 256)))
-        (bv #x00000064 32)
-        (bv #x0000000000000002 64)
-        (:union: (bv #x00000000 32) '())
-        (:union:
-         (bv #x00000004 32)
-         (:byte-array:
-          (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
-        (vector
-         (Operation
-          (:union: (bv #x00000000 32) '())
-          (:union:
-           (bv #x00000008 32)
-           (:union:
-            (bv #x00000100 32)
-            (MuxedAccount::med25519
-             (bv #x0000000000000000 64)
-             (:byte-array:
-              (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))))))
-        (:union: (bv #x00000000 32) '()))
-       '#()))))
-  (define tests (list test-1 test-2 test-3 test-4))
+        (proc (:union:-value (LedgerEntry-data e)) ledger-entries))))
+  
+  (define (num-sponsoring/list t)
+    (for-account-entry/list
+     (λ (account-entry ledger-entries)
+       (let ([account-id/pubkey (AccountEntry-accountID account-entry)])
+          (num-sponsoring ledger-entries account-id/pubkey)))
+     t))
+  
+  (define (num-sponsored/list t)
+    (for-each-entry/list
+     (λ (e es)
+       (num-sponsored e))
+     t))
+  
+  (define (check-signers-valid t)
+    (for-each-account-entry
+     (λ (account-entry ledger-entries)
+       (check-not-exn
+        (λ () (signers-valid? account-entry ledger-entries))))
+     t))
+  
+  (define (run-num-subentries-valid t)
+    (for-each-account-entry
+     (λ (account-entry ledger-entries)
+       (check-not-exn
+        (λ () (num-subentries-valid? account-entry ledger-entries))))
+    t))
+  
   (check-equal?
-   (compute-num-sponsoring test-1)
+   (num-sponsoring/list test-1)
    (list (bv #x00000000 32) (bv #x00000000 32) (bv #x00000000 32)))
   (check-equal?
-   (compute-num-sponsoring test-2)
+   (num-sponsoring/list test-2)
    (list (bv #x00000002 32) (bv #x00000002 32) (bv #x00000001 32)))
   (check-equal?
-   (compute-num-sponsored test-1)
+   (num-sponsoring/list test-4)
+   (list (bv #x00000000 32) (bv #x00000001 32) (bv #x00000000 32)))
+  (check-equal?
+   (num-sponsored/list test-1)
    (list (bv #x00000000 32) (bv #x00000000 32) (bv #x00000001 32)))
   (check-equal?
-   (compute-num-sponsored test-2)
+   (num-sponsored/list test-2)
    (list (bv #x00000002 32) (bv #x00000002 32) (bv #x00000002 32)))
   (check-equal?
-   (compute-num-sponsored test-3)
+   (num-sponsored/list test-3)
    (list (bv #x00000001 32) (bv #x00000001 32) (bv #x00000002 32)))
-  (check-equal?
-   (compute-num-sponsoring test-4)
-   (list (bv #x00000000 32) (bv #x00000001 32) (bv #x00000000 32)))
-  (for-each
-   (λ (t) (check-signers-valid t))
-   tests))
+
+  (define (for-each-test proc)
+    (for-each (λ (t) (proc t)) tests))
+  
+  (for-each-test check-signers-valid)
+  (for-each-test run-num-subentries-valid)
+  (for-each-test
+   ((curry for-each-account-entry)
+    (λ (account-entry ledger-entries)
+      (check-not-exn
+       (λ ()
+         (num-sponsoring-valid? account-entry ledger-entries))))))
+  (for-each-test
+   ((curry for-each-ledger-entry)
+    (λ (ledger-entry ledger-entries)
+      (check-not-exn
+       (λ ()
+         (num-sponsored-valid? ledger-entry ledger-entries))))))
+  (for-each-test
+   ((curry for-each-ledger-entry)
+    (λ (ledger-entry ledger-entries)
+      (check-not-exn
+       (λ ()
+         (sponsoring-data-valid? ledger-entry ledger-entries)))))))
