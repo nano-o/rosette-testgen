@@ -6,7 +6,6 @@
   racket/trace)
 
 ; TODO couldn't we just generate the grammar here?
-; TODO in the absence of type checking, we really need tests here.
 
 (provide (all-defined-out) (all-from-out "Stellar-grammar-merge-sponsored-demo.rkt"))
 
@@ -17,15 +16,19 @@
 (define (bv->bv64 bitvect)
   (zero-extend bitvect (bitvector 64)))
 
+(define (non-null? x/optional)
+  (bveq (:union:-tag x/optional) (bv 1 32)))
+
 (define (muxed-account->bv256 muxed-account)
   (destruct muxed-account
     [(:union: tag v)
-     (cond
-       [(bveq tag (bv KEY_TYPE_ED25519 32)) (:byte-array:-value v)]
-       [(bveq tag (bv KEY_TYPE_MUXED_ED25519 32))
-        ; in this case, extract the ed25519 key
-        (destruct v
-          [(MuxedAccount::med25519 _ k) (:byte-array:-value k)])])]))
+     (if (bveq tag (bv KEY_TYPE_ED25519 32))
+         (:byte-array:-value v)
+         (if (bveq tag (bv KEY_TYPE_MUXED_ED25519 32))
+             ; in this case, extract the ed25519 key
+             (destruct v
+               [(MuxedAccount::med25519 _ k) (:byte-array:-value k)])
+             (assume #f)))])) ; unreachable
 
 (define (source-account/bv256 tx-envelope)
   ; returns the ed25519 public key of this account (as a bitvector)
@@ -56,11 +59,11 @@
 (define (master-key-threshold account-entry) ; get the master key threshold
   (thresholds-ref (AccountEntry-thresholds account-entry) 0))
 
-(define (min-balance/bv32 lh num-subentries)
+(define (min-balance/bv32 ledger-header num-subentries)
   ; for now: 2 times the base reserve
   ; baseReserve is a uint32
   ; we return a uint64 result
-  (bvmul (LedgerHeader-baseReserve lh) (bvadd (bv 2 32) (bv num-subentries 32))))
+  (bvmul (LedgerHeader-baseReserve ledger-header) (bvadd (bv 2 32) (bv num-subentries 32))))
 
 (define (account-entry-for? ledger-entry account-id/bv256)
   ; true iff the ledger entry is an account entry with the given account ID.
@@ -76,18 +79,18 @@
     (ormap proc ledger-entries)))
 
 (define (duplicate-accounts? ledger-entries)
-  ; TODO: use fold and member instead
   (if (empty? ledger-entries)
       #f
       (or
-       (let* ([ledger-entry (car ledger-entries)]
-              [type (:union:-tag (LedgerEntry-data ledger-entry))])
+       ; the current entry has a duplicate in the tail of the list:
+       (let* ([ledger-entry (car ledger-entries)])
          (and
-          (bveq type (bv ACCOUNT 32))
+          (account-entry? ledger-entry)
           (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
                  [entry-pubkey (AccountEntry-accountID account-entry)]
-                 [entry-id/bv (:byte-array:-value (:union:-value entry-pubkey))])
-            (account-exists? (cdr ledger-entries)  entry-id/bv))))
+                 [entry-id/bv256 (:byte-array:-value (:union:-value entry-pubkey))])
+            (account-exists? (cdr ledger-entries)  entry-id/bv256))))
+       ; there are duplicates in the tail of the list:
        (duplicate-accounts? (cdr ledger-entries)))))
 
 (define (PublicKey-equal? k1 k2)
@@ -110,17 +113,17 @@
       is-sponsored?
       (PublicKey-equal? account-id/pubkey (:union:-value sponsorship-descriptor))))))
 
-(define (num-signers-sponsored-by ids sponsor-id/pubkey)
-  ; TODO what is ids?
-  ; TODO use fold
-  (if (empty? ids)
-      (bv 0 32)
-      (let* ([s (car ids)]
-             [sponsoring?
-              (and (bveq (:union:-tag s) (bv 1 32))
-                   (PublicKey-equal? sponsor-id/pubkey (:union:-value s)))]
-             [rest (num-signers-sponsored-by (cdr ids) sponsor-id/pubkey)])
-        (if sponsoring? (bvadd (bv 1 32) rest) rest))))
+(define (num-signers-sponsored-by sponsor-ids sponsor-id/pubkey)
+  ; sponsor-ids is a list of optional pub-keys
+  (let ([proc
+         (λ (s count)
+           (let ([sponsoring?
+                  (and (non-null? s)
+                       (PublicKey-equal? sponsor-id/pubkey (:union:-value s)))])
+             (if sponsoring?
+                 (bvadd (bv 1 32) count)
+                 count)))])
+    (foldl proc (bv 0 32) sponsor-ids)))
 
 (define (account-has-v2-ext? account-entry)
   (bveq (:union:-tag (AccountEntry-ext account-entry)) (bv 1 32))
@@ -136,35 +139,31 @@
 
 (define (num-sponsoring ledger-entries sponsor-id/pubkey)
   ; how many entries and sub-entries is sponsor-id sponsoring?
-  ; TODO use fold
-  (if (empty? ledger-entries)
-      (bv 0 32)
-      (let* ([e (car ledger-entries)]
-             [rest (num-sponsoring (cdr ledger-entries) sponsor-id/pubkey)]
-             [account-entry (:union:-value (LedgerEntry-data e))]
-             [n-in-this-entry
-                (if (and
-                     (account-entry? e)
-                     (account-has-v2-ext? account-entry))
-                    (let* ([ids (signer-sponsoring-ids account-entry)]
-                           [n-sponsored-signers (num-signers-sponsored-by ids sponsor-id/pubkey)])
-                      (if (sponsors-entry? e sponsor-id/pubkey)
-                          (bvadd (bv 1 32) n-sponsored-signers)
-                          n-sponsored-signers))
-                    (bv 0 32))])
-        (bvadd n-in-this-entry rest))))
+  (let ([proc
+         (λ (e count)
+           (let ([sponsors-entry
+                  (if (sponsors-entry? e sponsor-id/pubkey)
+                      (bv 1 32)
+                      (bv 0 32))]
+                 [sponsored-signers
+                  (if (account-entry? e)
+                      (let ([account-entry (:union:-value (LedgerEntry-data e))])
+                        (if (account-has-v2-ext? account-entry)
+                            (let ([ids (signer-sponsoring-ids account-entry)])
+                              (num-signers-sponsored-by ids sponsor-id/pubkey))
+                            (bv 0 32)))
+                      (bv 0 32))])
+             (bvadd count (bvadd sponsors-entry sponsored-signers))))])
+    (foldl proc (bv 0 32) ledger-entries)))
 
-(define (non-null? x/optional)
-  (bveq (:union:-tag x/optional) (bv 1 32)))
-
-(define (non-null-count union-list)
-  ; NOTE using count would case integer<->bv conversions, which is bad for solver performance
+(define (non-null-count l)
+  ; NOTE using count would cause integer<->bv conversions, which is bad for solver performance
   (let ([proc
          (λ (x/optional count)
            (if (non-null? x/optional)
                (bvadd count (bv 1 32))
                count))])
-    (foldl proc (bv 0 32) union-list)))
+    (foldl proc (bv 0 32) l)))
   
 (define (num-sponsored-signers account-entry)
   (if (account-has-v2-ext? account-entry)
