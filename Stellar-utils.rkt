@@ -186,6 +186,31 @@
              (bv 0 32))])
     (bvadd entry-sponsor sponsored-signers)))
 
+(define (signers-valid? account-entry ledger-entries)
+  (andmap
+   (λ (signer)
+     (and
+      ; TODO for now we require a key type of SIGNER_KEY_TYPE_ED25519:
+      (bveq (:union:-tag (Signer-key signer)) (bv SIGNER_KEY_TYPE_ED25519 32)) 
+      ; signer exists:
+      (account-exists? ledger-entries (:byte-array:-value (:union:-value (Signer-key signer))))
+      ; signer cannot be self
+      (not (PublicKey-equal? (Signer-key signer) (AccountEntry-accountID account-entry)))
+      ; non-zero weight:
+      (not (bveq (Signer-weight signer) (bv 0 32)))))
+   (vector->list (AccountEntry-signers account-entry))))
+
+(define (num-subentries-valid? account-entry)
+  'TODO)
+
+(define (num-sponsored-valid? account-entry)
+  'TODO)
+
+(define (num-sponsoring-valid? account-entry ledger-entries)
+  'TODO)
+
+; tests:
+
 (require racket/enter)
 (define (enter-test)
   (enter! (submod "./Stellar-utils.rkt" test)))
@@ -193,6 +218,7 @@
 (module+ test
   (require rackunit)
   (define (compute-num-sponsoring t)
+    ; TODO iteration pattern
     (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))])
       (for/list ([e ledger-entries]
                  #:when (bveq (:union:-tag (LedgerEntry-data e)) (bv ACCOUNT 32)))
@@ -202,6 +228,12 @@
     (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))])
       (for/list ([e ledger-entries])
         (num-sponsored e))))
+  (define (check-signers-valid t)
+    (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))])
+      (for/list ([e ledger-entries]
+                 #:when (bveq (:union:-tag (LedgerEntry-data e)) (bv ACCOUNT 32)))
+        (check-not-exn
+         (λ () (signers-valid? (:union:-value (LedgerEntry-data e)) ledger-entries))))))
   (define test-1
     (list
      (TestLedger
@@ -1019,6 +1051,7 @@
               (bv #x01e79f0a26dbcc02c6d420c9f2c680c8a7d6abcecec9f56505049e0b0f7f0ae5 256)))))))
         (:union: (bv #x00000000 32) '()))
        '#()))))
+  (define tests (list test-1 test-2 test-3 test-4))
   (check-equal?
    (compute-num-sponsoring test-1)
    (list (bv #x00000000 32) (bv #x00000000 32) (bv #x00000000 32)))
@@ -1033,6 +1066,10 @@
    (list (bv #x00000002 32) (bv #x00000002 32) (bv #x00000002 32)))
   (check-equal?
    (compute-num-sponsored test-3)
-   (list (bv #x00000001 32) (bv #x00000001 32) (bv #x00000002 32)))(check-equal?
+   (list (bv #x00000001 32) (bv #x00000001 32) (bv #x00000002 32)))
+  (check-equal?
    (compute-num-sponsoring test-4)
-   (list (bv #x00000000 32) (bv #x00000001 32) (bv #x00000000 32))))
+   (list (bv #x00000000 32) (bv #x00000001 32) (bv #x00000000 32)))
+  (for-each
+   (λ (t) (check-signers-valid t))
+   tests))
