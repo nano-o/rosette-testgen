@@ -14,10 +14,10 @@
 (define (xlm->stroop x)
   (* x 10000000))
 
-(define (to-uint64 bitvect)
+(define (bv->bv64 bitvect)
   (zero-extend bitvect (bitvector 64)))
 
-(define (account-ed25519/bv muxed-account)
+(define (muxed-account->bv256 muxed-account)
   (destruct muxed-account
     [(:union: tag v)
      (cond
@@ -26,19 +26,18 @@
         ; in this case, extract the ed25519 key
         (destruct v
           [(MuxedAccount::med25519 _ k) (:byte-array:-value k)])])]))
-  
-(define (source-account/bv tx-envelope)
+
+(define (source-account/bv256 tx-envelope)
   ; returns the ed25519 public key of this account (as a bitvector)
   (destruct tx-envelope
     [(:union: tag v)
-     (cond
-       [(bveq tag (bv ENVELOPE_TYPE_TX 32))
-        (destruct v
-          [(TransactionV1Envelope tx _)
-           (destruct tx
-             [(Transaction src _ _ _ _ _ _)
-              (account-ed25519/bv src)])])]
-       [else (assume #f)])])) ; only TransactionV1Envelope supported
+     (if (bveq tag (bv ENVELOPE_TYPE_TX 32))
+         (destruct v
+           [(TransactionV1Envelope tx _)
+            (destruct tx
+                      [(Transaction src _ _ _ _ _ _)
+                       (muxed-account->bv256 src)])])
+         (assume #f))])) ; TODO only TransactionV1Envelope supported for now
 
 (define (entry-type e)
   (:union:-tag (LedgerEntry-data e)))
@@ -57,32 +56,28 @@
 (define (master-key-threshold account-entry) ; get the master key threshold
   (thresholds-ref (AccountEntry-thresholds account-entry) 0))
 
-(define (min-balance/32 lh num-subentries)
+(define (min-balance/bv32 lh num-subentries)
   ; for now: 2 times the base reserve
   ; baseReserve is a uint32
   ; we return a uint64 result
   (bvmul (LedgerHeader-baseReserve lh) (bvadd (bv 2 32) (bv num-subentries 32))))
 
-(define (account-entry-for? ledger-entry account-id/bv)
+(define (account-entry-for? ledger-entry account-id/bv256)
   ; true iff the ledger entry is an account entry with the given account ID.
   (let ([type (:union:-tag (LedgerEntry-data ledger-entry))])
     (and (bveq type (bv ACCOUNT 32))
          (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
                 [entry-pubkey (AccountEntry-accountID account-entry)] ; that's a PublicKey
-                [entry-id/bv (:byte-array:-value (:union:-value entry-pubkey))])
-           (bveq entry-id/bv account-id/bv)))))
+                [entry-id/bv256 (:byte-array:-value (:union:-value entry-pubkey))])
+           (bveq entry-id/bv256 account-id/bv256)))))
 
 (define (account-exists? ledger-entries account-id/bv256)
-  ; account-id is a uint256
-  ; ledger-entries is a list of entries
-  (and
-   (not (null? ledger-entries))
-   (or
-    (account-entry-for? (car ledger-entries) account-id/bv256)
-    (account-exists? (cdr ledger-entries) account-id/bv256))))
+  (let ([proc (λ (e) (account-entry-for? e account-id/bv256))])
+    (ormap proc ledger-entries)))
 
-(define (duplicate-accounts? ledger-entries) ; n^2 runtime
-  (if (null? ledger-entries)
+(define (duplicate-accounts? ledger-entries)
+  ; TODO: use fold and member instead
+  (if (empty? ledger-entries)
       #f
       (or
        (let* ([ledger-entry (car ledger-entries)]
@@ -100,22 +95,25 @@
    (:byte-array:-value (:union:-value k1))
    (:byte-array:-value (:union:-value k2))))
 
+(define (entry-has-v1-ext? ledger-entry)
+  (bveq
+   (:union:-tag (LedgerEntry-ext ledger-entry))
+   (bv 1 32)))
+
 (define (sponsors-entry? ledger-entry account-id/pubkey)
-  (let ([has-ext-v1?
-          (bveq
-           (:union:-tag (LedgerEntry-ext ledger-entry))
-           (bv 1 32))])
-    (if has-ext-v1?
-        (let* ([ext-v1 (:union:-value (LedgerEntry-ext ledger-entry))]
-               [sponsorship-descriptor (LedgerEntryExtensionV1-sponsoringID ext-v1)]
-               [is-sponsored? (bveq (:union:-tag sponsorship-descriptor) (bv 1 32))])
-          (if is-sponsored?
-              (PublicKey-equal? account-id/pubkey (:union:-value sponsorship-descriptor))
-              #f))
-        #f)))
+  (and
+   (entry-has-v1-ext? ledger-entry)
+   (let* ([v1-ext (:union:-value (LedgerEntry-ext ledger-entry))]
+          [sponsorship-descriptor (LedgerEntryExtensionV1-sponsoringID v1-ext)]
+          [is-sponsored? (bveq (:union:-tag sponsorship-descriptor) (bv 1 32))])
+     (and
+      is-sponsored?
+      (PublicKey-equal? account-id/pubkey (:union:-value sponsorship-descriptor))))))
 
 (define (num-signers-sponsored-by ids sponsor-id/pubkey)
-  (if (null? ids)
+  ; TODO what is ids?
+  ; TODO use fold
+  (if (empty? ids)
       (bv 0 32)
       (let* ([s (car ids)]
              [sponsoring?
@@ -124,19 +122,22 @@
              [rest (num-signers-sponsored-by (cdr ids) sponsor-id/pubkey)])
         (if sponsoring? (bvadd (bv 1 32) rest) rest))))
 
-(define (signer-sponsoring-ids account-entry) ; assuming is has a v2 extension
-  (let* ([ext-v1 (:union:-value (AccountEntry-ext account-entry))]
-         [ext-v2 (:union:-value (AccountEntryExtensionV1-ext ext-v1))])
-  (AccountEntryExtensionV2-signerSponsoringIDs ext-v2)))
-
-(define (account-has-v2? account-entry)
+(define (account-has-v2-ext? account-entry)
   (bveq (:union:-tag (AccountEntry-ext account-entry)) (bv 1 32))
-  (let ([ext-v1 (:union:-value (AccountEntry-ext account-entry))])
-    (bveq (:union:-tag (AccountEntryExtensionV1-ext ext-v1)) (bv 2 32))))
+  (let ([v1-ext (:union:-value (AccountEntry-ext account-entry))])
+    (bveq (:union:-tag (AccountEntryExtensionV1-ext v1-ext)) (bv 2 32))))
+
+(define (signer-sponsoring-ids account-entry)
+  (if (account-has-v2-ext? account-entry)
+      (let* ([v1-ext (:union:-value (AccountEntry-ext account-entry))]
+             [v2-ext (:union:-value (AccountEntryExtensionV1-ext v1-ext))])
+        (vector->list (AccountEntryExtensionV2-signerSponsoringIDs v2-ext)))
+      null))
 
 (define (num-sponsoring ledger-entries sponsor-id/pubkey)
   ; how many entries and sub-entries is sponsor-id sponsoring?
-  (if (null? ledger-entries)
+  ; TODO use fold
+  (if (empty? ledger-entries)
       (bv 0 32)
       (let* ([e (car ledger-entries)]
              [rest (num-sponsoring (cdr ledger-entries) sponsor-id/pubkey)]
@@ -144,8 +145,8 @@
              [n-in-this-entry
                 (if (and
                      (account-entry? e)
-                     (account-has-v2? account-entry))
-                    (let* ([ids (vector->list (signer-sponsoring-ids account-entry))]
+                     (account-has-v2-ext? account-entry))
+                    (let* ([ids (signer-sponsoring-ids account-entry)]
                            [n-sponsored-signers (num-signers-sponsored-by ids sponsor-id/pubkey)])
                       (if (sponsors-entry? e sponsor-id/pubkey)
                           (bvadd (bv 1 32) n-sponsored-signers)
@@ -153,31 +154,34 @@
                     (bv 0 32))])
         (bvadd n-in-this-entry rest))))
 
-(define (num-non-null union-list)
-  (if (null? union-list)
-      (bv 0 32)
-      (bvadd
-       (if (bveq (:union:-tag (car union-list)) (bv 1 32))
-           (bv 1 32)
-           (bv 0 32))
-       (num-non-null (cdr union-list)))))
+(define (non-null? x/optional)
+  (bveq (:union:-tag x/optional) (bv 1 32)))
+
+(define (non-null-count union-list)
+  ; NOTE using count would case integer<->bv conversions, which is bad for solver performance
+  (let ([proc
+         (λ (x/optional count)
+           (if (non-null? x/optional)
+               (bvadd count (bv 1 32))
+               count))])
+    (foldl proc (bv 0 32) union-list)))
   
 (define (num-sponsored-signers account-entry)
-  (if (account-has-v2? account-entry)
-      (let* ([ids (vector->list (signer-sponsoring-ids account-entry))])
-        (num-non-null ids))
+  (if (account-has-v2-ext? account-entry)
+      (let* ([ids (signer-sponsoring-ids account-entry)])
+        (non-null-count ids))
       (bv 0 32)))
 
 (define (num-sponsored ledger-entry)
-  (let ([entry-sponsor ; 0 or 1
+  (let ([entry-sponsor ; 1 if entry is sponsored, 0 otherwise
          (if
           (and
-           (bveq (:union:-tag (LedgerEntry-ext ledger-entry)) (bv 1 32)) ; has a v1 extension
-           (let ([ext-v1 (:union:-value (LedgerEntry-ext ledger-entry))])
-             (bveq (:union:-tag (LedgerEntryExtensionV1-sponsoringID ext-v1)) (bv 1 32))))
+           (entry-has-v1-ext? ledger-entry)
+           (let ([v1-ext (:union:-value (LedgerEntry-ext ledger-entry))])
+             (bveq (:union:-tag (LedgerEntryExtensionV1-sponsoringID v1-ext)) (bv 1 32))))
          (bv 1 32)
          (bv 0 32))]
-        [sponsored-signers
+        [sponsored-signers ; number of signers of this entry that are sponsored
          (if (account-entry? ledger-entry)
              (num-sponsored-signers (:union:-value (LedgerEntry-data ledger-entry)))
              (bv 0 32))])
