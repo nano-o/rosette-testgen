@@ -33,32 +33,11 @@
      (bveq (AccountEntry-seqNum account-entry) (bv 1 64))
      ; master key has threshold 1
      (bveq (thresholds-ref (AccountEntry-thresholds account-entry) 0) (bv 1 8))
-     (signers-valid? account-entry ledger-entries)
-     (num-subentries-valid? account-entry ledger-entries)
      ; has a v2 extension:
      (account-has-v2-ext? account-entry)
-     (let* ([account-id (AccountEntry-accountID account-entry)])
-       (and
-        ; sponsoring ID is not self:
-        (not (sponsors-entry? ledger-entry account-id))
-        (let* ([actually-sponsoring (num-sponsoring ledger-entries account-id)]
-               [actually-sponsored (num-sponsored ledger-entry)]
-               [ext-v1 (:union:-value (AccountEntry-ext account-entry))]
-               [ext-v2 (:union:-value (AccountEntryExtensionV1-ext ext-v1))]
-               [num-sponsoring (AccountEntryExtensionV2-numSponsoring ext-v2)]
-               [num-sponsored (AccountEntryExtensionV2-numSponsored ext-v2)])
-          (and
-           ; sponsors exist:
-           (andmap
-            (λ (s-descr)
-              (if (bveq (:union:-tag s-descr) (bv 1 32))
-                  (account-exists? ledger-entries (:byte-array:-value (:union:-value (:union:-value s-descr))))
-                  #t))
-            (vector->list (AccountEntryExtensionV2-signerSponsoringIDs ext-v2)))
-           ; numSponsoring is correct:
-           (bveq actually-sponsoring num-sponsoring)
-           ; numSponsored is correct:
-           (bveq actually-sponsored num-sponsored)))))
+     (signers-valid? account-entry ledger-entries)
+     (num-subentries-valid? account-entry ledger-entries)
+     (sponsoring-data-valid? ledger-entry ledger-entries)
      ; balance is sufficient to pay the base fee and maintain the base reserve:
      ; TODO move to utils
      (bveq (AccountEntry-balance account-entry)
@@ -75,7 +54,7 @@
     (bveq (LedgerHeader-baseFee ledger-header) (bv 100 32)) ; base fee is 100 stroops
     (bveq (LedgerHeader-baseReserve ledger-header) (bv (xlm->stroop 0.5) 32)) ; base reserve is 0.5 XLM
     ; ledger entries
-    (andmap 
+    (andmap
      ; all entries satisfy the following:
      (λ (e)
        (and
@@ -138,7 +117,7 @@
     #;(let ([version (LedgerHeader-ledgerVersion ledger-header)])
       (if (bveq version (bv 14 32))
           (assume #t)
-          (if 
+          (if
            (bveq version (bv 18 32))
            (assume #t)
            (assume #f))))
