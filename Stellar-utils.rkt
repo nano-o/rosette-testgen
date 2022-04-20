@@ -226,24 +226,28 @@
           (or (not (account-has-v2-ext? account-entry))
               (let* ([ext-v1 (:union:-value (AccountEntry-ext account-entry))]
                      [ext-v2 (:union:-value (AccountEntryExtensionV1-ext ext-v1))]
-                     [sponsors (vector->list (AccountEntryExtensionV2-signerSponsoringIDs ext-v2))]
+                     [sponsors (AccountEntryExtensionV2-signerSponsoringIDs ext-v2)]
+                     [signers (AccountEntry-signers account-entry)]
                      [account-id (AccountEntry-accountID account-entry)])
                 (and
                   (not (sponsors-entry? ledger-entry account-id))
                   ; numSponsored must be correct:
                   (bveq (num-sponsored ledger-entry) (AccountEntryExtensionV2-numSponsored ext-v2))
                   ; numSponsoring must be correct:
-                  (bveq (num-sponsoring ledger-entries account-id) (AccountEntryExtensionV2-numSponsored ext-v2)))
-                  ; signer sponsors must exist and are not self:
+                  (bveq (num-sponsoring ledger-entries account-id) (AccountEntryExtensionV2-numSponsoring ext-v2))
+                  ; we have as many sponsorshipDescriptors as signers:
+                  (bveq (vector-length-bv signers (bitvector 32)) (vector-length-bv sponsors (bitvector 32)))
+                  ; TODO can the sponsor of a signer be the signer itself?
+                  ; signer sponsors must exist and the account cannot sponsor itself:
                   (andmap
                     (lambda (sponsor)
                       (or
                         (opt-null? sponsor)
                         (let ([sponsor/bv256 (:byte-array:-value (:union:-value (:union:-value sponsor)))])
                           (and
-                           (account-exists? ledger-entries sponsor/bv256)
-                           (not (PublicKey-equal? (:union:-value sponsor) account-id))))))
-                    sponsors)))))))
+                            (account-exists? ledger-entries sponsor/bv256)
+                            (not (PublicKey-equal? (:union:-value sponsor) account-id))))))
+                    (vector->list sponsors)))))))))
 
 ; tests:
 

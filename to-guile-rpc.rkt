@@ -14,6 +14,7 @@
 ; We serialize synthesized transactions and ledger entries to the representation expected by the guile-rpc library
 ; TODO might be easier to eval the received syntax and then use match on the resulting datum
 ; NOTE that guile-rpc expects symbols for enum constants, and not numbers
+; TODO why is this so slow?
 
 ; we need the current namespace to do reflection on structs with eval
 (define-namespace-anchor a)

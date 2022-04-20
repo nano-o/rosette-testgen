@@ -7,9 +7,13 @@
   "to-guile-rpc.rkt"
   "Stellar-overrides.rkt"
   "strkey-utils.rkt")
-(provide serialize-tx serialize-ledger)
+(provide serialize-tx serialize-ledger pretty-print-test)
 
 (define docker-image "testgen-utils:latest")
+
+(define (pretty-print-test ledger tx-envelope)
+ ; here we could serialize then use xdrpp to print the result
+ 'TODO)
 
 ; -i has to be quoted or Racket reads it as a complex number:
 (define docker-run-prefix `(docker run "-i" --rm ,docker-image))
