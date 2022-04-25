@@ -51,7 +51,7 @@
 (define (account-entry? e) ; is this ledger entry an account entry?
   (bveq (entry-type e) (bv ACCOUNT 32)))
 
-; Threshold are an opaque array; because we chose to use flat bitvectors for, it's a bit harder to access the components
+; Thresholds are an opaque array; because we chose to use flat bitvectors for, it's a bit harder to access the components
 (define (thresholds-ref t n) ; n between 0 and 3
   (let ([b (:byte-array:-value t)]
         ; total size is 32 bits
@@ -77,13 +77,12 @@
   (if (empty? ledger-entries)
       #f
       (or
-       ; the current entry has a duplicate in the tail of the list:
+       ; the current entry appears in the tail of the list:
        (let* ([ledger-entry (car ledger-entries)])
          (and
           (account-entry? ledger-entry)
           (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
-                 [entry-pubkey (AccountEntry-accountID account-entry)]
-                 [entry-id/bv256 (:byte-array:-value (:union:-value entry-pubkey))])
+                 [entry-id/bv256 (pubkey->bv256 (AccountEntry-accountID account-entry))])
             (account-exists? entry-id/bv256 (cdr ledger-entries)))))
        ; there are duplicates in the tail of the list:
        (duplicate-accounts? (cdr ledger-entries)))))
@@ -256,14 +255,13 @@
           (vector-length-bv (AccountEntry-signers account-entry) (bitvector 32))])
     num-signers/bv32))
 
-(define (min-balance/bv32 ledger-entry ledger-entries ledger-header)
-  ; TODO give an account-id/bv256 instead of the ledger-entry
-  ; TODO test
-  ; ledger-entry has to be an account entry
-  (let* ([base-reserve (LedgerHeader-baseReserve ledger-header)]
+(define (min-balance/bv32 account-id/bv256 ledger-entries ledger-header)
+  (let* ([ledger-entry (findf (lambda (e) (account-entry-for? e account-id/bv256)) ledger-entries)]
+         ; TODO what if it's not found?
+         [base-reserve (LedgerHeader-baseReserve ledger-header)]
          [account-entry (:union:-value (LedgerEntry-data ledger-entry))]
          [num-subentries (num-subentries account-entry ledger-entries)]
-         [num-sponsoring (num-sponsoring (pubkey->bv256 (AccountEntry-accountID account-entry)) ledger-entries)]
+         [num-sponsoring (num-sponsoring account-id/bv256 ledger-entries)]
          [num-sponsored (num-sponsored ledger-entry)])
     (bvmul
       base-reserve
@@ -276,13 +274,18 @@
             ))
         num-sponsored))))
 
-(define (entry-valid? ledger-entry ledger-entries)
+(define (entry-valid? ledger-entry ledger-entries ledger-header)
+ ; TODO: test
   (and
     (sponsoring-data-valid? ledger-entry ledger-entries)
     (or
      (not (account-entry? ledger-entry))
-     (let ([account-entry (:union:-value (LedgerEntry-data ledger-entry))])
+     (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
+            [account-id/bv256 (pubkey->bv256 (AccountEntry-accountID account-entry))])
        (signers-valid? account-entry ledger-entries)
+       (bvuge
+        (AccountEntry-balance account-entry)
+        (bv->bv64 (min-balance/bv32 account-id/bv256 ledger-entries ledger-header)))
        ; TODO maintains base reserve
        (num-subentries-valid? account-entry ledger-entries)))))
 
@@ -300,50 +303,54 @@
   ; first we define a few iteration primitives:
 
   (define (for-each-ledger-entry proc t)
-    (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))])
+    (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))]
+          [ledger-header (TestLedger-ledgerHeader (car t))])
       (for ([e ledger-entries])
-        (proc e ledger-entries))))
+        (proc e ledger-entries ledger-header))))
 
   (define (for-each-entry/list proc t)
-    (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))])
+    (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))]
+          [ledger-header (TestLedger-ledgerHeader (car t))])
       (for/list ([e ledger-entries])
-        (proc e ledger-entries))))
+        (proc e ledger-entries ledger-header))))
 
   (define (for-each-account-entry proc t)
-    (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))])
+    (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))]
+          [ledger-header (TestLedger-ledgerHeader (car t))])
       (for ([e ledger-entries]
             #:when (bveq (:union:-tag (LedgerEntry-data e)) (bv ACCOUNT 32)))
-        (proc (:union:-value (LedgerEntry-data e)) ledger-entries))))
+        (proc (:union:-value (LedgerEntry-data e)) ledger-entries ledger-header))))
 
-  (define (for-account-entry/list proc t)
-    (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))])
+  (define (for-each-account-entry/list proc t)
+    (let ([ledger-entries (vector->list (TestLedger-ledgerEntries (car t)))]
+          [ledger-header (TestLedger-ledgerHeader (car t))])
       (for/list ([e ledger-entries]
                  #:when (bveq (:union:-tag (LedgerEntry-data e)) (bv ACCOUNT 32)))
-        (proc (:union:-value (LedgerEntry-data e)) ledger-entries))))
+        (proc (:union:-value (LedgerEntry-data e)) ledger-entries ledger-header))))
 
   (define (num-sponsoring/list t)
-    (for-account-entry/list
-     (λ (account-entry ledger-entries)
+    (for-each-account-entry/list
+     (λ (account-entry ledger-entries ledger-header)
        (let ([account-id/pubkey (AccountEntry-accountID account-entry)])
           (num-sponsoring (pubkey->bv256 account-id/pubkey) ledger-entries)))
      t))
 
   (define (num-sponsored/list t)
     (for-each-entry/list
-     (λ (e es)
+     (λ (e es _)
        (num-sponsored e))
      t))
 
   (define (check-signers-valid t)
     (for-each-account-entry
-     (λ (account-entry ledger-entries)
+     (λ (account-entry ledger-entries ledger-header)
        (check-not-exn
         (λ () (signers-valid? account-entry ledger-entries))))
      t))
 
   (define (run-num-subentries-valid t)
     (for-each-account-entry
-     (λ (account-entry ledger-entries)
+     (λ (account-entry ledger-entries ledger-header)
        (check-not-exn
         (λ () (num-subentries-valid? account-entry ledger-entries))))
     t))
@@ -374,7 +381,19 @@
   (for-each-test run-num-subentries-valid)
   (for-each-test
    ((curry for-each-ledger-entry)
-    (λ (ledger-entry ledger-entries)
+    (λ (ledger-entry ledger-entries _)
       (check-not-exn
        (λ ()
-         (sponsoring-data-valid? ledger-entry ledger-entries)))))))
+         (sponsoring-data-valid? ledger-entry ledger-entries))))))
+  (for-each-test
+   ((curry for-each-ledger-entry)
+    (λ (ledger-entry ledger-entries ledger-header)
+      (check-not-exn
+       (λ ()
+         (entry-valid? ledger-entry ledger-entries ledger-header))))))
+  (for-each-test
+   ((curry for-each-account-entry)
+    (λ (account-entry ledger-entries ledger-header)
+      (check-not-exn
+       (λ ()
+         (min-balance/bv32 (pubkey->bv256 (AccountEntry-accountID account-entry)) ledger-entries ledger-header)))))))
