@@ -16,7 +16,7 @@
 (define symbols
   (set-union (symbolics symbolic-tx-envelope) (symbolics symbolic-ledger)))
 
-; Here the goal is to test various scenarios in which an account is merged with another account and there are some sponsored-reserve relationship involved.
+; Here the goal is to test various scenarios in which an account is merged with another account and there are some sponsorhip relationships involved.
 ; The tests will consist of a single ACCOUNT_MERGE operation.
 ; The variable part of the test is the ledger state in which this operation is applied and the contents of the ACCOUNT_MERGE operation.
 
@@ -24,27 +24,26 @@
 
 ; First, we establish some base assumptions.
 (define (account-okay? ledger-entry ledger-header ledger-entries)
-  (let ([account-entry (:union:-value (LedgerEntry-data ledger-entry))])
+  (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
+         [account-id/bv256 (pubkey->bv256 (AccountEntry-accountID account-entry))])
     (and
-     ; version is 14:
-     (let ([version (LedgerHeader-ledgerVersion ledger-header)])
-       (bveq version (bv 14 32)))
-     ; seq-num is 1:
-     (bveq (AccountEntry-seqNum account-entry) (bv 1 64))
-     ; master key has threshold 1
-     (bveq (thresholds-ref (AccountEntry-thresholds account-entry) 0) (bv 1 8))
-     ; has a v2 extension:
-     (account-has-v2-ext? account-entry)
-     (signers-valid? account-entry ledger-entries)
-     (num-subentries-valid? account-entry ledger-entries)
-     (sponsoring-data-valid? ledger-entry ledger-entries)
-     ; balance is sufficient to pay the base fee and maintain the base reserve:
-     ; TODO move to utils
-     (bveq (AccountEntry-balance account-entry)
-           (bv->bv64
-            (bvadd
-             (LedgerHeader-baseFee ledger-header)
-             (min-balance/bv32 ledger-header 10))))))) ; 10 sub-entries to be safe
+      ; version is 14:
+      (let ([version (LedgerHeader-ledgerVersion ledger-header)])
+        (bveq version (bv 14 32)))
+      ; seq-num is 1:
+      (bveq (AccountEntry-seqNum account-entry) (bv 1 64))
+      ; master key has threshold 1
+      (bveq (thresholds-ref (AccountEntry-thresholds account-entry) 0) (bv 1 8))
+      ; has a v2 extension:
+      (account-entry-has-v2-ext? account-entry)
+      ; entry is valid:
+      (entry-valid? ledger-entry ledger-entries ledger-header)
+      ; balance is equal to reserve requirements plus fee:
+      (bveq (AccountEntry-balance account-entry)
+            (bv->bv64
+              (bvadd
+                (LedgerHeader-baseFee ledger-header)
+                (min-balance/bv32 account-id/bv256 ledger-entries ledger-header)))))))
 
 (define (establish-preconditions ledger-header ledger-entries tx-envelope)
   (assume
@@ -63,20 +62,7 @@
         ; it has a v1 extension:
         (bveq (:union:-tag (LedgerEntry-ext e)) (bv 1 32))
         ; satisfies the account-okay? predicate:
-        (account-okay? e ledger-header ledger-entries)
-        ; entry sponsor must exist:
-        (let ([has-ext-v1?
-               (bveq
-                (:union:-tag (LedgerEntry-ext e))
-                (bv 1 32))])
-          (if has-ext-v1?
-              (let* ([ext-v1 (:union:-value (LedgerEntry-ext e))]
-                     [sponsorship-descriptor (LedgerEntryExtensionV1-sponsoringID ext-v1)]
-                     [is-sponsored? (bveq (:union:-tag sponsorship-descriptor) (bv 1 32))])
-                (if is-sponsored?
-                    (account-exists? ledger-entries (:byte-array:-value (:union:-value (:union:-value sponsorship-descriptor))))
-                    #t))
-              #t))))
+        (account-okay? e ledger-header ledger-entries)))
      ledger-entries)
     ; there are no duplicate accounts in the ledger:
     (not (duplicate-accounts? ledger-entries))
@@ -96,7 +82,7 @@
                ; not muxed:
                (bveq (:union:-tag src) (bv KEY_TYPE_ED25519 32))
                ; the source account exists:
-               (account-exists? ledger-entries (muxed-account->bv256 src))
+               (account-exists? (muxed-account->bv256 src) ledger-entries)
                ; no time bounds:
                (bveq (:union:-tag time-bounds) (bv 0 32))
                ; fee is equal to base fee:
@@ -106,42 +92,37 @@
                  (destruct op
                    [(Operation src body)
                     (and
-                     ; no src account in the op:
-                     (bveq (:union:-tag src) (bv 0 32))
+                     ; no src account in the op (is this is optional?):
+                     (opt-null? src)
                      ; it's an ACCOUNT_MERGE operation:
                      (bveq (:union:-tag body) (bv ACCOUNT_MERGE 32)))])))])]))]))))
 
 (define/path-explorer (test-case ledger-header ledger-entries tx-envelope)
   (begin
-    ; version is 14 or 18:
-    #;(let ([version (LedgerHeader-ledgerVersion ledger-header)])
-      (if (bveq version (bv 14 32))
-          (assume #t)
-          (if
-           (bveq version (bv 18 32))
-           (assume #t)
-           (assume #f))))
     ; ledger entries may or may not have a sponsor:
     (for-each
-     (λ (e) ; NOTE: we assumed they all have a v1 extension
-       (let ([ext (:union:-value (LedgerEntry-ext e))])
-         (if
-          (bveq
-           (:union:-tag (LedgerEntryExtensionV1-sponsoringID ext))
-           (bv 0 32))
-          (assume #t)
-          (assume #t))))
-     ledger-entries)
-    ; TODO sponsoring stuff
+     ; TODO syntax for this kind of stuff
+      (λ (e)
+         (let ([ext (:union:-value (LedgerEntry-ext e))])
+           (if
+             (bveq
+               (:union:-tag (LedgerEntryExtensionV1-sponsoringID ext))
+               (bv 0 32))
+             (assume #t)
+             (assume #t))))
+      ledger-entries)
     (let* ([tx-src (source-account/bv256 tx-envelope)]
            [tx (TransactionV1Envelope-tx (:union:-value tx-envelope))]
            [op (vector-ref-bv (Transaction-operations tx) (bv 0 1))]
            [dst (muxed-account->bv256 (:union:-value (Operation-body op)))])
       (if (bveq tx-src dst)
-          ACCOUNT_MERGE_MALFORMED
-          (if (not (account-exists? ledger-entries dst))
-              ACCOUNT_MERGE_NO_ACCOUNT
-              'TODO)))))
+        ACCOUNT_MERGE_MALFORMED
+        (if (not (account-exists? dst ledger-entries))
+          ACCOUNT_MERGE_NO_ACCOUNT
+          (if (not (bveq (num-sponsoring tx-src ledger-entries) (bv 0 32)))
+            ACCOUNT_MERGE_IS_SPONSOR
+            ; TODO now check if the destination is sponsoring any subentry (if so we'd need to modify numSponsoring)
+            'TODO))))))
 
 (define/path-explorer (test-spec test-ledger test-tx-envelope)
   (let ([test-header (TestLedger-ledgerHeader test-ledger)]
@@ -155,14 +136,17 @@
     (test-spec tl tx)))
 
 (define (go)
-  (compute-solutions
-   (λ (gen) (test-spec/path-explorer gen symbolic-ledger symbolic-tx-envelope))
-   symbols)
-  (define ts (get-test-inputs))
-  (displayln (format "there are ~a test cases" (length ts)))
-  (for ([(i t)  (in-dict (zip (range (length ts)) ts))])
-    (let ([output (run-test t)])
-      (displayln (format "test number ~a returned ~a" i output)))
-    (newline))
-  (create-test-files)
-  (displayln (format "finished generating ~a tests" (length ts))))
+  (begin
+    (compute-solutions
+      (λ (gen) (test-spec/path-explorer gen symbolic-ledger symbolic-tx-envelope))
+      symbols)
+    (define ts (get-test-inputs))
+    (displayln (format "there are ~a test cases" (length ts)))
+    (for ([(i t)  (in-dict (zip (range (length ts)) ts))])
+         (let ([output (run-test t)])
+           (displayln (format "test number ~a returned ~a" i output)))
+         (newline))
+    (create-test-files)
+    (displayln (format "finished generating ~a tests" (length ts)))))
+
+; (go)
