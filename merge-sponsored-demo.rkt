@@ -97,10 +97,34 @@
                      ; it's an ACCOUNT_MERGE operation:
                      (bveq (:union:-tag body) (bv ACCOUNT_MERGE 32)))])))])]))]))))
 
+(define/path-explorer (merge-entries src/bv256 dst/bv256 ledger-entries)
+ ; here we assume that all conditions for the operation to be successful are met
+ ; iterate over all entries and remove sponsoring relationships
+ ; then add the src balance to the dst
+ ; TODO how do we modify just one component of a deeply nested struct?
+ ; For now we'll just write down the control structure (so we can explore all paths) but do nothing.
+ (map
+   (λ (e)
+      (let* ([account-entry (:union:-value (LedgerEntry-data e))]
+             [entry-id/bv256 (pubkey->bv256 (AccountEntry-accountID account-entry))])
+        (if (bveq entry-id/bv256 dst/bv256)
+          (void) ; add src balance to dst
+          (if (not (bveq entry-id/bv256 src/bv256))
+            ; if the entry is sponsoring the src or any of the src's sub-entries, then we need to update the counts
+            (let ([src-entry (find-account-entry src/bv256 ledger-entries)])
+              (if (bvugt (num-sponsoring-for-this-entry e entry-id/bv256) (bv 0 32))
+               ; TODO maybe we should branch on whether there are any sponsored signers
+                (void)
+                (void)))
+            ; delete the entry
+            (void)))))
+   ledger-entries))
+
 (define/path-explorer (test-case ledger-header ledger-entries tx-envelope)
+ ; TODO return the new ledger entries
   (begin
-    ; ledger entries may or may not have a sponsor:
-    (for-each
+    ; ledger entries may or may not have a sponsor (with 3 entries this is 2^3=8 combinations):
+#;(for-each
      ; TODO syntax for this kind of stuff
       (λ (e)
          (let ([ext (:union:-value (LedgerEntry-ext e))])
@@ -111,18 +135,22 @@
              (assume #t)
              (assume #t))))
       ledger-entries)
-    (let* ([tx-src (source-account/bv256 tx-envelope)]
+    (let* ([tx-src/bv256 (source-account/bv256 tx-envelope)]
            [tx (TransactionV1Envelope-tx (:union:-value tx-envelope))]
            [op (vector-ref-bv (Transaction-operations tx) (bv 0 1))]
-           [dst (muxed-account->bv256 (:union:-value (Operation-body op)))])
-      (if (bveq tx-src dst)
+           [dst/bv256 (muxed-account->bv256 (:union:-value (Operation-body op)))])
+     ; TODO first we must charge the tx fee
+     ; Then if no error we must merge the accounts
+      (if (bveq tx-src/bv256 dst/bv256)
         ACCOUNT_MERGE_MALFORMED
-        (if (not (account-exists? dst ledger-entries))
+        (if (not (account-exists? dst/bv256 ledger-entries))
           ACCOUNT_MERGE_NO_ACCOUNT
-          (if (not (bveq (num-sponsoring tx-src ledger-entries) (bv 0 32)))
+          (if (not (bveq (num-sponsoring tx-src/bv256 ledger-entries) (bv 0 32)))
             ACCOUNT_MERGE_IS_SPONSOR
-            ; TODO now check if the destination is sponsoring any subentry (if so we'd need to modify numSponsoring)
-            'TODO))))))
+            ; TODO now check if the destination is sponsoring any subentries (if so we'd need to modify numSponsoring). Could also check if there's e.g. 2 sponsored entries.
+            (begin
+             (merge-entries tx-src/bv256 dst/bv256 ledger-entries)
+             'TODO)))))))
 
 (define/path-explorer (test-spec test-ledger test-tx-envelope)
   (let ([test-header (TestLedger-ledgerHeader test-ledger)]
@@ -136,6 +164,7 @@
     (test-spec tl tx)))
 
 (define (go)
+ ; TODO generate tests lazyly...
   (begin
     (compute-solutions
       (λ (gen) (test-spec/path-explorer gen symbolic-ledger symbolic-tx-envelope))
