@@ -51,6 +51,10 @@
 (define (account-entry? e) ; is this ledger entry an account entry?
   (bveq (entry-type e) (bv ACCOUNT 32)))
 
+(define (find-account-entry account-id/bv256 ledger-entries)
+  ; returns false if not found
+  (findf (λ (e) (account-entry-for? e account-id/bv256)) ledger-entries))
+
 ; Thresholds are an opaque array; because we chose to use flat bitvectors for, it's a bit harder to access the components
 (define (thresholds-ref t n) ; n between 0 and 3
   (let ([b (:byte-array:-value t)]
@@ -135,6 +139,27 @@
       (vector->list (AccountEntryExtensionV2-signerSponsoringIDs v2-ext)))
     null))
 
+(define (num-sponsoring-for-this-entry ledger-entry account-id/bv256)
+  ; counts how many subentries of ledger-entry are sponsored by account-id
+  (if (ledger-entry-has-v1-ext? ledger-entry)
+    (let* ([v1-ext (:union:-value (LedgerEntry-ext ledger-entry))]
+           [sponsoring-entry?
+             (and
+               (bveq (:union:-tag (LedgerEntryExtensionV1-sponsoringID v1-ext)) (bv 1 32))
+               (bveq
+                 (pubkey->bv256 (:union:-value (LedgerEntryExtensionV1-sponsoringID v1-ext)))
+                 account-id/bv256))]
+           [num-signers-sponsored
+             (if (account-entry? ledger-entry)
+               (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
+                      [sponsors (signer-sponsoring-ids account-entry)])
+                (num-signers-sponsored-by sponsors account-id/bv256))
+               (bv 0 32))])
+      (if sponsoring-entry?
+        (bvadd (bv 1 32) num-signers-sponsored)
+        num-signers-sponsored))
+    (bv 0 32)))
+
 (define (num-sponsoring sponsor-id/bv256 ledger-entries)
   ; how many entries and sub-entries is sponsor-id sponsoring?
   ; we iterate over ledger entries and count
@@ -209,7 +234,6 @@
 
 (define (sponsoring-data-valid? ledger-entry ledger-entries)
   (and
-    ; the entry's sponsor must exist:
     (or
       (not (ledger-entry-has-v1-ext? ledger-entry))
       (let* ([v1-ext (:union:-value (LedgerEntry-ext ledger-entry))]
@@ -218,6 +242,7 @@
         (or (not sponsored?)
             (let ([sponsor
                     (:union:-value (LedgerEntryExtensionV1-sponsoringID v1-ext))])
+              ; the entry's sponsor must exist:
               (account-exists? (:byte-array:-value (:union:-value sponsor)) ledger-entries)))))
     (or (not (account-entry? ledger-entry)) ; if it's an account entry:
         (let ([account-entry (:union:-value (LedgerEntry-data ledger-entry))])
@@ -239,7 +264,7 @@
                   ; TODO can the sponsor of a signer be the signer itself?
                   ; signer sponsors must exist and the account cannot sponsor itself:
                   (andmap
-                    (lambda (sponsor)
+                    (λ (sponsor)
                       (or
                         (opt-null? sponsor)
                         (let ([sponsor/bv256 (:byte-array:-value (:union:-value (:union:-value sponsor)))])
@@ -256,7 +281,7 @@
     num-signers/bv32))
 
 (define (min-balance/bv32 account-id/bv256 ledger-entries ledger-header)
-  (let* ([ledger-entry (findf (lambda (e) (account-entry-for? e account-id/bv256)) ledger-entries)]
+  (let* ([ledger-entry (find-account-entry account-id/bv256 ledger-entries)]
          ; TODO what if it's not found?
          [base-reserve (LedgerHeader-baseReserve ledger-header)]
          [account-entry (:union:-value (LedgerEntry-data ledger-entry))]
@@ -396,4 +421,15 @@
     (λ (account-entry ledger-entries ledger-header)
       (check-not-exn
        (λ ()
-         (min-balance/bv32 (pubkey->bv256 (AccountEntry-accountID account-entry)) ledger-entries ledger-header)))))))
+         (min-balance/bv32 (pubkey->bv256 (AccountEntry-accountID account-entry)) ledger-entries ledger-header))))))
+
+  (for-each-test
+   (λ (t)
+      (let ([account-id/bv256 (pubkey->bv256 (AccountEntry-accountID (:union:-value (LedgerEntry-data (car (vector->list (TestLedger-ledgerEntries (car t))))))))])
+        (for-each-ledger-entry
+         (λ (ledger-entry ledger-entries ledger-header)
+            (check-not-exn
+              (λ ()
+                 (num-sponsoring-for-this-entry ledger-entry account-id/bv256)
+                 )))
+         t)))))
