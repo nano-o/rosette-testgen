@@ -150,7 +150,7 @@
             ; TODO now check if the destination is sponsoring any subentries (if so we'd need to modify numSponsoring). Could also check if there's e.g. 2 sponsored entries.
             (begin
              (merge-entries tx-src/bv256 dst/bv256 ledger-entries)
-             'TODO)))))))
+             'TODO))))))) ; NOTE there are many unsat paths (66 in total? and 9 feasible)
 
 (define/path-explorer (test-spec test-ledger test-tx-envelope)
   (let ([test-header (TestLedger-ledgerHeader test-ledger)]
