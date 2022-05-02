@@ -309,9 +309,8 @@
             [account-id/bv256 (pubkey->bv256 (AccountEntry-accountID account-entry))])
        (signers-valid? account-entry ledger-entries)
        (bvuge
-        (AccountEntry-balance account-entry)
-        (bv->bv64 (min-balance/bv32 account-id/bv256 ledger-entries ledger-header)))
-       ; TODO maintains base reserve
+         (AccountEntry-balance account-entry)
+         (bv->bv64 (min-balance/bv32 account-id/bv256 ledger-entries ledger-header)))
        (num-subentries-valid? account-entry ledger-entries)))))
 
 ; tests:

@@ -27,9 +27,6 @@
   (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
          [account-id/bv256 (pubkey->bv256 (AccountEntry-accountID account-entry))])
     (and
-      ; version is 14:
-      (let ([version (LedgerHeader-ledgerVersion ledger-header)])
-        (bveq version (bv 14 32)))
       ; seq-num is 1:
       (bveq (AccountEntry-seqNum account-entry) (bv 1 64))
       ; master key has threshold 1
@@ -49,6 +46,7 @@
   (assume
    (and
     ; ledger header
+    (bveq (LedgerHeader-ledgerVersion ledger-header) (bv 14 32)) ; version is 14
     (bveq (LedgerHeader-ledgerSeq ledger-header) (bv 1 32)) ; sequence number 1
     (bveq (LedgerHeader-baseFee ledger-header) (bv 100 32)) ; base fee is 100 stroops
     (bveq (LedgerHeader-baseReserve ledger-header) (bv (xlm->stroop 0.5) 32)) ; base reserve is 0.5 XLM
@@ -59,8 +57,6 @@
        (and
         ; it's an account entry:
         (bveq (entry-type e) (bv ACCOUNT 32))
-        ; it has a v1 extension:
-        (bveq (:union:-tag (LedgerEntry-ext e)) (bv 1 32))
         ; satisfies the account-okay? predicate:
         (account-okay? e ledger-header ledger-entries)))
      ledger-entries)
@@ -78,6 +74,7 @@
              [(Transaction src fee seq-num time-bounds _ ops _)
               (and
                ; sequence number is 2:
+               ; TODO a seq-num-valid? predicate
                (bveq seq-num (bv 2 64))
                ; not muxed:
                (bveq (:union:-tag src) (bv KEY_TYPE_ED25519 32))
@@ -162,6 +159,11 @@
 (define (run-test t)
   (match-let* ([(list tl tx) t])
     (test-spec tl tx)))
+
+(define (lazy-go)
+ (lazy-create-test-files
+   (λ (gen) (test-spec/path-explorer gen symbolic-ledger symbolic-tx-envelope))
+   symbols))
 
 (define (go)
  ; TODO generate tests lazyly...
