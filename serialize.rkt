@@ -47,7 +47,7 @@
 
 (define (serialize-ledger ledger-defn)
   (defn->base64 ledger-defn "TestLedger"))
-  
+
 (module+ test
   (require rackunit)
   (define keys
