@@ -139,7 +139,7 @@
       (vector->list (AccountEntryExtensionV2-signerSponsoringIDs v2-ext)))
     null))
 
-(define (num-sponsoring-for-this-entry ledger-entry account-id/bv256)
+(define (num-sponsoring-in-this-entry ledger-entry account-id/bv256)
   ; counts how many subentries of ledger-entry are sponsored by account-id
   (if (ledger-entry-has-v1-ext? ledger-entry)
     (let* ([v1-ext (:union:-value (LedgerEntry-ext ledger-entry))]
@@ -429,6 +429,6 @@
          (λ (ledger-entry ledger-entries ledger-header)
             (check-not-exn
               (λ ()
-                 (num-sponsoring-for-this-entry ledger-entry account-id/bv256)
+                 (num-sponsoring-in-this-entry ledger-entry account-id/bv256)
                  )))
          t)))))

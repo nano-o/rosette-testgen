@@ -94,28 +94,31 @@
                      ; it's an ACCOUNT_MERGE operation:
                      (bveq (:union:-tag body) (bv ACCOUNT_MERGE 32)))])))])]))]))))
 
-(define/path-explorer (merge-entries src/bv256 dst/bv256 ledger-entries)
- ; here we assume that all conditions for the operation to be successful are met
- ; iterate over all entries and remove sponsoring relationships
- ; then add the src balance to the dst
- ; TODO how do we modify just one component of a deeply nested struct?
- ; For now we'll just write down the control structure (so we can explore all paths) but do nothing.
- (map
-   (λ (e)
-      (let* ([account-entry (:union:-value (LedgerEntry-data e))]
-             [entry-id/bv256 (pubkey->bv256 (AccountEntry-accountID account-entry))])
-        (if (bveq entry-id/bv256 dst/bv256)
-          (void) ; add src balance to dst
-          (if (not (bveq entry-id/bv256 src/bv256))
-            ; if the entry is sponsoring the src or any of the src's sub-entries, then we need to update the counts
-            (let ([src-entry (find-account-entry src/bv256 ledger-entries)])
-              (if (bvugt (num-sponsoring-for-this-entry e entry-id/bv256) (bv 0 32))
+(define/path-explorer
+  (merge-entries src/bv256 dst/bv256 ledger-entries)
+  ; here we assume that all conditions for the operation to be successful are met
+  ; iterate over all entries and remove sponsoring relationships
+  ; then add the src balance to the dst
+  ; TODO how do we modify just one component of a deeply nested struct?
+  ; For now we'll just write down the control structure (so we can explore all paths) but do nothing.
+  (map
+    (λ (e)
+       (let* ([account-entry (:union:-value (LedgerEntry-data e))]
+              [current-entry-id/bv256 (pubkey->bv256 (AccountEntry-accountID account-entry))])
+         (begin
+          (if (bveq current-entry-id/bv256 dst/bv256)
+           (void) ; add src balance to dst
+           (void)) ; else do nothing
+         (if (not (bveq current-entry-id/bv256 src/bv256))
+           ; if the entry is sponsoring the src or any of the src's sub-entries, then we need to update the counts
+           (let ([src-entry (find-account-entry src/bv256 ledger-entries)])
+             (if (bvugt (num-sponsoring-in-this-entry src-entry current-entry-id/bv256) (bv 0 32))
                ; TODO maybe we should branch on whether there are any sponsored signers
-                (void)
-                (void)))
-            ; delete the entry
-            (void)))))
-   ledger-entries))
+               (void)
+               (void)))
+           ; delete the entry
+           (void)))))
+    ledger-entries))
 
 (define/path-explorer (test-case ledger-header ledger-entries tx-envelope)
  ; TODO return the new ledger entries
@@ -161,7 +164,7 @@
     (test-spec tl tx)))
 
 (define (lazy-go)
- (lazy-create-test-files
+ (lazy-run-tests
    (λ (gen) (test-spec/path-explorer gen symbolic-ledger symbolic-tx-envelope))
    symbols))
 
