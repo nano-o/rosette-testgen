@@ -7,7 +7,7 @@
   rosette/lib/destruct
   ;racket/trace
   (only-in list-util zip)
-  macro-debugger/expand)
+  #;macro-debugger/expand)
 
 (define symbolic-ledger
   (the-grammar #:depth 9 #:start TestLedger-rule))
@@ -107,7 +107,7 @@
          (if (bveq current-entry-id/bv256 src/bv256)
            (void) ; current-entry is the one we want to delete
            (begin
-             ; add balance fs current-entry is the destination
+             ; add balance if current-entry is the destination
              (if (bveq current-entry-id/bv256 dst/bv256)
                (void)
                (void))
@@ -176,7 +176,8 @@
 
 (define (lazy-go)
  (lazy-run-tests
-   (λ (gen) (test-spec-crash/path-explorer gen symbolic-ledger symbolic-tx-envelope))
+   ; (λ (gen) (test-spec-crash/path-explorer gen symbolic-ledger symbolic-tx-envelope))
+   (λ (gen) (test-spec/path-explorer gen symbolic-ledger symbolic-tx-envelope))
    symbols))
 
 ; TODO something should fail if the dst is sponsoring the src
