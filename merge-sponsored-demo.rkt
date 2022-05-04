@@ -104,12 +104,14 @@
     (λ (e)
        (let* ([account-entry (:union:-value (LedgerEntry-data e))]
               [current-entry-id/bv256 (pubkey->bv256 (AccountEntry-accountID account-entry))])
-         (begin
-           (if (bveq current-entry-id/bv256 dst/bv256)
-             (void) ; add src balance to dst
-             (void)) ; else do nothing
-           (if (not (bveq current-entry-id/bv256 src/bv256))
-             ; if the entry is sponsoring the src or any of the src's sub-entries, then we need to update the counts
+         (if (bveq current-entry-id/bv256 src/bv256)
+           (void) ; current-entry is the one we want to delete
+           (begin
+             ; add balance fs current-entry is the destination
+             (if (bveq current-entry-id/bv256 dst/bv256)
+               (void)
+               (void))
+             ; now adjust num-sponsoring
              (let* ([src-entry (find-account-entry src/bv256 ledger-entries)]
                     [sponsors? (sponsors? current-entry-id/bv256 src-entry)]
                     [num-sponsored-signers (num-signers-sponsored-by-in current-entry-id/bv256 src-entry)])
@@ -119,8 +121,7 @@
                    (void))
                  (if (bvugt num-sponsored-signers (bv 0 32))
                    (void) ; subtract num-sponsored-signers from num-sponsoring
-                   (void))))
-             (void))))) ; current-entry is the one we want to delete
+                   (void))))))))
     ledger-entries))
 
 (define/path-explorer (test-case ledger-header ledger-entries tx-envelope)
@@ -137,10 +138,30 @@
         ACCOUNT_MERGE_NO_ACCOUNT
         (if (not (bveq (num-sponsoring tx-src/bv256 ledger-entries) (bv 0 32)))
           ACCOUNT_MERGE_IS_SPONSOR
-          ; TODO now check if the destination is sponsoring any subentries (if so we'd need to modify numSponsoring). Could also check if there's e.g. 2 sponsored entries.
           (begin
             (merge-entries tx-src/bv256 dst/bv256 ledger-entries)
             ACCOUNT_MERGE_SUCCESS)))))) ; NOTE there are many unsat paths
+
+(define (crash-precondition ledger-header ledger-entries tx-envelope)
+  ; here we assert that the dst sponsors the src entry
+  (let* ([tx-src/bv256 (source-account/bv256 tx-envelope)]
+         [src-entry (find-account-entry tx-src/bv256 ledger-entries)]
+         [tx (TransactionV1Envelope-tx (:union:-value tx-envelope))]
+         [op (vector-ref-bv (Transaction-operations tx) (bv 0 1))]
+         [dst/bv256 (muxed-account->bv256 (:union:-value (Operation-body op)))])
+   (assume
+    (and
+      (not (bveq tx-src/bv256 dst/bv256))
+      (account-exists? dst/bv256 ledger-entries)
+      (bveq (num-sponsoring tx-src/bv256 ledger-entries) (bv 0 32))
+      (sponsors? dst/bv256 src-entry)))))
+
+(define/path-explorer (test-spec-crash test-ledger test-tx-envelope)
+  (let ([test-header (TestLedger-ledgerHeader test-ledger)]
+        [test-entries (vector->list (TestLedger-ledgerEntries test-ledger))])
+    (begin
+     (establish-preconditions test-header test-entries test-tx-envelope)
+     (crash-precondition test-header test-entries test-tx-envelope))))
 
 (define/path-explorer (test-spec test-ledger test-tx-envelope)
   (let ([test-header (TestLedger-ledgerHeader test-ledger)]
@@ -155,7 +176,7 @@
 
 (define (lazy-go)
  (lazy-run-tests
-   (λ (gen) (test-spec/path-explorer gen symbolic-ledger symbolic-tx-envelope))
+   (λ (gen) (test-spec-crash/path-explorer gen symbolic-ledger symbolic-tx-envelope))
    symbols))
 
 ; TODO something should fail if the dst is sponsoring the src
