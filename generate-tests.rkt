@@ -156,9 +156,12 @@
     (create-test-file i s))))
 
 (define (lazy-run-tests spec symbols)
- (let* ([all-solutions (all-paths spec symbols)]
-        [sat-solutions (stream-filter sat? all-solutions)])
-   (for ([s (in-stream sat-solutions)]
-         [i (in-naturals 0)])
-    (create-test-file i s)
-    (run-test i))))
+  (let* ([all-solutions (all-paths spec symbols)]
+         [sat-solutions (stream-filter sat? all-solutions)])
+    (begin
+      (for ([s (in-stream sat-solutions)]
+            [i (in-naturals 0)])
+           (create-test-file i s)
+           (run-test i)
+           (displayln (format "ran test ~a" i)))
+      (displayln "finished"))))
