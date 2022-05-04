@@ -115,18 +115,6 @@
       (let ([sponsor/bv256 (pubkey->bv256 (:union:-value sponsorship-descriptor))])
        (bveq account-id/bv256 sponsor/bv256))))))
 
-(define (num-signers-sponsored-by sponsor-ids sponsor-id/bv256)
-  ; sponsor-ids is a list of optional pub-keys
-  (let ([proc
-         (λ (s count)
-           (let ([sponsoring?
-                  (and (opt-non-null? s)
-                       (bveq sponsor-id/bv256 (pubkey->bv256 (:union:-value s))))])
-             (if sponsoring?
-                 (bvadd (bv 1 32) count)
-                 count)))])
-    (foldl proc (bv 0 32) sponsor-ids)))
-
 (define (account-entry-has-v2-ext? account-entry)
   (bveq (:union:-tag (AccountEntry-ext account-entry)) (bv 1 32))
   (let ([v1-ext (:union:-value (AccountEntry-ext account-entry))])
@@ -139,45 +127,56 @@
       (vector->list (AccountEntryExtensionV2-signerSponsoringIDs v2-ext)))
     null))
 
-(define (num-sponsoring-in-this-entry ledger-entry account-id/bv256)
-  ; counts how many subentries of ledger-entry are sponsored by account-id
-  (if (ledger-entry-has-v1-ext? ledger-entry)
-    (let* ([v1-ext (:union:-value (LedgerEntry-ext ledger-entry))]
-           [sponsoring-entry?
-             (and
-               (bveq (:union:-tag (LedgerEntryExtensionV1-sponsoringID v1-ext)) (bv 1 32))
-               (bveq
-                 (pubkey->bv256 (:union:-value (LedgerEntryExtensionV1-sponsoringID v1-ext)))
-                 account-id/bv256))]
-           [num-signers-sponsored
-             (if (account-entry? ledger-entry)
-               (let* ([account-entry (:union:-value (LedgerEntry-data ledger-entry))]
-                      [sponsors (signer-sponsoring-ids account-entry)])
-                (num-signers-sponsored-by sponsors account-id/bv256))
-               (bv 0 32))])
-      (if sponsoring-entry?
-        (bvadd (bv 1 32) num-signers-sponsored)
-        num-signers-sponsored))
+(define (num-signers-sponsored-by-in account-id/bv256 ledger-entry)
+  ; counts how many signers of ledger-entry are sponsored by account-id
+  (define (num-in-list sponsor-ids sponsor-id/bv256)
+    ; sponsor-ids is a list of optional pub-keys
+    (let ([proc
+            (λ (s count)
+               (let ([sponsoring?
+                       (and (opt-non-null? s)
+                            (bveq sponsor-id/bv256 (pubkey->bv256 (:union:-value s))))])
+                 (if sponsoring?
+                   (bvadd (bv 1 32) count)
+                   count)))])
+      (foldl proc (bv 0 32) sponsor-ids)))
+  (if (account-entry? ledger-entry)
+    (let ([account-entry (:union:-value (LedgerEntry-data ledger-entry))])
+      (if (account-entry-has-v2-ext? account-entry)
+        (let ([sponsors (signer-sponsoring-ids account-entry)])
+          (num-in-list sponsors account-id/bv256))
+        (bv 0 32)))
     (bv 0 32)))
+
+(define (sponsors? sponsor-id/bv256 ledger-entry)
+  (and
+    (ledger-entry-has-v1-ext? ledger-entry)
+    (let ([v1-ext (:union:-value (LedgerEntry-ext ledger-entry))])
+      (and
+        (opt-non-null? (LedgerEntryExtensionV1-sponsoringID v1-ext))
+        (bveq
+          (pubkey->bv256 (:union:-value (LedgerEntryExtensionV1-sponsoringID v1-ext)))
+          sponsor-id/bv256)))))
+
+(define (num-sponsored-by-in account-id/bv256 ledger-entry)
+  ; counts how many subentries of ledger-entry are sponsored by account-id
+  (let ([sponsors? (sponsors? account-id/bv256 ledger-entry)]
+        [num-signers-sponsored (num-signers-sponsored-by-in account-id/bv256 ledger-entry)])
+      (if sponsors? ; NOTE counts for 2
+        (bvadd (bv 2 32) num-signers-sponsored)
+        num-signers-sponsored)))
 
 (define (num-sponsoring sponsor-id/bv256 ledger-entries)
   ; how many entries and sub-entries is sponsor-id sponsoring?
   ; we iterate over ledger entries and count
   (let ([proc
-         (λ (e count)
-           (let ([sponsors-entry?/bv32
-                  (if (sponsors-entry? e sponsor-id/bv256)
-                      (bv 1 32)
-                      (bv 0 32))]
-                 [sponsored-signers
-                  (if (account-entry? e)
-                      (let ([account-entry (:union:-value (LedgerEntry-data e))])
-                        (if (account-entry-has-v2-ext? account-entry)
-                            (let ([ids (signer-sponsoring-ids account-entry)])
-                              (num-signers-sponsored-by ids sponsor-id/bv256))
-                            (bv 0 32)))
-                      (bv 0 32))])
-             (bvadd count (bvadd sponsors-entry?/bv32 sponsored-signers))))])
+          (λ (e count)
+             (let ([sponsors-entry?/bv32
+                     (if (sponsors-entry? e sponsor-id/bv256)
+                       (bv 2 32) ; NOTE is seems that sponsoring an account counts for 2
+                       (bv 0 32))]
+                   [num-sponsored-signers (num-signers-sponsored-by-in sponsor-id/bv256 e)])
+               (bvadd count (bvadd sponsors-entry?/bv32 num-sponsored-signers))))])
     (foldl proc (bv 0 32) ledger-entries)))
 
 (define (non-null-count l)
@@ -198,13 +197,13 @@
 
 (define (num-sponsored ledger-entry)
   ; computes the numbers of sponsors that this ledger-entry has
-  (let ([entry-sponsor ; 1 if entry is sponsored, 0 otherwise
+  (let ([entry-sponsor ; 2 if entry is sponsored, 0 otherwise
          (if
           (and
            (ledger-entry-has-v1-ext? ledger-entry)
            (let ([v1-ext (:union:-value (LedgerEntry-ext ledger-entry))])
              (bveq (:union:-tag (LedgerEntryExtensionV1-sponsoringID v1-ext)) (bv 1 32))))
-         (bv 1 32)
+         (bv 2 32) ; NOTE it seems that it counts for 2
          (bv 0 32))]
         [sponsored-signers ; number of signers of this entry that are sponsored
          (if (account-entry? ledger-entry)
@@ -384,19 +383,19 @@
    (list (bv #x00000000 32) (bv #x00000000 32) (bv #x00000000 32)))
   (check-equal?
    (num-sponsoring/list test-2)
-   (list (bv #x00000002 32) (bv #x00000002 32) (bv #x00000001 32)))
+   (list (bv #x00000003 32) (bv #x00000002 32) (bv #x00000002 32)))
   (check-equal?
    (num-sponsoring/list test-4)
-   (list (bv #x00000000 32) (bv #x00000001 32) (bv #x00000000 32)))
+   (list (bv #x00000000 32) (bv #x00000002 32) (bv #x00000000 32)))
   (check-equal?
    (num-sponsored/list test-1)
-   (list (bv #x00000000 32) (bv #x00000000 32) (bv #x00000001 32)))
+   (list (bv #x00000000 32) (bv #x00000000 32) (bv #x00000002 32)))
   (check-equal?
    (num-sponsored/list test-2)
-   (list (bv #x00000002 32) (bv #x00000002 32) (bv #x00000002 32)))
+   (list (bv #x00000003 32) (bv #x00000003 32) (bv #x00000003 32)))
   (check-equal?
    (num-sponsored/list test-3)
-   (list (bv #x00000001 32) (bv #x00000001 32) (bv #x00000002 32)))
+   (list (bv #x00000001 32) (bv #x00000002 32) (bv #x00000003 32)))
 
   (define (for-each-test proc)
     (for-each (λ (t) (proc t)) tests))
@@ -429,6 +428,6 @@
          (λ (ledger-entry ledger-entries ledger-header)
             (check-not-exn
               (λ ()
-                 (num-sponsoring-in-this-entry ledger-entry account-id/bv256)
+                 (num-sponsored-by-in account-id/bv256 ledger-entry)
                  )))
          t)))))
