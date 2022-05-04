@@ -104,14 +104,13 @@
 (define (pubkey->bv256 pubkey)
   (:byte-array:-value (:union:-value pubkey)))
 
-(define (sponsors-entry? ledger-entry account-id/bv256)
+(define (sponsors? account-id/bv256 ledger-entry)
   (and
    (ledger-entry-has-v1-ext? ledger-entry)
    (let* ([v1-ext (:union:-value (LedgerEntry-ext ledger-entry))]
-          [sponsorship-descriptor (LedgerEntryExtensionV1-sponsoringID v1-ext)]
-          [is-sponsored? (opt-non-null? sponsorship-descriptor)])
+          [sponsorship-descriptor (LedgerEntryExtensionV1-sponsoringID v1-ext)])
      (and
-      is-sponsored?
+      (opt-non-null? sponsorship-descriptor)
       (let ([sponsor/bv256 (pubkey->bv256 (:union:-value sponsorship-descriptor))])
        (bveq account-id/bv256 sponsor/bv256))))))
 
@@ -148,16 +147,6 @@
         (bv 0 32)))
     (bv 0 32)))
 
-(define (sponsors? sponsor-id/bv256 ledger-entry)
-  (and
-    (ledger-entry-has-v1-ext? ledger-entry)
-    (let ([v1-ext (:union:-value (LedgerEntry-ext ledger-entry))])
-      (and
-        (opt-non-null? (LedgerEntryExtensionV1-sponsoringID v1-ext))
-        (bveq
-          (pubkey->bv256 (:union:-value (LedgerEntryExtensionV1-sponsoringID v1-ext)))
-          sponsor-id/bv256)))))
-
 (define (num-sponsored-by-in account-id/bv256 ledger-entry)
   ; counts how many subentries of ledger-entry are sponsored by account-id
   (let ([sponsors? (sponsors? account-id/bv256 ledger-entry)]
@@ -172,7 +161,7 @@
   (let ([proc
           (λ (e count)
              (let ([sponsors-entry?/bv32
-                     (if (sponsors-entry? e sponsor-id/bv256)
+                     (if (sponsors? sponsor-id/bv256 e)
                        (bv 2 32) ; NOTE is seems that sponsoring an account counts for 2
                        (bv 0 32))]
                    [num-sponsored-signers (num-signers-sponsored-by-in sponsor-id/bv256 e)])
@@ -253,7 +242,7 @@
                      [account-id/pubkey (AccountEntry-accountID account-entry)])
                 (and
                   ; an account cannot sponsor itself:
-                  (not (sponsors-entry? ledger-entry (pubkey->bv256 account-id/pubkey)))
+                  (not (sponsors? (pubkey->bv256 account-id/pubkey) ledger-entry))
                   ; numSponsored must be correct:
                   (bveq (num-sponsored ledger-entry) (AccountEntryExtensionV2-numSponsored ext-v2))
                   ; numSponsoring must be correct:
