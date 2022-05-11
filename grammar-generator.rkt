@@ -610,6 +610,8 @@
 (define (built-in-structs stx)
   ; we put ":" in the name to avoid clashes with XDR names
   ; TODO ":" is really ugly
+  ; we can use union as it cannot be used as an identifier as per RFC4506
+  ; we can also use an _ prefix, which again cannot be used in an identifier as per RFC4506
   (list
    (make-struct-type stx ":byte-array:" '("value"))
    (make-struct-type stx ":union:" '("tag" "value"))))
