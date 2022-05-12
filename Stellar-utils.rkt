@@ -1,8 +1,12 @@
-#lang rosette
+#lang sweet-exp rosette
+
+; TODO make thing more readable with sweet-exp
+; TODO configure vim autoindent indentation for that...
 
 (require
   "Stellar-grammar-merge-sponsored-demo.rkt"
   rosette/lib/destruct
+  syntax/parse/define
   racket/trace)
 
 ; TODO couldn't we just generate the grammar here?
@@ -10,28 +14,38 @@
 
 (provide (all-defined-out) (all-from-out "Stellar-grammar-merge-sponsored-demo.rkt"))
 
+define enum-value(v)
+  bv v 32
+
 ; 10 millon stroops = 1 XLM
-(define (xlm->stroop x)
-  (* x 10000000))
+define xlm->stroop(x)
+  {x * 10000000}
 
-(define (bv->bv64 bitvect)
-  (zero-extend bitvect (bitvector 64)))
+define bv->bv64(bitvect)
+  zero-extend bitvect (bitvector 64)
 
-(define (opt-non-null? x/optional)
-  (bveq (:union:-tag x/optional) (bv 1 32)))
-(define (opt-null? x/optional)
-  (bveq (:union:-tag x/optional) (bv 0 32)))
+define =/bv bveq
 
-(define (muxed-account->bv256 muxed-account)
-  (destruct muxed-account
+; NOTE: may be nice for internal defs:
+define-simple-macro
+  def x:id (~datum =) b:expr
+  define x b
+
+define opt-non-null?(x/optional)
+  {(:union:-tag x/optional) =/bv (enum-value 1)}
+define opt-null?(x/optional)
+  {(:union:-tag x/optional) =/bv (enum-value 0)}
+
+define muxed-account->bv256(muxed-account)
+  destruct muxed-account ; NOTE destruct doesn't cooperate well with sweet-exp
     [(:union: tag v)
-     (if (bveq tag (bv KEY_TYPE_ED25519 32))
-         (:byte-array:-value v)
-         (if (bveq tag (bv KEY_TYPE_MUXED_ED25519 32))
-             ; in this case, extract the ed25519 key
-             (destruct v
-               [(MuxedAccount::med25519 _ k) (:byte-array:-value k)])
-             (assume #f)))])) ; unreachable
+     (if (bveq tag (enum-value KEY_TYPE_ED25519))
+       (:byte-array:-value v)
+       (if {tag =/bv (bv KEY_TYPE_MUXED_ED25519 32)}
+         ; in this case, extract the ed25519 key
+         (destruct v
+           [(MuxedAccount::med25519 _ k) (:byte-array:-value k)])
+            (assume #f)))] ; unreachable
 
 (define (source-account/bv256 tx-envelope)
   ; returns the ed25519 public key of this account (as a bitvector)
@@ -55,13 +69,13 @@
   ; returns false if not found
   (findf (λ (e) (account-entry-for? e account-id/bv256)) ledger-entries))
 
-; Thresholds are an opaque array; because we chose to use flat bitvectors for, it's a bit harder to access the components
-(define (thresholds-ref t n) ; n between 0 and 3
-  (let ([b (:byte-array:-value t)]
-        ; total size is 32 bits
-        [i (- 31 (* n 8))]
-        [j (- 32 (* (+ n 1) 8))])
-    (extract i j b)))
+; Thresholds are an opaque array; because we represent opaque arrays with flat bitvectors, it's a bit harder to access the components
+; TODO: why not use vectors of bytes?
+define thresholds-ref(t n) ; n between 0 and 3
+  def b = (:byte-array:-value t) ; total size is 32 bits
+  def i = (- 31 (* n 8))
+  def j = (- 32 (* (+ n 1) 8))
+  extract i j b
 
 (define (master-key-threshold account-entry) ; get the master key threshold
   (thresholds-ref (AccountEntry-thresholds account-entry) 0))
@@ -74,8 +88,9 @@
          (bveq entry-id/bv256 account-id/bv256))))
 
 (define (account-exists? account-id/bv256 ledger-entries)
-  (let ([proc (λ (e) (account-entry-for? e account-id/bv256))])
-    (ormap proc ledger-entries)))
+  (define (this-one? e)
+    (account-entry-for? e account-id/bv256))
+  (ormap this-one? ledger-entries))
 
 (define (duplicate-accounts? ledger-entries)
   (if (empty? ledger-entries)
