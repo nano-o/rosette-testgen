@@ -32,20 +32,21 @@ define-simple-macro
   define x b
 
 define opt-non-null?(x/optional)
-  {(:union:-tag x/optional) =/bv (enum-value 1)}
+  {:union:-tag(x/optional) =/bv (enum-value 1)}
 define opt-null?(x/optional)
-  {(:union:-tag x/optional) =/bv (enum-value 0)}
+  {:union:-tag(x/optional) =/bv (enum-value 0)}
 
 define muxed-account->bv256(muxed-account)
   destruct muxed-account ; NOTE destruct doesn't cooperate well with sweet-exp
-    [(:union: tag v)
-     (if (bveq tag (enum-value KEY_TYPE_ED25519))
-       (:byte-array:-value v)
-       (if {tag =/bv (bv KEY_TYPE_MUXED_ED25519 32)}
-         ; in this case, extract the ed25519 key
-         (destruct v
-           [(MuxedAccount::med25519 _ k) (:byte-array:-value k)])
-            (assume #f)))] ; unreachable
+    group
+      (:union: tag v)
+      (if (bveq tag (enum-value KEY_TYPE_ED25519))
+        (:byte-array:-value v)
+        (if {tag =/bv (bv KEY_TYPE_MUXED_ED25519 32)}
+          ; in this case, extract the ed25519 key
+          (destruct v
+            [(MuxedAccount::med25519 _ k) (:byte-array:-value k)])
+             (assume #f))) ; unreachable
 
 (define (source-account/bv256 tx-envelope)
   ; returns the ed25519 public key of this account (as a bitvector)
@@ -73,9 +74,9 @@ define muxed-account->bv256(muxed-account)
 ; TODO: why not use vectors of bytes?
 define thresholds-ref(t n) ; n between 0 and 3
   def b = (:byte-array:-value t) ; total size is 32 bits
-  def i = (- 31 (* n 8))
-  def j = (- 32 (* (+ n 1) 8))
-  extract i j b
+  def i = {31 - {n * 8}}
+  def j = {32 - {{n + 1} * 8}}
+  extract(i j b)
 
 (define (master-key-threshold account-entry) ; get the master key threshold
   (thresholds-ref (AccountEntry-thresholds account-entry) 0))
