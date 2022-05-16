@@ -180,10 +180,7 @@
    (λ (gen) (test-spec/path-explorer gen symbolic-ledger symbolic-tx-envelope))
    symbols))
 
-; TODO something should fail if the dst is sponsoring the src
-
 (define (go)
- ; TODO generate tests lazyly...
   (begin
     (compute-solutions
       (λ (gen) (test-spec/path-explorer gen symbolic-ledger symbolic-tx-envelope))
@@ -196,5 +193,3 @@
          (newline))
     (create-test-files)
     (displayln (format "finished generating ~a tests" (length ts)))))
-
-; (go)

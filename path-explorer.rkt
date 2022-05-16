@@ -14,16 +14,15 @@
 (define-syntax-parameter the-generator (lambda (stx) (raise-syntax-error (syntax-e stx) "can only be used inside path-explorer")))
 
 ; We define macro that takes a racket definition and creates a Rosette program that follows the path given by a generator
-; TODO should we allow non-determinism in the specs?
-; For example, the error code returns by a transaction could depend on the order in which conditions are checked (if multiple conditions are violated).
+; Should we allow non-determinism in the specs? No, because everything should be deterministic for SMR
 ; TODO it might make sense to restrict specs to a total fragment of Racket
 ; TODO it might be better to explicitly mark the control-flow nodes that are subject to exhaustive exploration
-; e.g. we could have if/e, and/e, or/e etc.
+; e.g. we could have if/e, and/e, or/e etc. or wrap stuff in (explore ...)
 ; TODO this whole thing only works if we have no symbolic unions (e.g. if a list can have different length we're in trouble). This is because Rosette will execute the same code multiple times for each union member.
 
 (begin-for-syntax
   (define debug? #f)
-  
+
   ; First we rewrite "or", "and", "case" to "if" expressions
   ; TODO support "cond"
   (define-syntax-class l0
@@ -52,7 +51,7 @@
              #:attr l1 #'(fn arg*.l1 ...)])
 
   ; NOTE with "and" and "or" we want to explore the structure of the formula
-  
+
   (define (or->ifs e*)
     (if (null? e*)
         #'#f
@@ -61,7 +60,7 @@
           #`(if #,(car e*)
                 #t
                 rest))))
-  
+
   (define (and->ifs e*)
     (if (null? e*)
         #'#t
@@ -70,12 +69,12 @@
           #`(if (not #,(car e*))
                 #f
                 rest))))
-  
+
   ; Next we synthesize path-explorer expressions
 
   ; a set containing the function names that have a path explorer
   (define fn-with-explorer (mutable-set))
-  
+
   (define (explorer-id x)
     (format-id x "~a/path-explorer" x))
 
@@ -96,7 +95,7 @@
   (define-syntax-class (has-path-explorer)
     [pattern x:id
              #:when (set-member? fn-with-explorer (syntax-e #'x))])
-    
+
   (define-syntax-class l1
     #:description "an expression amenable to path-exploration"
     #:literals (begin let let* if or and assume case)
@@ -177,7 +176,7 @@
             (solve (prog gen))
             symbols)])
       (begin
-        (when debug?
+        (when #t ;debug?
             (displayln (format "End of execution path; SAT: ~a" (sat? solution))))
         (if (equal? (gen 0) 0)
             (stream-cons solution (go))

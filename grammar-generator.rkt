@@ -20,7 +20,10 @@
 ; TODO create union struct named after the each union type instead of the generic :union: (for readability)
 ; TODO clean up make-rule
 ; TODO add tests to make sure the grammar macro is working...
-; TODO now that we have a working grammar macro, how do we use (e.g. we have several modules which depend on it...)
+; TODO now that we have a working grammar macro, how do we use it? (e.g. we have several modules which depend on it...)
+; TODO could be useful to make nullable type monads using a generic interface
+; TODO split in two: one part to compile an XDR spec to Racket type definitions (constants and structs), and one part to generate the Rosette grammar.
+; TODO use lenses to allow writing functional specifications
 
 (require
   (rename-in nanopass [extends extends-language]) ; conflicts with rosette
@@ -45,6 +48,7 @@
 
 (define-language L0
   ; This is a subset of the language of guile-rpc ASTs
+  ; TODO what's not supported?
   (terminals
    (identifier (i))
    (constant (c))
@@ -121,7 +125,6 @@
          `(union (,i1 ,i2) ,union-case-spec* ...))))
 
 ; Next we add the default bool enum
-
 (define-pass add-bool : L0a (ir) -> L0a ()
   (XDR-Spec : XDR-Spec (ir) -> XDR-Spec ()
             ((,def* ...)
@@ -199,7 +202,7 @@
           (make-consts-hashmap (simplify-union (L0-parser test-3)))
           (make-consts-hashmap (simplify-union (L0-parser test-4)))
           (make-consts-hashmap Stellar-l0a)))))))
-                     
+
 ; Make constant definitions:
 
 (define (constant-definitions stx h)
@@ -577,7 +580,7 @@
 (define (make-list stx consts elem-type-rule-thunk size)
   (let ([n (size->number consts size)])
     (make-sequence stx #'list elem-type-rule-thunk n)))
-(define max-seq-len 2) ; we never make variable-length sequences bigger than that
+(define max-seq-len 3) ; we never make variable-length sequences bigger than that TODO: unless there's an override...
 (define (make-vector stx consts elem-type-rule-thunk size) ; variable-size array
   (let ([n (size->number consts size)])
     (let ([m (if (or (not n) (> n max-seq-len)) max-seq-len n)])
@@ -611,7 +614,8 @@
   ; we put ":" in the name to avoid clashes with XDR names
   ; TODO ":" is really ugly
   ; we can use union as it cannot be used as an identifier as per RFC4506
-  ; we can also use an _ prefix, which again cannot be used in an identifier as per RFC4506
+  ; we can also use a prefix like _ or -, which again cannot be used at the beginning of an identifier as per RFC4506
+  ; we could also consider creating on union struct per union type (with the type name in it)
   (list
    (make-struct-type stx ":byte-array:" '("value"))
    (make-struct-type stx ":union:" '("tag" "value"))))
