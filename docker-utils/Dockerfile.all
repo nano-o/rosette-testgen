@@ -1,0 +1,141 @@
+FROM ubuntu:jammy
+
+# RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+ARG DEBIAN_FRONTEND=noninteractive
+# are both the above needed?
+
+# always run apt-get update before install to make sure we don't have a stale database
+RUN apt-get update && apt-get install -y --no-install-recommends apt-utils dialog ca-certificates
+
+# Install and configure locale `en_US.UTF-8`
+RUN apt-get update && apt-get install -y locales && \
+    sed -i -e "s/# $en_US.*/en_US.UTF-8 UTF-8/" /etc/locale.gen && \
+    dpkg-reconfigure --frontend=noninteractive locales && \
+    update-locale LANG=en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV TZ="America/Los_Angeles"
+
+# create a user who can use sudo:
+RUN apt-get update && apt-get install -y sudo
+RUN useradd -ms /bin/bash user && echo 'user:user' | chpasswd && adduser user sudo
+RUN echo "ALL ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+# install packages:
+RUN apt-get update && apt-get -y install vim vim-nox curl aptitude cmake python3-dev bear gdb universal-ctags rsync git build-essential pkg-config autoconf automake libtool bison flex libpq-dev parallel libunwind-dev libstdc++-10-dev clang-format ccache clang llvm cmake ripgrep bat fd-find fzf zsh tmux tmate stow clangd wget postgresql sqlite3 vim vim-nox curl build-essential aptitude cmake python3-dev bear gdb texinfo guile-3.0 guile-3.0-dev golang-go nodejs
+
+
+# Switch back to dialog for any ad-hoc use of apt-get
+# RUN echo 'debconf debconf/frontend select Interactive' | debconf-set-selections
+
+USER user
+WORKDIR /home/user/
+
+# build stellar-core
+# clang by default
+ENV CC=clang
+ENV CXX=clang++
+# clone stellar-core
+RUN git clone https://github.com/stellar/stellar-core.git
+WORKDIR /home/user/stellar-core
+RUN ./autogen.sh
+RUN ./configure --prefix=/home/user/ --enable-ccache
+RUN bear -- make -j2
+RUN make install
+
+# install septum (tool to grep in big codebases)
+WORKDIR /home/user/
+RUN git clone https://github.com/pyjarrett/septum.git
+RUN wget https://github.com/alire-project/alire/releases/download/v1.1.2/alr-1.1.2-bin-x86_64-linux.zip
+RUN unzip /home/user/alr-1.1.2-bin-x86_64-linux.zip
+RUN rm LICENSE.txt
+WORKDIR /home/user/septum
+RUN /home/user/bin/alr toolchain -n --select
+RUN /home/user/bin/alr build
+RUN cp bin/septum /home/user/bin
+WORKDIR /home/user/
+
+# make and install guile-rpc:
+
+WORKDIR /home/user/
+RUN git clone git://git.sv.gnu.org/guile-rpc.git
+WORKDIR /home/user/guile-rpc/
+RUN mkdir m4
+RUN cp /usr/share/aclocal/guile.m4 m4/
+RUN autoreconf -vfi
+RUN ./configure --prefix=/home/user
+RUN make install
+WORKDIR /home/user/
+
+# install stc
+ENV PATH=/home/user/go/bin:${PATH}
+RUN GOPROXY=direct go install github.com/xdrpp/stc/...@latest
+RUN mkdir /home/user/.stc/
+ENV STCDIR=/home/user/.stc/
+COPY --chown=user:user test.net ${STCDIR}
+
+# install script xdr_spec_to-sexp.sh:
+ENV PATH=/home/user/bin:${PATH}
+RUN grpc-compile --help # force compilation
+COPY --chown=user:user xdr_spec_to_sexp.sh /home/user/bin/
+RUN chmod +x /home/user/bin/xdr_spec_to_sexp.sh
+
+# install script serialize.sh:
+RUN git clone https://github.com/jacobrec/guile-lib.git jlib # for base64 support
+COPY --chown=user:user serialize.scm /home/user/
+RUN guile serialize.scm # force compilation
+COPY --chown=user:user Stellar.x /home/user/
+COPY --chown=user:user serialize.sh /home/user/bin/
+COPY --chown=user:user sign.sh /home/user/bin/
+COPY --chown=user:user run-test.sh /home/user/bin/
+RUN chmod +x /home/user/bin/serialize.sh
+RUN chmod +x /home/user/bin/sign.sh
+RUN chmod +x /home/user/bin/run-test.sh
+
+# install more packages:
+USER root
+RUN apt-get update && apt-get -y install aptitude python3-pynvim software-properties-common
+USER user
+
+# configure stuff:
+RUN curl -fLo /home/user/.vim/autoload/plug.vim --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+COPY --chown=user:user dotfiles dotfiles
+WORKDIR /home/user/dotfiles/
+RUN stow vim
+# TODO: why not have stow create the following?
+RUN mkdir /home/user/.vim/backupfiles
+RUN mkdir /home/user/.vim/swapfiles
+RUN mkdir /home/user/.vim/undofiles
+RUN stow ctags
+RUN stow tmux
+# RUN stow zsh
+RUN stow gdb
+# RUN stow bash
+WORKDIR /home/user/
+RUN echo '\n\
+# disable C-S in case it causes freezing in vim\n\
+stty -ixon\n\
+# Avoid duplicates\n\
+HISTCONTROL=ignoredups:erasedups\n\
+# When the shell exits, append to the history file instead of overwriting it\n\
+shopt -s histappend\n\
+# After each command, append to the history file and reread it\n\
+PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND$'\n'}history -a; history -c; history -r"\n'\
+>> /home/user/.bashrc
+
+RUN vim -E -s -u "/home/user/.vimrc" +PlugInstall +qall | true
+# TODO: the line above does not set up YCM properly
+# racket-langserver does not run without x11 and dependencies of racket dependencies (so we install the racket package):
+USER root
+RUN apt-get update && apt-get -y install xvfb racket
+RUN wget https://download.racket-lang.org/installers/8.5/racket-8.5-x86_64-linux-cs.sh
+# work around raco bug:
+RUN raco setup --doc-index --force-user-docs
+# NOTE: apt update will overwrite this version of racket:
+RUN yes | sh racket-8.5-x86_64-linux-cs.sh --unix-style
+USER user
+RUN raco pkg install --batch --auto racket-langserver
+
+ENV PATH=/home/user/bin:${PATH}
+ENV BAT_THEME=ansi
+
+WORKDIR /home/user/
