@@ -1,4 +1,4 @@
-#lang racket
+#lang errortrace racket
 
 ; Compiles an XDR specification to:
 ; - A set of Racket definitions (constants and structs)
@@ -16,10 +16,11 @@
 
 ; We use the nanopass compiler framework
 
+; TODO use define-nested-lenses or struct-nested-lens to define all possible nested lenses?
 ; TODO there's pretty much no error checking
 ; TODO write tests
 ; TODO a pass to remove recursion or limit its depth (ClaimPredicate)? For now I manually removed the recursion from the XDR spec.
-; TODO for variable length arrays (like signers), allow specifying a length range
+; TODO for variable length arrays (like signers), allow specifying a length range; but, not currently compatible with the path explorer.
 ; TODO create union struct named after the each union type instead of the generic :union: (for readability)
 ; TODO clean up make-rule
 ; TODO add tests to make sure the grammar macro is working...
@@ -33,7 +34,10 @@
   racket/hash
   (only-in list-util zip)
   racket/syntax
-  graph)
+  graph
+  (for-template
+    racket/base
+    lens))
 
 (provide
   xdr-types->racket
@@ -92,7 +96,6 @@
                  (("B" "C") ("d" "int")))))
       (define-type "test-struct"
         (struct ("t1" (union (case ("tagname-3" "tagtype-3") (("F" "G") ("y" "T")))))))))
-  (define/provide-test-suite L0-parser/test
     (test-case
      "parse simple examples"
      (check-not-exn
@@ -105,7 +108,7 @@
      (check-not-exn
       (λ ()
         (L0-parser Stellar-xdr-types))
-      "exception parsing Stellar-xdr-types")))
+      "exception parsing Stellar-xdr-types"))
   (define Stellar-l0 (L0-parser Stellar-xdr-types)))
 
 ; L0a simplifies L0 a bit by removing the superfluous Union-Spec production
@@ -133,13 +136,12 @@
 ; (define-language-node-counter L0-counter L0)
 
 (module+ test
-  (define/provide-test-suite simplify-union/test
     (test-case
      "run simplify-union on stellar spec"
      (check-not-exn
       (λ ()
         (simplify-union Stellar-l0))
-      "exception in simplify-union")))
+      "exception in simplify-union"))
   (define Stellar-l0a (add-bool (simplify-union Stellar-l0))))
 
 ; throws an exception if there are any nested enums
@@ -154,24 +156,23 @@
 (module+ test
   (define test-2
     '((define-type "test-struct"
-        (struct ("t1" (enum ("A" 1)))))))
+                   (struct ("t1" (enum ("A" 1)))))))
   (define test-3
     '((define-type "t1" (enum ("A" 1)))))
-  (define/provide-test-suite throw-if-nested-enum/test
-    (test-case
-     "should throw on nested enum"
-     (check-exn
+  (test-case
+    "should throw on nested enum"
+    (check-exn
       exn:fail?
       (λ ()
-          (throw-if-nested-enum (simplify-union (L0-parser test-2)))))
+         (throw-if-nested-enum (simplify-union (L0-parser test-2)))))
     (test-case
-     "should not throw"
-     (check-not-exn
-      (λ ()
-        (begin
-          (throw-if-nested-enum (simplify-union (L0-parser test-1)))
-          (throw-if-nested-enum (simplify-union (L0-parser test-3)))
-          (throw-if-nested-enum Stellar-l0a))))))))
+      "should not throw"
+      (check-not-exn
+        (λ ()
+           (begin
+             (throw-if-nested-enum (simplify-union (L0-parser test-1)))
+             (throw-if-nested-enum (simplify-union (L0-parser test-3)))
+             (throw-if-nested-enum Stellar-l0a)))))))
 
 ; returns a hashmap mapping top-level enum symbols and constants to values
 (define-pass make-consts-hashmap : L0a (ir) -> * (h)
@@ -191,15 +192,14 @@
   (define test-4
     '((define-type "test-enum" (enum ("A" 1) ("B" 2))) (define-constant "C" 3)))
 
-  (define/provide-test-suite make-consts-hashmap/test
-    (test-case
-     "no exn"
-     (check-not-exn
+  (test-case
+    "no exn"
+    (check-not-exn
       (λ ()
-        (begin
-          (make-consts-hashmap (simplify-union (L0-parser test-3)))
-          (make-consts-hashmap (simplify-union (L0-parser test-4)))
-          (make-consts-hashmap Stellar-l0a)))))))
+         (begin
+           (make-consts-hashmap (simplify-union (L0-parser test-3)))
+           (make-consts-hashmap (simplify-union (L0-parser test-4)))
+           (make-consts-hashmap Stellar-l0a))))))
 
 ; Make constant definitions:
 
@@ -211,12 +211,11 @@
     #`(#,@defs)))
 
 (module+ test
-  (define/provide-test-suite constant-definitions/test
-    (test-case
-     "no exn"
-     (check-not-exn
+  (test-case
+    "no exn"
+    (check-not-exn
       (λ ()
-        (constant-definitions #'() (make-consts-hashmap Stellar-l0a))))))
+         (constant-definitions #'() (make-consts-hashmap Stellar-l0a)))))
   (define Stellar-const-defs (constant-definitions #'() (make-consts-hashmap Stellar-l0a))))
 
 ; Here we collect top-level enum definitions
@@ -232,13 +231,12 @@
    '(("bool" . (("TRUE" . 1) ("FALSE" . 0)))))) ; bool is implicit
 
 (module+ test
-  (define/provide-test-suite enum-defs/test
-    (test-case
-     "no exn"
-     (check-not-exn
+  (test-case
+    "no exn"
+    (check-not-exn
       (λ ()
-        (enum-defs Stellar-l0a))
-      "exception in enum-defs")))
+         (enum-defs Stellar-l0a))
+      "exception in enum-defs"))
   (define Stellar-enum-defs (enum-defs Stellar-l0a)))
 
 ; next we normalize union specs
@@ -285,15 +283,14 @@
   (define test-5
     '((define-type "my-enum" (enum ("A" 0) ("B" 1)))
       (define-type "my-union" (union (case ("tag" "my-enum") (("A") ("i" "int")) ((1) ("j" "int")))))))
-  (define/provide-test-suite normalize-unions/test
-    (test-case
-     "throw on numeric tag value in union tagged by an enum type"
-     (check-exn
+  (test-case
+    "throw on numeric tag value in union tagged by an enum type"
+    (check-exn
       exn:fail?
       (λ ()
-        (let* ([test-5-L0 (simplify-union (L0-parser test-5))]
-               [test-5-enums (enum-defs test-5-L0)])
-          (normalize-unions test-5-L0 test-5-enums))))))
+         (let* ([test-5-L0 (simplify-union (L0-parser test-5))]
+                [test-5-enums (enum-defs test-5-L0)])
+           (normalize-unions test-5-L0 test-5-enums)))))
   (define Stellar-l1 (normalize-unions Stellar-l0a Stellar-enum-defs)))
 
 ; Next we define a pass that changes the length of variable-length arrays as specified by the caller
@@ -349,7 +346,7 @@
         (+ (fixed-length-array p type-spec v))
         (+ (enum p (i* c*) ...))
         (+ (struct p decl* ...))))
-(define path? list?)
+(define path? list?) ; NOTE: this is part of the defintion of L2
 
 (define-pass add-path : L1 (ir) -> L2 ()
   (Def : Def (ir) -> Def ()
@@ -384,13 +381,12 @@
     l2))
 
 (module+ test
-  (define/provide-test-suite add-path/test
-    (test-case
-     "no exn on Stellar"
-     (check-not-exn
+  (test-case
+    "no exn on Stellar"
+    (check-not-exn
       (λ ()
-        (add-path Stellar-l1))
-      "exception in add-path")))
+         (add-path Stellar-l1))
+      "exception in add-path"))
   (define Stellar-l2 (add-path Stellar-l1)))
 
 (define (struct-name path)
@@ -406,13 +402,12 @@
   (XDR-Spec ir))
 
 (module+ test
-  (define/provide-test-suite collect-types/test
-    (test-case
-     "no exn"
-     (check-not-exn
+  (test-case
+    "no exn"
+    (check-not-exn
       (λ ()
-        (collect-types Stellar-l2))
-      "exception in collect-types")))
+         (collect-types Stellar-l2))
+      "exception in collect-types"))
   (define Stellar-types (collect-types Stellar-l2)))
 
 (define base-types '("opaque" "void" "int" "unsigned int" "hyper" "unsigned hyper"))
@@ -506,7 +501,7 @@
 (define (make-struct-type stx name fields) ; name and fields as strings
   (let ([field-names (for/list ([f fields])
                        (format-id stx "~a" f))])
-        #`(struct #,(format-id stx "~a" name) #,field-names #:transparent)))
+        #`(struct/lens #,(format-id stx "~a" name) #,field-names #:transparent)))
 
 (module+ test
   (make-struct-type #'() "my-struct" '("field1" "field2")))
@@ -519,7 +514,15 @@
         ((variable-length-array ,p ,[sts] ,v) sts)
         ((fixed-length-array ,p ,[sts] ,v) sts)
         ((enum ,p (,i* ,c*) ...) (hash))
-        ((union ,p (,i1 ,i2) ,[sts*] ...) (apply hash-union sts*)) ; TODO make type for union (for readability)
+        ; The following may not be a good idea if we want to treat union with tag bool as generic option types.
+        ; The problem is that guile-rpc transforms optionals into normal unions.
+        ; For now we could assume that any union with bool tag is in fact an optional.
+        ((union ,p (,i1 ,i2) ,[sts*] ...)
+         (let ([rest (apply hash-union sts*)])
+          (if (equal? i2 "bool")
+           rest
+           (let ([t (make-struct-type stx (struct-name p) '("tag" "value"))])
+             (hash-union (hash (struct-name p) t) rest)))))
         ((struct ,p ,decl* ...)
          (let* ([get-decl-pair
                  (λ (decl)
@@ -556,21 +559,19 @@
        (make-struct-types (hash-ref h t) stx)))))
 
 (module+ test
-  (hash-count
-   (make-struct-types/rec
-    #'()
-    Stellar-types
-    (set "TransactionEnvelope" "TransactionResult" "LedgerEntry"))))
+  (check-not-exn
+   (λ ()
+      (make-struct-types/rec
+        #'()
+        Stellar-types
+        (set "TransactionEnvelope" "TransactionResult" "LedgerEntry")))))
 
 (define (built-in-structs stx)
-  ; we put ":" in the name to avoid clashes with XDR names
-  ; TODO ":" is really ugly
   ; we can use union as it cannot be used as an identifier as per RFC4506
   ; we can also use a prefix like _ or -, which again cannot be used at the beginning of an identifier as per RFC4506
-  ; we could also consider creating on union struct per union type (with the type name in it)
   (list
-   (make-struct-type stx ":byte-array:" '("value"))
-   (make-struct-type stx ":union:" '("tag" "value"))))
+   (make-struct-type stx "-byte-array" '("value"))
+   (make-struct-type stx "-optional" '("present" "value"))))
 
 (define (xdr-types->racket xdr-spec overrides stx ts) ; ts is a set of types
   (let* ([l0 (throw-if-nested-enum (add-bool (simplify-union (L0-parser xdr-spec))))]
@@ -593,4 +594,4 @@
        key-set
        "GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3"
        "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
-  (xdr-types->racket Stellar-xdr-types test-overrides (set "TransactionEnvelope" "TestLedger" "TestCaseResult")))
+  (xdr-types->racket Stellar-xdr-types test-overrides #'()  (set "TransactionEnvelope" "TestLedger" "TestCaseResult")))
