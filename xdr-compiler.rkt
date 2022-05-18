@@ -29,23 +29,14 @@
 ; TODO use lenses to allow writing functional specifications
 
 (require
-  (rename-in nanopass [extends extends-language]) ; conflicts with rosette
+  nanopass
   racket/hash
   (only-in list-util zip)
   racket/syntax
-  racket/generator
-  ;racket/pretty
-  graph
-  "strkey-utils.rkt"
-  (only-in rosette bitvector->natural)
-  (for-template
-   rosette
-   rosette/lib/synthax))
+  graph)
 
 (provide
-  xdr-types->grammar
   xdr-types->racket
-  xdr-types->grammar-datum
   max-depth)
 
 (module+ test
@@ -121,7 +112,7 @@
 
 (define-language L0a
   ; TODO how to remove Union-Spec entirely?
-  (extends-language L0)
+  (extends L0)
   (Spec (type-spec)
         (- (union union-spec))
         (+ (union (i1 i2) union-case-spec* ...))))
@@ -253,7 +244,7 @@
 ; next we normalize union specs
 
 (define-language L1
-  (extends-language L0a)
+  (extends L0a)
   (Union-Case-Spec (union-case-spec)
                    (- ((v* ...) decl)
                       (else decl))
@@ -340,7 +331,7 @@
 
 (define-language L2
   ; add path field to types
-  (extends-language L1)
+  (extends L1)
   (terminals
    (+ (path (p))))
   (Spec (type-spec)
@@ -571,52 +562,6 @@
     Stellar-types
     (set "TransactionEnvelope" "TransactionResult" "LedgerEntry"))))
 
-; Next:
-; Generate rules
-
-(define (size->number consts size)
-  (if (string? size)
-      (hash-ref consts size)
-      size))
-(define (make-sequence stx seq-t elem-type-rule-thunk size)
-  ; seq-t is list or vector
-  ; elem-type-rule is syntax or string
-  ; size is a numeric value
-  #`(#,seq-t
-     #,@(for/list ([i (in-range size)]) (elem-type-rule-thunk))))
-(define (make-list stx consts elem-type-rule-thunk size)
-  (let ([n (size->number consts size)])
-    (make-sequence stx #'list elem-type-rule-thunk n)))
-(define max-seq-len 3) ; we never make variable-length sequences bigger than that TODO: unless there's an override...
-(define (make-vector stx consts elem-type-rule-thunk size) ; variable-size array
-  (let ([n (size->number consts size)])
-    (let ([m (if (or (not n) (> n max-seq-len)) max-seq-len n)])
-      (make-sequence stx #'vector elem-type-rule-thunk m))))
-
-; generate unique indices (used to generate unique slocs)
-(define get-index!
-  (generator
-   ()
-   (let loop ([index 0])
-     (yield index)
-     (loop (+ index 1)))))
-
-; generate an identifier for a grammar rule:
-(define (format-id/unique-sloc str [stx #f])
-  ; Rosette seems to be relying on source-location information to create symbolic variable names.
-  ; Since we want all grammar holes to be independent, we need to use a unique location each time.
-  ; This is only useful if using the grammar generator in a macro.
-  (format-id stx "~a" str #:source (make-srcloc (format "generated-sloc:~a" (get-index!)) 1 0 1 0)))
-
-; make a hole for a particular type name (provided as a string)
-(define (rule-hole str)
-  #`(#,(format-id/unique-sloc (string-append str "-rule")))) ; TODO: unique-loc not needed anymore since we call instantiate-rule later?
-
-(define (value-rule stx v)
-  (if (string? v)
-      (format-id/unique-sloc v stx) ; TODO unique-loc needed?
-      v))
-
 (define (built-in-structs stx)
   ; we put ":" in the name to avoid clashes with XDR names
   ; TODO ":" is really ugly
@@ -626,69 +571,6 @@
   (list
    (make-struct-type stx ":byte-array:" '("value"))
    (make-struct-type stx ":union:" '("tag" "value"))))
-
-(define-pass make-rule : (L2 Spec) (ir stx type-name consts overrides) -> * (rule-thunk)
-  ; TODO could stx and overrides be a parameters?
-  ; TODO: for use as a macro, we need unique source locations for each sub-rule invocation
-  ; This does include rules of the form (?? bitvector 32)
-  (Spec : Spec (ir) -> * (rule-thunk)
-        [(,p ,i)
-         (let ([key (reverse p)])
-           (if
-            (and
-             (dict-has-key? overrides key)
-             (eq? (car (dict-ref overrides key)) 'key-set))
-            (let* ([vals (map (λ (s) (bitvector->natural (strkey->bv s))) (cdr (dict-ref overrides key)))]
-                   [vals/syn (map (λ (v) #`(#,(format-id stx "~a" ":byte-array:") (bv #,v 256))) vals)])
-              (λ () #`(choose #,@vals/syn)))
-            (case i
-              [("opaque") (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 8)))]
-              [("int" "unsigned int") (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 32)))]
-              [("hyper" "unsigned hyper") (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 64)))]
-              [else (λ () (rule-hole i))])))]
-        [(struct ,p ,[rule-thunk*] ...)
-         (let ([struct-name (format-id/unique-sloc (struct-name p) stx)]) ; TODO unique loc needed? probably not
-           (λ () #`(#,struct-name #,@(map (λ (f) (f)) rule-thunk*))))]
-        [(string ,p ,c) (λ () (make-vector stx consts (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 8))) c))]
-        [(variable-length-array ,p ,[elem-rule-thunk] ,v)
-         (λ () (make-vector stx consts elem-rule-thunk v))]
-        [(fixed-length-array ,p ,type-spec ,v)
-         ; special case for opaque fixed-length arrays: we use :byte-array:
-         (guard
-          (let ([opaque?
-                 (nanopass-case
-                  (L2 Spec)
-                  type-spec
-                  [(,p ,i) (equal? i "opaque")]
-                  [else #f])])
-            opaque?))
-         (let ([n (size->number consts v)])
-           (λ () #`(#,(format-id stx "~a" ":byte-array:") (#,(format-id/unique-sloc "??" #'()) (bitvector #,(* n 8))))))]
-        [(fixed-length-array ,p ,[elem-rule-thunk] ,v)
-         (λ () (make-list stx consts elem-rule-thunk v))]
-        [(enum ,p (,i* ,c*) ...)
-         (let ([bv* (map (λ (i) #`(bv #,i 32)) i*)])
-           (if (> (length bv*) 1)
-               #`(choose #,@bv*)
-               (car bv*)))]
-        [(union ,p (,i1 ,i2) ,[rule-thunk*] ...)
-         (λ ()
-           (if (> (length rule-thunk*) 1)
-               #`(choose #,@(map (λ (x) (x)) rule-thunk*))
-               ((car rule-thunk*))))])
-  (Union-Case-Spec : Union-Case-Spec (ir) -> * (rule-thunk)
-                   [(,v ,[rule-thunk])
-                    (λ () #`(#,(format-id stx "~a" ":union:") (bv #,(value-rule stx v) 32) #,(rule-thunk)))])
-  (Decl : Decl (ir) -> * (rule-thunk)
-        [(,i ,[rule-thunk]) rule-thunk]
-        [,void (λ () #'null)])
-  #`(#,(format-id/unique-sloc (string-append type-name "-rule")) #,((Spec ir)))) ; TODO unique-sloc needed?
-
-(module+ test
-  (let ([t "SimplePaymentResult"])
-    (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-l0a) null))
-  (let ([t "PathPaymentStrictReceiveResult"])
-    (make-rule (hash-ref Stellar-types t)  #'() t (make-consts-hashmap Stellar-l0a) null)))
 
 (define (xdr-types->racket xdr-spec overrides stx ts) ; ts is a set of types
   (let* ([l0 (throw-if-nested-enum (add-bool (simplify-union (L0-parser xdr-spec))))]
@@ -703,37 +585,6 @@
         #,@struct-defs
         #,@(built-in-structs stx))))
 
-; returns everything as a syntax object
-(define (xdr-types->grammar xdr-spec overrides stx ts) ; ts is a set of types
-  (let* ([l0 (throw-if-nested-enum (add-bool (simplify-union (L0-parser xdr-spec))))]
-         [l1 (normalize-unions l0 (enum-defs l0))]
-         [l2 (add-path (override-lengths l1 overrides))]
-         [h (collect-types l2)]
-         [consts-h (make-consts-hashmap l0)]
-         [const-defs (constant-definitions stx consts-h)]
-         [struct-defs (hash-values (make-struct-types/rec stx h ts))]
-         [deps (set-union
-                ts
-                (apply set-union
-                       (for/list ([t ts])
-                         (deps h t))))]
-         [rules (for/list ([t deps])
-                  (make-rule (hash-ref h t) stx t consts-h overrides))])
-    #`(begin
-        #,@const-defs
-        #,@struct-defs
-        #,@(built-in-structs stx)
-        (define-grammar
-          (#,(format-id stx "~a" "the-grammar")) #,@rules))))
-
-(define (xdr-types->grammar-datum xdr-types overrides types)
-   (syntax->datum
-    (xdr-types->grammar
-     xdr-types
-     overrides
-     #'()
-     types)))
-
 (module+ test
   (define test-overrides
     '((("Transaction" "operations") len . 1)
@@ -742,4 +593,4 @@
        key-set
        "GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3"
        "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
-  (xdr-types->grammar-datum Stellar-xdr-types test-overrides (set "TransactionEnvelope" "TestLedger" "TestCaseResult")))
+  (xdr-types->racket Stellar-xdr-types test-overrides (set "TransactionEnvelope" "TestLedger" "TestCaseResult")))
