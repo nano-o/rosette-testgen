@@ -2,32 +2,24 @@
 
 ; Compiles an XDR specification to:
 ; - A set of Racket definitions (constants and structs)
-; - A Rosette grammar allowing to create symbolic data structures adhering to the XDR specification
+; - Lenses to manipulate the above
 ; Reads an input specification in guile-rpc AST format; so, one must first pre-process an XDR specification with the guile-rpc XDR parser
 
-; XDR structs become Racket structs
-; XDR opaque fixed-length arrays become instances of :byte-array: struct (TODO: create a new struct based on the type name)
+; XDR opaque fixed-length arrays become instances of -byte-array containing a bitvector
 ; XDR non-opaque fixed-length arrays become Racket lists
 ; XDR variable-length arrays become Racket vectors
 ; XDR enums become Racket 32-bit bitvectors
-; XDR unions become instances of the :union: struct (TODO: create a new struct based on the type name)
+; XDR unions become structs with two members, tag and value, except when the tag is a boolean, in which case the union become an -optional struct
 ; XDR constants get an associated symbol
 ; Some of those representations were chosen for compatibility with the guile-rpc representation.
 
 ; We use the nanopass compiler framework
 
-; TODO use define-nested-lenses or struct-nested-lens to define all possible nested lenses?
+; TODO use lenses to allow writing functional specifications; first try it on the merge demo.
 ; TODO there's pretty much no error checking
 ; TODO write tests
 ; TODO a pass to remove recursion or limit its depth (ClaimPredicate)? For now I manually removed the recursion from the XDR spec.
-; TODO for variable length arrays (like signers), allow specifying a length range; but, not currently compatible with the path explorer.
-; TODO create union struct named after the each union type instead of the generic :union: (for readability)
-; TODO clean up make-rule
-; TODO add tests to make sure the grammar macro is working...
-; TODO now that we have a working grammar macro, how do we use it? (e.g. we have several modules which depend on it...)
-; TODO could be useful to make nullable type monads using a generic interface
-; TODO split in two: one part to compile an XDR spec to Racket type definitions (constants and structs), and one part to generate the Rosette grammar.
-; TODO use lenses to allow writing functional specifications
+; TODO a way to check that a Racket structure conforms to an XDR spec
 
 (require
   nanopass
@@ -35,13 +27,14 @@
   (only-in list-util zip)
   racket/syntax
   graph
-  (for-template
+  (for-template ; TODO needs rosette or not?
     racket/base
     lens))
 
 (provide
   xdr-types->racket
-  max-depth)
+  max-depth
+  valid?)
 
 (module+ test
   (require rackunit "read-datums.rkt")
@@ -126,6 +119,7 @@
          `(union (,i1 ,i2) ,union-case-spec* ...))))
 
 ; Next we add the default bool enum
+; This is a little awkward
 (define-pass add-bool : L0a (ir) -> L0a ()
   (XDR-Spec : XDR-Spec (ir) -> XDR-Spec ()
             ((,def* ...)
@@ -145,7 +139,7 @@
   (define Stellar-l0a (add-bool (simplify-union Stellar-l0))))
 
 ; throws an exception if there are any nested enums
-; NOTE we produce L0a to allow the nanopass framework to synthesize most of the rules
+; NOTE we produce L0a, even if we throw it away, so that the nanopass framework will synthesize most of the rules; otherwise it doesn't
 (define-pass throw-if-nested-enum : L0a (ir) -> L0a ()
   (Def : Def (ir) -> Def ()
        ((define-type ,i (enum (,i* ,c*) ...)) ir))
@@ -239,7 +233,10 @@
       "exception in enum-defs"))
   (define Stellar-enum-defs (enum-defs Stellar-l0a)))
 
-; next we normalize union specs
+; Next we normalize union specs.
+; This means we flatten union specs (e.g. `(v1 v2) decl` becomes `(v1 decl) (v2
+; delc)`) and we replace `else` by an explicit enumeration of all the remaining
+; cases.
 
 (define-language L1
   (extends L0a)
@@ -268,8 +265,8 @@
               ((union (,i1 ,i2) ,[Union-Case-Spec : union-case-spec -> * alist*] ...)
                (let* ([tag-decl* (apply append alist*)]
                       [_ (when (and
-                                (dict-has-key? enum-dict i2) ; tag type is an enum type
-                                (ormap number? (dict-keys tag-decl*)))
+                                 (dict-has-key? enum-dict i2) ; tag type is an enum type
+                                 (ormap number? (dict-keys tag-decl*)))
                            (error (format "numeric tag values not allowed in a union tagged by an enum type in: ~a" ir)))]
                       [tag-decl2*
                        (if (dict-has-key? tag-decl* 'else)
@@ -436,10 +433,12 @@
   (define TransactionEnvelope-deps (immediate-deps (hash-ref Stellar-types "TransactionEnvelope"))))
 
 (define (type-graph-edges h)
-  (apply append
-         (for/list ([(k v) (in-hash h)])
-           (let ([deps (set->list (immediate-deps v))])
-             (map (λ (d) (list k d)) deps)))))
+  ; returns a list of edges
+  (apply
+    append
+    (for/list ([(k v) (in-hash h)])
+      (let ([deps (set->list (immediate-deps v))])
+        (map (λ (d) (list k d)) deps)))))
 
 (define (deps-graph h)
   (let ([edges (type-graph-edges h)])
@@ -449,6 +448,11 @@
     (do-bfs (deps-graph h) t
             #:init (set)
             #:visit: (set-add $acc $v)))
+
+(module+ test
+  (define TransactionEnvelope-deps/rec (deps Stellar-types "TransactionEnvelope"))
+  (define TransactionResult-deps/rec (deps Stellar-types "TransactionResult"))
+  (define LedgerEntry-deps/rec (deps Stellar-types "LedgerEntry")))
 
 (define (min-depth h t)
   ; the minimum depth to cover the graph
@@ -468,17 +472,18 @@
     (do-dfs g
             #:epilogue: (let ([ns (get-neighbors g $v)])
                           (if (null? ns)
-                              (max-depth-set! $v 1)
-                              (let* ([get-depth (λ (v)
-                                                  (if (max-depth-defined? v)
-                                                      (max-depth v)
-                                                      0))]
-                                     [m (apply max (map get-depth ns))])
-                                (max-depth-set! $v (+ m 1))))))
+                            (max-depth-set! $v 1)
+                            (let* ([get-depth (λ (v)
+                                                 (if (max-depth-defined? v)
+                                                   (max-depth v)
+                                                   0))]
+                                   [m (apply max (map get-depth ns))])
+                              (max-depth-set! $v (+ m 1))))))
     (max-depth->hash)))
 
 (define (recursive-types h t)
   ; returns the set of types that are recursive
+  ; TODO a test
   (let ([g (deps-graph h)]
         [rec-types (mutable-set)])
     (define-vertex-property g path)
@@ -491,10 +496,6 @@
                           (not seen))))
     rec-types))
 
-(module+ test
-  (define TransactionEnvelope-deps/rec (deps Stellar-types "TransactionEnvelope"))
-  (define TransactionResult-deps/rec (deps Stellar-types "TransactionResult"))
-  (define LedgerEntry-deps/rec (deps Stellar-types "LedgerEntry")))
 
 ; Next we define needed Racket struct types
 
@@ -504,7 +505,11 @@
         #`(struct/lens #,(format-id stx "~a" name) #,field-names #:transparent)))
 
 (module+ test
-  (make-struct-type #'() "my-struct" '("field1" "field2")))
+  (test-case
+    "make struct type"
+    (check-not-exn
+      (λ ()
+         (make-struct-type #'() "my-struct" '("field1" "field2"))))))
 
 (define-pass make-struct-types : (L2 Spec) (ir stx) -> * (sts)
   ; NOTE stops at type identifiers
@@ -516,7 +521,7 @@
         ((enum ,p (,i* ,c*) ...) (hash))
         ; The following may not be a good idea if we want to treat union with tag bool as generic option types.
         ; The problem is that guile-rpc transforms optionals into normal unions.
-        ; For now we could assume that any union with bool tag is in fact an optional.
+        ; For now we assume that any union with bool tag is in fact an optional.
         ((union ,p (,i1 ,i2) ,[sts*] ...)
          (let ([rest (apply hash-union sts*)])
           (if (equal? i2 "bool")
@@ -544,8 +549,15 @@
   (Spec ir))
 
 (module+ test
-  (make-struct-types (hash-ref Stellar-types "ManageOfferSuccessResult") #'())
-  (make-struct-types (hash-ref Stellar-types "LiquidityPoolEntry") #'()))
+  (test-case
+    "make struct types"
+    (check-not-exn
+      (λ ()
+         (begin
+           (make-struct-types (hash-ref Stellar-types "ManageOfferSuccessResult") #'())
+           (make-struct-types (hash-ref Stellar-types "LiquidityPoolEntry") #'())
+           null))
+      )))
 
 (define (make-struct-types/rec stx h ts)
   (let* ([deps
@@ -573,6 +585,7 @@
    (make-struct-type stx "-byte-array" '("value"))
    (make-struct-type stx "-optional" '("present" "value"))))
 
+; this produces a syntax object
 (define (xdr-types->racket xdr-spec overrides stx ts) ; ts is a set of types
   (let* ([l0 (throw-if-nested-enum (add-bool (simplify-union (L0-parser xdr-spec))))]
          [l1 (normalize-unions l0 (enum-defs l0))]
@@ -594,4 +607,14 @@
        key-set
        "GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3"
        "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
-  (xdr-types->racket Stellar-xdr-types test-overrides #'()  (set "TransactionEnvelope" "TestLedger" "TestCaseResult")))
+  (test-case
+    "xdr-types->racket"
+    (check-not-exn
+      (λ ()
+         (xdr-types->racket Stellar-xdr-types test-overrides #'()  (set "TransactionEnvelope" "TestLedger" "TestCaseResult"))))))
+
+(define-pass valid-datum? : (L2 Spec) (ir overrides d) -> * (b)
+             'TODO)
+
+(define (valid? xdr-spec overrides t d)
+  #t)
