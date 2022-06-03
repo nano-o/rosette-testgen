@@ -22,6 +22,15 @@
 ; TODO a pass to remove recursion or limit its depth (ClaimPredicate)? For now I manually removed the recursion from the XDR spec.
 ; TODO a way to check that a Racket structure conforms to an XDR spec
 
+(provide
+  ; generates Racket definitions corresponding to an XDR specification (constants and structs) and a
+  ; function `valid?` that can be used to check wether a Racket datum is valid with respect to the XDR
+  ; specification given
+  xdr-types->racket
+  ; computes the maximum depth of an XDR specification (useful to generate grammars; TODO move to the
+  ; grammar-generator module)
+  max-depth)
+
 (require
   nanopass
   racket/hash
@@ -30,18 +39,14 @@
   graph
   (for-template
     racket/base
-    lens))
-
-(provide
-  xdr-types->racket
-  max-depth
-  valid?)
+    lens
+    (only-in rosette bitvector bveq)))
 
 (module+ test
   (require rackunit "read-datums.rkt")
   (define Stellar-xdr-types
     (read-datums "Stellar.xdr-types"))
-  (define (eat x) ; to have rackunit evaluate something without printing it
+  (define (gobble x) ; to have rackunit evaluate something without printing it
     (void)))
 
 (define-language L0
@@ -94,11 +99,11 @@
         (struct ("t1" (union (case ("tagname-3" "tagtype-3") (("F" "G") ("y" "T")))))))))
     (test-case
      "parse simple examples"
-        (eat (L0-parser test-0))
-        (eat (L0-parser test-1)))
+        (gobble (L0-parser test-0))
+        (gobble (L0-parser test-1)))
     (test-case
      "parser Stellar-xdr-types"
-        (eat (L0-parser Stellar-xdr-types)))
+        (gobble (L0-parser Stellar-xdr-types)))
   (define Stellar-l0 (L0-parser Stellar-xdr-types)))
 
 ; L0a simplifies L0 a bit by removing the superfluous Union-Spec production
@@ -129,7 +134,7 @@
 (module+ test
     (test-case
      "run simplify-union on stellar spec"
-        (eat (simplify-union Stellar-l0)))
+        (gobble (simplify-union Stellar-l0)))
   (define Stellar-l0a (add-bool (simplify-union Stellar-l0))))
 
 ; throws an exception if there are any nested enums
@@ -156,9 +161,9 @@
     (test-case
       "should not throw"
       (begin
-        (eat (throw-if-nested-enum (simplify-union (L0-parser test-1))))
-        (eat (throw-if-nested-enum (simplify-union (L0-parser test-3))))
-        (eat (throw-if-nested-enum Stellar-l0a))))))
+        (gobble (throw-if-nested-enum (simplify-union (L0-parser test-1))))
+        (gobble (throw-if-nested-enum (simplify-union (L0-parser test-3))))
+        (gobble (throw-if-nested-enum Stellar-l0a))))))
 
 ; returns a hashmap mapping top-level enum symbols and constants to values
 (define-pass make-consts-hashmap : L0a (ir) -> * (h)
@@ -181,9 +186,9 @@
   (test-case
     "no exn"
     (begin
-      (eat (make-consts-hashmap (simplify-union (L0-parser test-3))))
-      (eat (make-consts-hashmap (simplify-union (L0-parser test-4))))
-      (eat (make-consts-hashmap Stellar-l0a)))))
+      (gobble (make-consts-hashmap (simplify-union (L0-parser test-3))))
+      (gobble (make-consts-hashmap (simplify-union (L0-parser test-4))))
+      (gobble (make-consts-hashmap Stellar-l0a)))))
 
 ; Make constant definitions:
 
@@ -197,7 +202,7 @@
 (module+ test
   (test-case
     "no exn"
-    (eat (constant-definitions #'() (make-consts-hashmap Stellar-l0a))))
+    (gobble (constant-definitions #'() (make-consts-hashmap Stellar-l0a))))
   (define Stellar-const-defs (constant-definitions #'() (make-consts-hashmap Stellar-l0a))))
 
 ; Here we collect top-level enum definitions
@@ -215,7 +220,7 @@
 (module+ test
   (test-case
     "no exn"
-    (eat (enum-defs Stellar-l0a)))
+    (gobble (enum-defs Stellar-l0a)))
   (define Stellar-enum-defs (enum-defs Stellar-l0a)))
 
 ; Next we normalize union specs.
@@ -352,7 +357,7 @@
 (module+ test
   (test-case
     "no exn on Stellar"
-    (eat (add-path Stellar-l1)))
+    (gobble (add-path Stellar-l1)))
   (define Stellar-l2 (add-path Stellar-l1)))
 
 (define (struct-name path)
@@ -370,7 +375,7 @@
 (module+ test
   (test-case
     "collect-types"
-    (eat (collect-types Stellar-l2)))
+    (gobble (collect-types Stellar-l2)))
   (define Stellar-types (collect-types Stellar-l2)))
 
 (define base-types '("opaque" "void" "int" "unsigned int" "hyper" "unsigned hyper"))
@@ -473,7 +478,7 @@
 (module+ test
   (test-case
     "make struct type"
-         (eat (make-struct-type #'() "my-struct" '("field1" "field2")))))
+         (gobble (make-struct-type #'() "my-struct" '("field1" "field2")))))
 
 (define-pass make-struct-types : (L2 Spec) (ir stx) -> * (sts)
   ; NOTE stops at type identifiers
@@ -483,7 +488,7 @@
         ((variable-length-array ,[sts] ,v) sts)
         ((fixed-length-array ,[sts] ,v) sts)
         ((enum (,i* ,c*) ...) (hash))
-        ; The following may not be a good idea if we want to treat union with tag bool as generic option types.
+        ; The following may not be a good idea if we want to trgobble union with tag bool as generic option types.
         ; The problem is that guile-rpc transforms optionals into normal unions.
         ; For now we assume that any union with bool tag is in fact an optional.
         ((union ,p (,i1 ,i2) ,[sts*] ...)
@@ -515,8 +520,8 @@
 (module+ test
   (test-case
     "make struct types"
-      (eat (make-struct-types (hash-ref Stellar-types "ManageOfferSuccessResult") #'()))
-      (eat (make-struct-types (hash-ref Stellar-types "LiquidityPoolEntry") #'()))))
+      (gobble (make-struct-types (hash-ref Stellar-types "ManageOfferSuccessResult") #'()))
+      (gobble (make-struct-types (hash-ref Stellar-types "LiquidityPoolEntry") #'()))))
 
 (define (make-struct-types/rec stx h ts)
   (let* ([deps
@@ -532,7 +537,7 @@
 (module+ test
   (test-case
     "make-struct-types/rec test"
-    (eat
+    (gobble
       (make-struct-types/rec
         #'()
         Stellar-types
@@ -569,36 +574,72 @@
        "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
   (test-case
     "xdr-types->racket"
-      (eat (xdr-types->racket Stellar-xdr-types test-overrides #'()  (set "TransactionEnvelope" "TestLedger" "TestCaseResult")))))
+      (gobble (xdr-types->racket Stellar-xdr-types test-overrides #'()  (set "TransactionEnvelope" "TestLedger" "TestCaseResult")))))
 
 ; Next we generate the valid? function for a given xdr spec
-
-(define/contract (valid-basetype? t d)
-  (-> base-type? syntax? syntax?)
-  (cond
-    [(equal? t "opaque")
-     #`((bitvector 8) #,d)]
-    [(set-member? '("int", "unsigned int") t)
-     #`((bitvector 32) #,d)]
-    [(set-member? '("hyper", "unsigned hyper") t)
-     #`((bitvector 64) #,d)]))
-
-(define-pass valid?/syntax : L2 (t types stx) -> * (stx)
-  (Spec : Spec (t d) -> * (stx)
-        (,i (if (base-type? i) (valid-basetype? i d) (Spec (hash-ref types i) d)))
-        (else #'(#t)))
+; TODO we could avoid all those lambdas if we passed a syntax object to Spec
+(define-pass valid?/syntax : L2 (t types ctx) -> * (stx)
+  (Spec : Spec (t) -> * (stx)
+        (,i
+          (cond
+            [(not (base-type? i))
+             (Spec (hash-ref types i))]
+            [(equal? t "opaque")
+             #`(λ (d) ((bitvector 8) d))]
+            [(set-member? '("int", "unsigned int") t)
+             #`(λ (d) ((bitvector 32) d))]
+            [(set-member? '("hyper", "unsigned hyper") t)
+             #`(λ (d) ((bitvector 64) d))]))
+        ((string ,c)
+         #`(λ (d) (and (vector? d) (equal? (vector-length d) #,c))))
+        ((variable-length-array ,[stx] ,v)
+         #`(λ (d)
+              (and
+                (vector? d)
+                (when #,v (equal? (vector-length d) #,v))
+                (for/and ([e d])
+                  #,stx e))))
+        ((fixed-length-array ,[stx] ,v)
+         #`(λ (d)
+              (and
+                (vector? d)
+                (equal? (vector-length d) #,v)
+                (for/and ([e d])
+                  #,stx e))))
+        ((enum (,i* ,c*) ...)
+         #`(λ (d)
+              (and
+                ((bitvector 32) d)
+                (for/or ([v #,c*])
+                  (bveq d v)))))
+        ((struct ,p ,decl* ...)
+         (define struct-type-valid?
+           (format-id ctx "~a?" (struct-name p)))
+         (define (field-valid? decl)
+           (nanopass-case
+             (L2 Decl)
+             decl
+             ((,i ,type-spec)
+              (define type-valid? (Spec type-spec))
+              (define accessor
+                (format-id ctx "~a-~a" (struct-name p) i))
+              #`(λ (d) (#,type-valid? (#,accessor d))))
+             (,void (error "void struct member not supported"))))
+         #`(λ (d)
+              (and
+                (#,struct-type-valid? d)
+                #,@(for/list ([fd decl*])
+                     #`(#,(field-valid? fd) d)))))
+        ((union ,p (,i1 ,i2) ,union-case-spec* ...)
+         #'todo)
+        (else #'(λ (d) (#t))))
     (begin
-      (define fn-id (format-id stx "valid?"))
-      (define d (format-id fn-id "d"))
-      (define body (Spec t d))
-      #`(define (#,fn-id #,d) #,body)))
+      (define fn-id (format-id ctx "valid?"))
+      #`(define (#,fn-id data) (#,(Spec t) data))))
 
 (module+ test
   (test-case
     "valid?/syntax tests"
     (begin
-      (eat (valid?/syntax "int" (hash) #'()))
-      (eat (valid?/syntax "PublicKey" Stellar-types #'())))))
-
-(define (valid? xdr-spec overrides t d)
-  #t)
+      (gobble (valid?/syntax "int" (hash) #'()))
+      (gobble (valid?/syntax "PublicKey" Stellar-types #'())))))
