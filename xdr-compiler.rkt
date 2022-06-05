@@ -36,18 +36,13 @@
   racket/hash
   (only-in list-util zip)
   racket/syntax
+  (only-in mischief/contract dict/c)
+  (only-in mischief/for for/dict)
   graph
   (for-template
     racket/base
     lens
     (only-in rosette bitvector bveq)))
-
-(module+ test
-  (require rackunit "read-datums.rkt")
-  (define Stellar-xdr-types
-    (read-datums "Stellar.xdr-types"))
-  (define (gobble x) ; to have rackunit evaluate something without printing it
-    (void)))
 
 (define-language L0
   ; This is a subset of the language of guile-rpc ASTs
@@ -89,27 +84,47 @@
 (define-parser L0-parser L0)
 
 (module+ test
-  (define test-0 '((define-type "t" (union (case ("tag" "type") (("X") ("x" "tx")) (else ("y" "Y")))))))
-  (define test-1
+  (require rackunit "read-datums.rkt")
+  (define (gobble x) ; to have rackunit evaluate something without printing it
+    (void))
+  ;; we now define a few XDR specifications for use in tests
+  (define test-xdr-spec-0 '((define-type "t" (union (case ("tag" "type") (("X") ("x" "tx")) (else ("y" "Y")))))))
+  (define test-xdr-spec-1
     '((define-type "test-union"
         (union (case ("tagname" "tagtype")
                  (("A") ("c" (union (case ("tagname-2" "tagtype-2") (("X" "Y") ("x" "T"))))))
                  (("B" "C") ("d" "int")))))
       (define-type "test-struct"
         (struct ("t1" (union (case ("tagname-3" "tagtype-3") (("F" "G") ("y" "T")))))))))
+  (define test-xdr-spec-2
+    '((define-type "test-struct"
+                   (struct ("t1" (enum ("A" 1)))))))
+  (define test-xdr-spec-3
+    '((define-type "t1" (enum ("A" 1)))))
+  (define test-xdr-spec-4
+    '((define-type "test-enum" (enum ("A" 1) ("B" 2))) (define-constant "C" 3)))
+  (define test-xdr-spec-5
+    '((define-type "my-enum" (enum ("A" 0) ("B" 1) ("C" 2)))
+      (define-type "my-union" (union (case ("tag" "my-enum") (("A") ("i" "int")) ((1) ("j" "int")))))))
+  (define test-xdr-spec-6
+    '((define-type "my-enum" (enum ("A" 0) ("B" 1) ("C" 2)))
+      (define-type "my-union" (union (case ("tag" "my-enum") (("A") ("i" "int")) (else ("j" "int")))))))
+  ;; the Stellar XDR spec:
+  (define Stellar-xdr-types
+    (read-datums "Stellar.xdr-types")))
+
+(module+ test
     (test-case
      "parse simple examples"
-        (gobble (L0-parser test-0))
-        (gobble (L0-parser test-1)))
+        (gobble (L0-parser test-xdr-spec-0))
+        (gobble (L0-parser test-xdr-spec-1)))
     (test-case
      "parser Stellar-xdr-types"
         (gobble (L0-parser Stellar-xdr-types)))
   (define Stellar-l0 (L0-parser Stellar-xdr-types)))
 
-; L0a simplifies L0 a bit by removing the superfluous Union-Spec production
-
+;; L0a simplifies L0 a bit by removing the superfluous Union-Spec production
 (define-language L0a
-  ; TODO how to remove Union-Spec entirely?
   (extends L0)
   (Spec (type-spec)
         (- (union union-spec))
@@ -120,22 +135,30 @@
         ((union (case (,i1 ,i2) ,[union-case-spec*] ...))
          `(union (,i1 ,i2) ,union-case-spec* ...))))
 
-; Next we add the default bool enum
-; This is a little awkward
+;; Add the default bool enum
 (define-pass add-bool : L0a (ir) -> L0a ()
   (XDR-Spec : XDR-Spec (ir) -> XDR-Spec ()
             ((,def* ...)
              `(,def* ...
                ,(with-output-language (L0a Def) `(define-type "bool" (enum ("TRUE" 1) ("FALSE" 0))))))))
 
-; does not work:
-; (define-language-node-counter L0-counter L0)
-
 (module+ test
+  (test-case
+    "simplify-union"
+    (check-equal?
+      (simplify-union (L0-parser test-xdr-spec-0))
+      (with-output-language
+        (L0a XDR-Spec)
+        `((define-type
+            "t"
+            (union
+              ("tag" "type")
+              (("X") ("x" "tx"))
+              (else ("y" "Y"))))))))
     (test-case
      "run simplify-union on stellar spec"
         (gobble (simplify-union Stellar-l0)))
-  (define Stellar-l0a (add-bool (simplify-union Stellar-l0))))
+  (define Stellar-l0a (simplify-union Stellar-l0)))
 
 ; throws an exception if there are any nested enums
 ; NOTE we produce L0a, even if we throw it away, so that the nanopass framework will synthesize most of the rules; otherwise it doesn't
@@ -147,25 +170,20 @@
          (error "enums defined inside other types are not supported"))))
 
 (module+ test
-  (define test-2
-    '((define-type "test-struct"
-                   (struct ("t1" (enum ("A" 1)))))))
-  (define test-3
-    '((define-type "t1" (enum ("A" 1)))))
   (test-case
     "should throw on nested enum"
     (check-exn
       exn:fail?
       (λ ()
-         (throw-if-nested-enum (simplify-union (L0-parser test-2)))))
+         (throw-if-nested-enum (simplify-union (L0-parser test-xdr-spec-2)))))
     (test-case
-      "should not throw"
+      "throw-if-nested-enum should not throw"
       (begin
-        (gobble (throw-if-nested-enum (simplify-union (L0-parser test-1))))
-        (gobble (throw-if-nested-enum (simplify-union (L0-parser test-3))))
+        (gobble (throw-if-nested-enum (simplify-union (L0-parser test-xdr-spec-1))))
+        (gobble (throw-if-nested-enum (simplify-union (L0-parser test-xdr-spec-3))))
         (gobble (throw-if-nested-enum Stellar-l0a))))))
 
-; returns a hashmap mapping top-level enum symbols and constants to values
+;; returns a hashmap mapping top-level enum symbols and constants to values
 (define-pass make-consts-hashmap : L0a (ir) -> * (h)
   (XDR-Spec : XDR-Spec (ir) -> * (h)
             ((,[h*] ...) (apply hash-union h*)))
@@ -177,23 +195,26 @@
          (for/hash ([i i*] [c c*])
            (values i c)))
         (else (hash)))
-  (XDR-Spec ir))
+  (invariant-assertion
+    (hash/c string? number?)
+    (XDR-Spec ir)))
 
 (module+ test
-  (define test-4
-    '((define-type "test-enum" (enum ("A" 1) ("B" 2))) (define-constant "C" 3)))
-
   (test-case
-    "no exn"
+    "make-consts-hashmap"
     (begin
-      (gobble (make-consts-hashmap (simplify-union (L0-parser test-3))))
-      (gobble (make-consts-hashmap (simplify-union (L0-parser test-4))))
+      (check-equal?
+        (make-consts-hashmap (simplify-union (L0-parser test-xdr-spec-3)))
+        '#hash(("A" . 1)))
+      (check-equal?
+        (make-consts-hashmap (simplify-union (L0-parser test-xdr-spec-4)))
+        '#hash(("A" . 1) ("B" . 2) ("C" . 3)))
       (gobble (make-consts-hashmap Stellar-l0a)))))
 
-; Make constant definitions:
-
-(define (constant-definitions stx h)
-  ; expects a hashmap mapping identifiers to values
+;; Make constant definitions:
+(define/contract
+  (constant-definitions stx h)
+  (-> syntax? (hash/c string? number?) syntax?)
   (let ([defs
           (for/list ([(k v) (in-dict h)])
             #`(define #,(format-id stx k) #,v))])
@@ -205,21 +226,25 @@
     (gobble (constant-definitions #'() (make-consts-hashmap Stellar-l0a))))
   (define Stellar-const-defs (constant-definitions #'() (make-consts-hashmap Stellar-l0a))))
 
-; Here we collect top-level enum definitions
-; Returns an alist
+; Here we collect top-level enum definitions in a hashmap
 (define-pass enum-defs : L0a (ir) -> * (l)
   (XDR-Spec : XDR-Spec (ir) -> * (l)
-            ((,[l*] ...) (apply append l*)))
+            ((,[l*] ...) (apply hash-union l*)))
   (Def : Def (ir) -> * (l)
-        ((define-type ,i (enum (,i* ,c*) ...)) `((,i . ,(zip i* c*))))
-        (else '()))
-  (append
-   (XDR-Spec ir)
-   '(("bool" . (("TRUE" . 1) ("FALSE" . 0)))))) ; bool is implicit
+       ((define-type ,i (enum (,i* ,c*) ...)) (hash i (zip i* c*)))
+       (else '#hash()))
+  (invariant-assertion
+    (hash/c string? list?)
+    (XDR-Spec ir)))
 
 (module+ test
   (test-case
-    "no exn"
+    "enum-defs"
+    (check-equal?
+      (enum-defs (simplify-union (L0-parser test-xdr-spec-4)))
+      '#hash(("test-enum" . (("A" . 1) ("B" . 2))))))
+  (test-case
+    "run enum-defs on Stellar spec"
     (gobble (enum-defs Stellar-l0a)))
   (define Stellar-enum-defs (enum-defs Stellar-l0a)))
 
@@ -235,49 +260,70 @@
                       (else decl))
                    (+ (v decl))))
 
-(define (replace-else tag-decl* enum-type)
-  (let* ([tags (dict-keys tag-decl*)]
-         [all-tags (dict-keys enum-type)]
-         [tag-decl2*
-          (let* ([other-tags (set-remove tags 'else)]
-                 [else-tags (set-subtract all-tags other-tags)]
-                 [else-tag-decl* (for/list ([t else-tags])
-                                   `(,t . ,(dict-ref tag-decl* 'else)))])
-            (append (dict-remove tag-decl* 'else) else-tag-decl*))])
-    tag-decl2*))
-
-(define-pass normalize-unions : L0a (ir enum-dict) -> L1 ()
-  (Union-Case-Spec : Union-Case-Spec (ir) -> * ()
-                   (((,v* ...) ,[decl]) (for/list ([v v*])
-                                          `(,v . ,decl)))
-                   ((else ,decl) `((else . ,decl))))
-  (Spec : Spec (ir) -> Spec ()
-              ((union (,i1 ,i2) ,[Union-Case-Spec : union-case-spec -> * alist*] ...)
-               (let* ([tag-decl* (apply append alist*)]
-                      [_ (when (and
-                                 (dict-has-key? enum-dict i2) ; tag type is an enum type
-                                 (ormap number? (dict-keys tag-decl*)))
-                           (error (format "numeric tag values not allowed in a union tagged by an enum type in: ~a" ir)))]
-                      [tag-decl2*
-                       (if (dict-has-key? tag-decl* 'else)
-                           (replace-else tag-decl* (dict-ref enum-dict i2))
-                           tag-decl*)]
-                      [tag* (map car tag-decl2*)]
-                      [decl* (map cdr tag-decl2*)])
-                 `(union (,i1 ,i2) (,tag* ,decl*) ...)))))
+;; replaces the else form in a union spec by a list of all cases it covers
+(define/contract (replace-else tag-decl* enum-type)
+  (-> (and/c dict? list?) list? (and/c dict? list?))
+  (define tags (dict-keys tag-decl*))
+  (define all-tags (dict-keys enum-type))
+  (define else-tags (set-subtract all-tags (set-remove tags 'else)))
+  (for/dict (dict-remove tag-decl* 'else)
+      ([t else-tags])
+    (values t (dict-ref tag-decl* 'else))))
 
 (module+ test
-  (define test-5
-    '((define-type "my-enum" (enum ("A" 0) ("B" 1)))
-      (define-type "my-union" (union (case ("tag" "my-enum") (("A") ("i" "int")) ((1) ("j" "int")))))))
+  (test-case
+    "replace-else"
+    (define enum-type
+      '(("A" . 1) ("B" . 2) ("C" . 3)))
+    (define tag-decl*
+      '(("A" . "int") (else . "hyper")))
+    (check-equal?
+      (make-hash (replace-else tag-decl* enum-type))
+      (make-hash '(("A" . "int") ("B" . "hyper") ("C" . "hyper"))))))
+
+(define-pass normalize-unions : L0a (ir enum-dict) -> L1 ()
+  (Union-Case-Spec
+    : Union-Case-Spec (ir) -> * ()
+    (((,v* ...) ,[decl])
+     (for/list ([v v*]) `(,v . ,decl)))
+    ((else ,[decl]) `((else . ,decl))))
+  (Spec
+    : Spec (ir) -> Spec ()
+    ((union (,i1 ,i2) ,[Union-Case-Spec : union-case-spec -> * alist*] ...)
+     (define tag-decl* (apply append alist*))
+     (when
+       (and
+         (dict-has-key? enum-dict i2) ; tag type is an enum type
+         (ormap number? (dict-keys tag-decl*)))
+       (error (format "numeric tag values not allowed in a union tagged by an enum type in: ~a" ir)))
+     (define tag-decl-2*
+       (if (dict-has-key? tag-decl* 'else)
+         (replace-else tag-decl* (dict-ref enum-dict i2))
+         tag-decl*))
+     (println tag-decl*)
+     (println tag-decl-2*)
+     (define tag* (map car tag-decl-2*))
+     (define decl* (map cdr tag-decl-2*))
+     `(union (,i1 ,i2) (,tag* ,decl*) ...))))
+
+(module+ test
+  (test-case
+    "normalize-unions"
+    (define enums (enum-defs (simplify-union (L0-parser test-xdr-spec-6))))
+    (check-equal?
+      (normalize-unions (simplify-union (L0-parser test-xdr-spec-6)) enums)
+      'todo))
   (test-case
     "throw on numeric tag value in union tagged by an enum type"
     (check-exn
       exn:fail?
       (λ ()
-         (let* ([test-5-L0 (simplify-union (L0-parser test-5))]
-                [test-5-enums (enum-defs test-5-L0)])
-           (normalize-unions test-5-L0 test-5-enums)))))
+         (let* ([test-xdr-spec-5-L0 (simplify-union (L0-parser test-xdr-spec-5))]
+                [test-xdr-spec-5-enums (enum-defs test-xdr-spec-5-L0)])
+           (normalize-unions test-xdr-spec-5-L0 test-xdr-spec-5-enums)))))
+  (test-case
+    "run normalize-unions on Stellar spec"
+    (gobble (normalize-unions Stellar-l0a Stellar-enum-defs)))
   (define Stellar-l1 (normalize-unions Stellar-l0a Stellar-enum-defs)))
 
 ; Next we define a pass that changes the length of variable-length arrays as specified by the caller
@@ -349,7 +395,7 @@
                     `(,v ,decl1))))
 
 (define (l0->l2 overrides l0)
-  (let* ([l0a (throw-if-nested-enum (add-bool (simplify-union l0)))]
+  (let* ([l0a (throw-if-nested-enum (simplify-union l0))]
          [l1 (normalize-unions l0a (enum-defs l0a))]
          [l2 (add-path (override-lengths l1 overrides))])
     l2))
@@ -359,9 +405,6 @@
     "no exn on Stellar"
     (gobble (add-path Stellar-l1)))
   (define Stellar-l2 (add-path Stellar-l1)))
-
-(define (struct-name path)
-  (string-join (reverse path) "::"))
 
 ; collect all type defs in a hashmap
 (define-pass collect-types : L2 (ir) -> * (h)
@@ -480,6 +523,14 @@
     "make struct type"
          (gobble (make-struct-type #'() "my-struct" '("field1" "field2")))))
 
+(define/contract (struct-name path)
+  (-> (and/c (listof string?) (not/c null?)) string?)
+  (string-join (reverse path) "::"))
+
+(module+ test
+  (check-equal? (struct-name '("c" "b" "a")) "a::b::c")
+  (check-equal? (struct-name '("c")) "c"))
+
 (define-pass make-struct-types : (L2 Spec) (ir stx) -> * (sts)
   ; NOTE stops at type identifiers
   (Spec : Spec (ir) -> * (sts)
@@ -524,15 +575,15 @@
       (gobble (make-struct-types (hash-ref Stellar-types "LiquidityPoolEntry") #'()))))
 
 (define (make-struct-types/rec stx h ts)
-  (let* ([deps
-          (apply
-           set-union
-           (for/list ([t (in-set ts)])
-             (deps h t)))])
+  (define ts-deps
     (apply
-     hash-union
-     (for/list ([t (in-set (set-union ts deps))])
-       (make-struct-types (hash-ref h t) stx)))))
+      set-union
+      (for/list ([t (in-set ts)])
+        (deps h t))))
+  (apply
+    hash-union
+    (for/list ([t (in-set (set-union ts ts-deps))])
+      (make-struct-types (hash-ref h t) stx))))
 
 (module+ test
   (test-case
@@ -549,32 +600,6 @@
   (list
    (make-struct-type stx "-byte-array" '("value"))
    (make-struct-type stx "-optional" '("present" "value"))))
-
-; this produces a syntax object
-(define (xdr-types->racket xdr-spec overrides stx ts) ; ts is a set of types
-  (let* ([l0 (throw-if-nested-enum (add-bool (simplify-union (L0-parser xdr-spec))))]
-         [l1 (normalize-unions l0 (enum-defs l0))]
-         [l2 (add-path (override-lengths l1 overrides))]
-         [h (collect-types l2)]
-         [consts-h (make-consts-hashmap l0)]
-         [const-defs (constant-definitions stx consts-h)]
-         [struct-defs (hash-values (make-struct-types/rec stx h ts))])
-    #`(begin
-        #,@const-defs
-        #,@struct-defs
-        #,@(built-in-structs stx))))
-
-(module+ test
-  (define test-overrides
-    '((("Transaction" "operations") len . 1)
-      (("TestLedger" "ledgerEntries") len . 2)
-      (("MuxedAccount" "ed25519")
-       key-set
-       "GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3"
-       "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
-  (test-case
-    "xdr-types->racket"
-      (gobble (xdr-types->racket Stellar-xdr-types test-overrides #'()  (set "TransactionEnvelope" "TestLedger" "TestCaseResult")))))
 
 ; Next we generate the valid? function for a given xdr spec
 ; TODO we could avoid all those lambdas if we passed a syntax object to Spec
@@ -616,7 +641,7 @@
          (define struct-type-valid?
            (format-id ctx "~a?" (struct-name p)))
          (define (field-valid? decl)
-           (nanopass-case
+           (nanopass-case ; TODO Do we need nanopass-case here? Would a simple match not work?
              (L2 Decl)
              decl
              ((,i ,type-spec)
@@ -631,8 +656,13 @@
                 #,@(for/list ([fd decl*])
                      #`(#,(field-valid? fd) d)))))
         ((union ,p (,i1 ,i2) ,union-case-spec* ...)
-         #'todo)
-        (else #'(λ (d) (#t))))
+         ;; Here we must check that the tag is valid (i.e. bv 32 and in the range for
+         ;; enums). We must also check that the value is valid.
+         (define tag-getter
+           (format-id ctx "~a-tag" (struct-name p)))
+         (define tag-valid?
+           (valid?/syntax i2 types ctx))
+         #`(λ (d) (#,tag-valid? (#,tag-getter d)))))
     (begin
       (define fn-id (format-id ctx "valid?"))
       #`(define (#,fn-id data) (#,(Spec t) data))))
@@ -643,3 +673,37 @@
     (begin
       (gobble (valid?/syntax "int" (hash) #'()))
       (gobble (valid?/syntax "PublicKey" Stellar-types #'())))))
+
+; this produces a syntax object
+(define (xdr-types->racket xdr-spec overrides stx)
+  (define l0 (throw-if-nested-enum (simplify-union (L0-parser xdr-spec))))
+
+  (let* (
+         [l1 (normalize-unions l0 (enum-defs l0))]
+         [l2 (add-path (override-lengths l1 overrides))]
+         [types-h (collect-types l2)]
+         [consts-h (make-consts-hashmap l0)]
+         [const-defs (constant-definitions stx consts-h)]
+         [struct-defs (hash-values (make-struct-types/rec stx types-h (hash-values types-h)))]
+         [valid? (for/list ([t (hash-values types-h)])
+                   (valid?/syntax t types-h stx))])
+    #`(begin
+        #,@const-defs
+        #,@struct-defs
+        #,@(built-in-structs stx))))
+
+; (module+ test)
+
+(module+ test
+  (define test-overrides
+    '((("Transaction" "operations") len . 1)
+      (("TestLedger" "ledgerEntries") len . 2)
+      (("MuxedAccount" "ed25519")
+       key-set
+       "GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3"
+       "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
+  (test-case
+    "run xdr-types->racket on Stellar's XDR spec"
+      (gobble (xdr-types->racket Stellar-xdr-types test-overrides #'()))))
+
+; (define (valid-union? path tag-type cases types ctx)
