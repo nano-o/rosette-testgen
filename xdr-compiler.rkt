@@ -109,6 +109,11 @@
   (define test-xdr-spec-6
     '((define-type "my-enum" (enum ("A" 0) ("B" 1) ("C" 2)))
       (define-type "my-union" (union (case ("tag" "my-enum") (("A") ("i" "int")) (else ("j" "int")))))))
+  (define test-xdr-spec-7
+    '((define-type "my-enum" (enum ("A" 0) ("B" 1) ("C" 2)))
+      (define-type "my-union" (union (case ("tag" "my-enum")
+                                       (("A") ("i" "int"))
+                                       (else ("j" (struct ("field1" "int") ("field2" "hyper")))))))))
   ;; the Stellar XDR spec:
   (define Stellar-xdr-types
     (read-datums "Stellar.xdr-types")))
@@ -281,6 +286,7 @@
       (make-hash (replace-else tag-decl* enum-type))
       (make-hash '(("A" . "int") ("B" . "hyper") ("C" . "hyper"))))))
 
+; TODO explain why we need to normalize unions
 (define-pass normalize-unions : L0a (ir enum-dict) -> L1 ()
   (Union-Case-Spec
     : Union-Case-Spec (ir) -> * ()
@@ -298,10 +304,10 @@
        (error (format "numeric tag values not allowed in a union tagged by an enum type in: ~a" ir)))
      (define tag-decl-2*
        (if (dict-has-key? tag-decl* 'else)
-         (replace-else tag-decl* (dict-ref enum-dict i2))
+         (if (not (dict-has-key? enum-dict i2))
+           (error "else not allowed in union if tag type is not an enum")
+           (replace-else tag-decl* (dict-ref enum-dict i2)))
          tag-decl*))
-     (println tag-decl*)
-     (println tag-decl-2*)
      (define tag* (map car tag-decl-2*))
      (define decl* (map cdr tag-decl-2*))
      `(union (,i1 ,i2) (,tag* ,decl*) ...))))
@@ -312,7 +318,15 @@
     (define enums (enum-defs (simplify-union (L0-parser test-xdr-spec-6))))
     (check-equal?
       (normalize-unions (simplify-union (L0-parser test-xdr-spec-6)) enums)
-      'todo))
+      (with-output-language (L1 XDR-Spec)
+        `((define-type "my-enum" (enum ("A" 0) ("B" 1) ("C" 2)))
+          (define-type
+            "my-union"
+            (union
+              ("tag" "my-enum")
+              ("A" ("i" "int"))
+              ("C" ("j" "int"))
+              ("B" ("j" "int"))))))))
   (test-case
     "throw on numeric tag value in union tagged by an enum type"
     (check-exn
@@ -326,16 +340,17 @@
     (gobble (normalize-unions Stellar-l0a Stellar-enum-defs)))
   (define Stellar-l1 (normalize-unions Stellar-l0a Stellar-enum-defs)))
 
-; Next we define a pass that changes the length of variable-length arrays as specified by the caller
+;; Next we define a pass that changes the length of variable-length arrays as specified by the caller
 
 (define (get-length overrides path len)
-  (let ([key (reverse path)])
-    (if (dict-has-key? overrides key)
-        (let ([ov (dict-ref overrides key)])
-          (if (eq? (car ov) 'len)
-              (cdr ov)
-              len))
-        len)))
+  (define key (reverse path))
+  (cond
+    [(dict-has-key? overrides key)
+     (define ov (dict-ref overrides key))
+     (if (eq? (car ov) 'len)
+       (cdr ov)
+       len)])
+  len)
 
 ; overridess must be a dict mapping paths to natural numbers
 ; NOTE could be done in make-rule instead of rewriting L1
@@ -372,37 +387,61 @@
 (define path? list?) ; NOTE: this is part of the defintion of L2
 
 (define-pass add-path : L1 (ir) -> L2 ()
-  (Def : Def (ir) -> Def ()
-       ((define-type ,i ,[Spec : type-spec0 (list i) -> type-spec1])
-        `(define-type ,i ,type-spec1)))
-  (Decl : Decl (ir p) -> Decl ()
-        ((,i ,[Spec : type-spec0 (cons i p) -> type-spec1])
-         `(,i ,type-spec1)))
-  (Spec : Spec (ir p) -> Spec ()
-        (,i i)
-        ((union (,i1 ,i2) ,[Union-Case-Spec : union-case-spec0* p -> union-case-spec1*] ...)
-         `(union ,p (,i1 ,i2) ,union-case-spec1* ...))
-        ((string ,c) `(string ,c))
-        ((variable-length-array ,[Spec : type-spec0 p -> type-spec1] ,v)
-         `(variable-length-array ,type-spec1 ,v))
-        ((fixed-length-array ,[Spec : type-spec0 p -> type-spec1] ,v)
-         `(fixed-length-array ,type-spec1 ,v))
-        ((enum (,i* ,c*) ...) `(enum (,i* ,c*) ...))
-        ((struct ,[Decl : decl0 p -> decl1] ...)
-         `(struct ,p ,decl1 ...)))
-  (Union-Case-Spec : Union-Case-Spec (ir p) -> Union-Case-Spec ()
-                   ((,v ,[Decl : decl0 p -> decl1])
-                    `(,v ,decl1))))
+  (Def
+    : Def (ir) -> Def ()
+    ((define-type ,i ,[Spec : type-spec0 (list i) -> type-spec1])
+     `(define-type ,i ,type-spec1)))
+  (Decl
+    : Decl (ir p) -> Decl ()
+    ((,i ,[Spec : type-spec0 (cons i p) -> type-spec1])
+     `(,i ,type-spec1)))
+  (Spec
+    : Spec (ir p) -> Spec ()
+    (,i i)
+    ((union (,i1 ,i2) ,[Union-Case-Spec : union-case-spec0* p -> union-case-spec1*] ...)
+     `(union ,p (,i1 ,i2) ,union-case-spec1* ...))
+    ((string ,c) `(string ,c))
+    ((variable-length-array ,[Spec : type-spec0 p -> type-spec1] ,v)
+     `(variable-length-array ,type-spec1 ,v))
+    ((fixed-length-array ,[Spec : type-spec0 p -> type-spec1] ,v)
+     `(fixed-length-array ,type-spec1 ,v))
+    ((enum (,i* ,c*) ...) `(enum (,i* ,c*) ...))
+    ((struct ,[Decl : decl0 p -> decl1] ...)
+     `(struct ,p ,decl1 ...)))
+  (Union-Case-Spec
+    : Union-Case-Spec (ir p) -> Union-Case-Spec ()
+    ((,v ,[Decl : decl0 p -> decl1])
+     `(,v ,decl1))))
 
 (define (l0->l2 overrides l0)
-  (let* ([l0a (throw-if-nested-enum (simplify-union l0))]
-         [l1 (normalize-unions l0a (enum-defs l0a))]
-         [l2 (add-path (override-lengths l1 overrides))])
-    l2))
+  (define l0a
+    (add-bool (throw-if-nested-enum (simplify-union l0))))
+  (define l1
+    (normalize-unions l0a (enum-defs l0a)))
+  (add-path (override-lengths l1 overrides)))
 
 (module+ test
   (test-case
-    "no exn on Stellar"
+    "l0->l2"
+    (check-equal?
+      (l0->l2 '#hash() (L0-parser test-xdr-spec-7))
+      (with-output-language (L2 XDR-Spec)
+        (let* ([my-union-path '("my-union")]
+               [my-struct-path '("j" "my-union")]
+               [my-struct (with-output-language (L2 Spec) `(struct ,my-struct-path ("field1" "int") ("field2" "hyper")))])
+          `((define-type "my-enum" (enum ("A" 0) ("B" 1) ("C" 2)))
+            (define-type
+              "my-union"
+              (union
+                ,my-union-path
+                ("tag" "my-enum")
+                ("A" ("i" "int"))
+                ("C" ("j" ,my-struct))
+                ("B"
+                 ("j" ,my-struct))))
+            (define-type "bool" (enum ("TRUE" 1) ("FALSE" 0))))))))
+  (test-case
+    "run add-path on Stellar spec"
     (gobble (add-path Stellar-l1)))
   (define Stellar-l2 (add-path Stellar-l1)))
 
@@ -413,7 +452,9 @@
   (Def : Def (ir) -> * (h)
        ((define-type ,i ,type-spec) (hash i type-spec))
        ((define-constant ,i ,c) (hash)))
-  (XDR-Spec ir))
+  (invariant-assertion
+    (hash/c string? (λ (x) #t))
+    (XDR-Spec ir)))
 
 (module+ test
   (test-case
@@ -425,8 +466,7 @@
 (define (base-type? t)
   (set-member? base-types t))
 
-; Next we compute the type symbols that a type definition depends on.
-
+;; Next we compute the type symbols that a type definition depends on.
 (define-pass immediate-deps : (L2 Spec) (ir) -> * (d)
   ; all the types the given type spec depends on
   (Spec : Spec (ir) -> * (d)
@@ -441,18 +481,21 @@
         (else (set)))
   (Union-Case-Spec : Union-Case-Spec (ir) -> * (d)
                    ((,v ,[d]) d))
-  (Spec ir)) ; TODO needed?
+  (invariant-assertion
+    (set/c string?)
+    (Spec ir)))
 
 (module+ test
   (define TransactionEnvelope-deps (immediate-deps (hash-ref Stellar-types "TransactionEnvelope"))))
 
-(define (type-graph-edges h)
-  ; returns a list of edges
+(define/contract
+  (type-graph-edges h)
+  (-> hash? (*list/c (list/c string? string?)))  ; returns a list of edges
   (apply
     append
     (for/list ([(k v) (in-hash h)])
-      (let ([deps (set->list (immediate-deps v))])
-        (map (λ (d) (list k d)) deps)))))
+      (define deps (set->list (immediate-deps v)))
+      (map (λ (d) (list k d)) deps))))
 
 (define (deps-graph h)
   (let ([edges (type-graph-edges h)])
