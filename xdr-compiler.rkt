@@ -163,7 +163,7 @@
     (test-case
      "run simplify-union on stellar spec"
         (gobble (simplify-union Stellar-l0)))
-  (define Stellar-l0a (simplify-union Stellar-l0)))
+  (define Stellar-l0a (add-bool (simplify-union Stellar-l0))))
 
 ; throws an exception if there are any nested enums
 ; NOTE we produce L0a, even if we throw it away, so that the nanopass framework will synthesize most of the rules; otherwise it doesn't
@@ -453,7 +453,7 @@
        ((define-type ,i ,type-spec) (hash i type-spec))
        ((define-constant ,i ,c) (hash)))
   (invariant-assertion
-    (hash/c string? (λ (x) #t))
+    (hash/c string? (const #t))
     (XDR-Spec ir)))
 
 (module+ test
@@ -466,7 +466,7 @@
 (define (base-type? t)
   (set-member? base-types t))
 
-;; Next we compute the type symbols that a type definition depends on.
+;; Next we compute the (non-base) type symbols that a type definition depends on.
 (define-pass immediate-deps : (L2 Spec) (ir) -> * (d)
   ; all the types the given type spec depends on
   (Spec : Spec (ir) -> * (d)
@@ -474,7 +474,10 @@
         ((variable-length-array ,[d] ,v) d)
         ((fixed-length-array ,[d] ,v) d)
         ((struct ,p ,[d*] ...) (apply set-union d*))
-        ((union ,p (,i1 ,i2) ,[d*] ...) (apply set-union d*))
+        ((union ,p (,i1 ,i2) ,[d*] ...)
+         (define tag-type
+           (if (base-type? i2) (set) (set i2)))
+         (apply set-union (cons tag-type d*)))
         (else (set)))
   (Decl : Decl (ir) -> * (d)
         ((,i ,[d]) d)
@@ -486,7 +489,12 @@
     (Spec ir)))
 
 (module+ test
-  (define TransactionEnvelope-deps (immediate-deps (hash-ref Stellar-types "TransactionEnvelope"))))
+  (test-case
+    "immediate-deps of LedgerKey"
+  (define LedgerKey-deps (immediate-deps (hash-ref Stellar-types "LedgerKey")))
+  (check-equal?
+    LedgerKey-deps
+    (set "LedgerEntryType" "PoolID" "string64" "TrustLineAsset" "ClaimableBalanceID" "AccountID" "int64"))))
 
 (define/contract
   (type-graph-edges h)
@@ -502,14 +510,17 @@
     (unweighted-graph/directed edges)))
 
 (define (deps h t)
-    (do-bfs (deps-graph h) t
-            #:init (set)
-            #:visit: (set-add $acc $v)))
+  (do-bfs
+    (deps-graph h) t
+    #:init (set)
+    #:visit: (set-add $acc $v)))
 
 (module+ test
-  (define TransactionEnvelope-deps/rec (deps Stellar-types "TransactionEnvelope"))
-  (define TransactionResult-deps/rec (deps Stellar-types "TransactionResult"))
-  (define LedgerEntry-deps/rec (deps Stellar-types "LedgerEntry")))
+  (test-case
+    "deps"
+    (check-equal?
+      (deps Stellar-types "TrustLineAsset")
+      (set "PoolID" "PublicKeyType" "AssetType" "AccountID" "PublicKey" "TrustLineAsset" "AssetCode12" "AlphaNum12" "AlphaNum4" "uint256" "Hash" "AssetCode4"))))
 
 (define (min-depth h t)
   ; the minimum depth to cover the graph
@@ -520,6 +531,12 @@
                            acc
                            (cons (cons k v) acc)))])
       (cdr (argmax (λ (p) (cdr p)) reachable)))))
+
+(module+ test
+  "min-depth"
+  (check-equal?
+    (min-depth Stellar-types "TransactionEnvelope")
+    7))
 
 ; max depth without recursing:
 (define (max-depth xdr-types)
@@ -538,9 +555,15 @@
                               (max-depth-set! $v (+ m 1))))))
     (max-depth->hash)))
 
+(module+ test
+  (test-case
+    "max-depth"
+    (check-equal?
+      (dict-ref (max-depth Stellar-xdr-types) "AccountEntry")
+      7)))
+
 (define (recursive-types h t)
   ; returns the set of types that are recursive
-  ; TODO a test
   (let ([g (deps-graph h)]
         [rec-types (mutable-set)])
     (define-vertex-property g path)
@@ -553,13 +576,19 @@
                           (not seen))))
     rec-types))
 
+(module+ test
+  (test-case
+    "recursive-types"
+    (check-equal?
+      (recursive-types Stellar-types "TransactionEnvelope")
+      (mutable-set))))
 
 ; Next we define needed Racket struct types
 
-(define (make-struct-type stx name fields) ; name and fields as strings
+(define (make-struct-type ctx name fields) ; name and fields as strings
   (let ([field-names (for/list ([f fields])
-                       (format-id stx "~a" f))])
-        #`(struct/lens #,(format-id stx "~a" name) #,field-names #:transparent)))
+                       (format-id ctx "~a" f))])
+        #`(struct/lens #,(format-id ctx "~a" name) #,field-names #:transparent)))
 
 (module+ test
   (test-case
@@ -618,6 +647,7 @@
       (gobble (make-struct-types (hash-ref Stellar-types "LiquidityPoolEntry") #'()))))
 
 (define (make-struct-types/rec stx h ts)
+  ; TODO: fails if a type in ts has no non-base types its depends on (because in this case it's not in the graph)
   (define ts-deps
     (apply
       set-union
@@ -635,7 +665,7 @@
       (make-struct-types/rec
         #'()
         Stellar-types
-        (set "TransactionEnvelope" "TransactionResult" "LedgerEntry")))))
+        (hash-keys Stellar-types)))))
 
 (define (built-in-structs stx)
   ; we can use union as it cannot be used as an identifier as per RFC4506
@@ -719,15 +749,14 @@
 
 ; this produces a syntax object
 (define (xdr-types->racket xdr-spec overrides stx)
-  (define l0 (throw-if-nested-enum (simplify-union (L0-parser xdr-spec))))
-
+  (define l0 (throw-if-nested-enum (add-bool (simplify-union (L0-parser xdr-spec)))))
   (let* (
          [l1 (normalize-unions l0 (enum-defs l0))]
          [l2 (add-path (override-lengths l1 overrides))]
          [types-h (collect-types l2)]
          [consts-h (make-consts-hashmap l0)]
          [const-defs (constant-definitions stx consts-h)]
-         [struct-defs (hash-values (make-struct-types/rec stx types-h (hash-values types-h)))]
+         [struct-defs (hash-values (make-struct-types/rec stx types-h (hash-keys types-h)))]
          [valid? (for/list ([t (hash-values types-h)])
                    (valid?/syntax t types-h stx))])
     #`(begin
