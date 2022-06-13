@@ -40,11 +40,12 @@
   racket/syntax
   (only-in mischief/contract dict/c)
   (only-in mischief/for for/dict)
+  rebellion/collection/association-list
   graph
   (for-template
     racket/base
     lens
-    (only-in rosette bitvector bveq))
+    (only-in rosette bitvector bveq bv))
   racket/trace)
 
 (define-language L0
@@ -134,6 +135,8 @@
 ;; L0a simplifies L0 a bit by removing the superfluous Union-Spec production
 (define-language L0a
   (extends L0)
+  (Union-Spec (union-spec)
+              (- (case (i1 i2) union-case-spec* ...)))
   (Spec (type-spec)
         (- (union union-spec))
         (+ (union (i1 i2) union-case-spec* ...))))
@@ -513,7 +516,7 @@
     (unweighted-graph/directed edges)))
 
 (define/contract (deps h t)
-  (-> hash? string? set?)
+  (-> hash? string? (set/c string?))
   (define g (deps-graph h))
   (cond
     [(has-vertex? g t)
@@ -534,12 +537,13 @@
 (define (min-depth h t)
   ; the minimum depth to cover the graph
   (let-values ([(a _) (bfs (deps-graph h) t)])
-    (let ([reachable (for/fold ([acc null])
-                               ([(k v) (in-hash a)])
-                       (if (equal? v +inf.0)
-                           acc
-                           (cons (cons k v) acc)))])
-      (cdr (argmax (λ (p) (cdr p)) reachable)))))
+    (define reachable
+      (for/fold ([acc null])
+        ([(k v) (in-hash a)])
+        (if (equal? v +inf.0)
+          acc
+          (cons (cons k v) acc))))
+    (cdr (argmax (λ (p) (cdr p)) reachable))))
 
 (module+ test
   (test-case
@@ -704,11 +708,11 @@
         [(not (base-type? i))
          (Spec (hash-ref types i))]
         [(equal? t "opaque")
-         #`(λ (d) ((bitvector 8) d))]
+         #`(bitvector 8)]
         [(set-member? '("int", "unsigned int") t)
-         #`(λ (d) ((bitvector 32) d))]
+         #`(bitvector 32)]
         [(set-member? '("hyper", "unsigned hyper") t)
-         #`(λ (d) ((bitvector 64) d))]))
+         #`(bitvector 64)]))
     ((string ,c)
      #`(λ (d) (and (vector? d) (equal? (vector-length d) #,c))))
     ((variable-length-array ,[stx] ,v)
@@ -717,25 +721,25 @@
             (vector? d)
             (when #,v (equal? (vector-length d) #,v))
             (for/and ([e d])
-              #,stx e))))
+              (#,stx e)))))
     ((fixed-length-array ,[stx] ,v)
      #`(λ (d)
           (and
             (vector? d)
             (equal? (vector-length d) #,v)
             (for/and ([e d])
-              #,stx e))))
+              (#,stx e)))))
     ((enum (,i* ,c*) ...)
-     #`(λ (d)
-          (and
-            ((bitvector 32) d)
-            (for/or ([v #,c*])
-              (bveq d v)))))
+     #`(conjoin
+         (bitvector 32)
+         (λ (d)
+            (for/or ([v (list #,@c*)])
+              (bveq d (bv v 32))))))
     ((struct ,p ,decl* ...)
      (define struct-type-valid?
        (format-id ctx "~a?" (struct-name p)))
      (define (field-valid? decl)
-       (nanopass-case ; TODO Do we need nanopass-case here? Would a simple match not work?
+       (nanopass-case
          (L2 Decl)
          decl
          ((,i ,type-spec)
@@ -749,19 +753,42 @@
             (#,struct-type-valid? d)
             #,@(for/list ([f decl*])
                  #`(#,(field-valid? f) d)))))
-    ((union ,p (,i1 ,i2) ,union-case-spec* ...)
+    ((union ,p (,i1 ,i2) ,[case-test*] ...)
      ;; Here we must check that the tag is valid (i.e. bv 32 and in the range for
      ;; enums). We must also check that the value is valid.
      (define tag-getter
        (format-id ctx "~a-tag" (struct-name p)))
+     (define value-getter
+       (format-id ctx "~a-value" (struct-name p)))
      (define tag-valid?
        (if (base-type? i2)
          (Spec i2)
          (Spec (hash-ref types i2))))
-     ; TODO check the value
-     #`(λ (d) (#,tag-valid? (#,tag-getter d)))))
+     #`(λ (d)
+          (and
+            (#,tag-valid? (#,tag-getter d)) ; seems redundant
+            (for/or ([c #,@case-test*])
+              (c (#,tag-getter d) (#,value-getter d)))))))
+  (Union-Case-Spec
+    : Union-Case-Spec (t) -> * (stx)
+    ((,v ,decl)
+     (define check-tag
+       #`(λ (tag) (bveq (bv #,v 32) tag)))
+     (define check-val
+       #`(λ (val)
+            (#,(nanopass-case
+                 (L2 Decl)
+                 decl
+                 ((,i ,type-spec)
+                  (Spec type-spec))
+                 (,void #'null?))
+             val)))
+     #`(λ (tag val)
+          (and
+            (#,check-tag tag)
+            (#,check-val val)))))
   (begin
-    (define fn-id (format-id ctx "valid?"))
+    (define fn-id (format-id ctx "~a-valid?" t))
     (define t-def (if (base-type? t) t (hash-ref types t)))
     #`(define (#,fn-id data) (#,(Spec t-def) data))))
 
@@ -773,7 +800,8 @@
       (gobble (valid?/syntax "PublicKey" Stellar-types #'())))))
 
 ; this produces a syntax object
-(define (xdr-types->racket xdr-spec overrides stx ts)
+(define/contract (xdr-types->racket xdr-spec overrides stx ts)
+  (-> list? list? syntax? (list/c string?) syntax?)
   (define l0 (throw-if-nested-enum (add-bool (simplify-union (L0-parser xdr-spec)))))
   (define l1 (normalize-unions l0 (enum-defs l0)))
   (define l2 (add-path (override-lengths l1 overrides)))
@@ -785,15 +813,14 @@
   (define consts-h (make-consts-hashmap l0))
   (define const-defs (constant-definitions stx consts-h))
   (define struct-defs (hash-values (make-struct-types/rec stx types-h ts)))
-  (define valid?
+  (define valid?-defs
     (for/list ([t ts])
       (valid?/syntax t types-h stx)))
   #`(begin
       #,@const-defs
       #,@struct-defs
-      #,@(built-in-structs stx)))
-
-; (module+ test)
+      #,@(built-in-structs stx)
+      #,@valid?-defs))
 
 (module+ test
   (define test-overrides
@@ -806,5 +833,3 @@
   (test-case
     "run xdr-types->racket on Stellar's XDR spec"
       (gobble (xdr-types->racket Stellar-xdr-types test-overrides #'() '("TransactionEnvelope")))))
-
-; (define (valid-union? path tag-type cases types ctx)
