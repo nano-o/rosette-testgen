@@ -16,6 +16,8 @@
 
 ; We use the nanopass compiler framework
 
+; NOTE: there's some complexity in tracking dependencies between types; we do this in order to later as small a grammar as possible (instead of generating a grammar for all types). This is probably a case of premature optimisation.
+
 ; TODO use lenses to allow writing functional specifications; first try it on the merge demo.
 ; TODO there's pretty much no error checking
 ; TODO write tests
@@ -42,7 +44,8 @@
   (for-template
     racket/base
     lens
-    (only-in rosette bitvector bveq)))
+    (only-in rosette bitvector bveq))
+  racket/trace)
 
 (define-language L0
   ; This is a subset of the language of guile-rpc ASTs
@@ -496,8 +499,7 @@
     LedgerKey-deps
     (set "LedgerEntryType" "PoolID" "string64" "TrustLineAsset" "ClaimableBalanceID" "AccountID" "int64"))))
 
-(define/contract
-  (type-graph-edges h)
+(define/contract (type-graph-edges h)
   (-> hash? (*list/c (list/c string? string?)))  ; returns a list of edges
   (apply
     append
@@ -505,15 +507,22 @@
       (define deps (set->list (immediate-deps v)))
       (map (λ (d) (list k d)) deps))))
 
-(define (deps-graph h)
+(define/contract (deps-graph h)
+  (-> hash? unweighted-graph?)
   (let ([edges (type-graph-edges h)])
     (unweighted-graph/directed edges)))
 
-(define (deps h t)
-  (do-bfs
-    (deps-graph h) t
-    #:init (set)
-    #:visit: (set-add $acc $v)))
+(define/contract (deps h t)
+  (-> hash? string? set?)
+  (define g (deps-graph h))
+  (cond
+    [(has-vertex? g t)
+     (do-bfs
+       g ; the graph
+       t ; the source of the bfs
+       #:init (set)
+       #:visit: (set-add $acc $v))]
+    [else (set)]))
 
 (module+ test
   (test-case
@@ -533,27 +542,30 @@
       (cdr (argmax (λ (p) (cdr p)) reachable)))))
 
 (module+ test
-  "min-depth"
-  (check-equal?
-    (min-depth Stellar-types "TransactionEnvelope")
-    7))
+  (test-case
+    "min-depth"
+    (check-equal?
+      (min-depth Stellar-types "TransactionEnvelope")
+      7)))
 
 ; max depth without recursing:
 (define (max-depth xdr-types)
   (let ([h (collect-types (l0->l2 null (L0-parser xdr-types)))])
     (define g (deps-graph h))
     (define-vertex-property g max-depth)
-    (do-dfs g
-            #:epilogue: (let ([ns (get-neighbors g $v)])
-                          (if (null? ns)
-                            (max-depth-set! $v 1)
-                            (let* ([get-depth (λ (v)
-                                                 (if (max-depth-defined? v)
-                                                   (max-depth v)
-                                                   0))]
-                                   [m (apply max (map get-depth ns))])
-                              (max-depth-set! $v (+ m 1))))))
-    (max-depth->hash)))
+    (do-dfs
+      g
+      #:epilogue:
+        (begin
+          (define ns (get-neighbors g $v))
+          (cond
+            [(null? ns) (max-depth-set! $v 1)]
+            [else
+              (define (get-depth v)
+                (if (max-depth-defined? v) (max-depth v) 0))
+              (define m (apply max (map get-depth ns)))
+              (max-depth-set! $v (+ m 1))]))
+      (max-depth->hash))))
 
 (module+ test
   (test-case
@@ -562,19 +574,23 @@
       (dict-ref (max-depth Stellar-xdr-types) "AccountEntry")
       7)))
 
-(define (recursive-types h t)
+(define/contract (recursive-types h t)
+  (-> hash? string? set-mutable?)
   ; returns the set of types that are recursive
-  (let ([g (deps-graph h)]
-        [rec-types (mutable-set)])
-    (define-vertex-property g path)
-    (do-bfs g t
-            #:init (path-set! t null)
-            #:on-enqueue: (path-set! $v (cons $from (path $from)))
-            #:visit?: (begin
-                        (let ([seen (set-member? (path $from) $v)])
-                          (when seen (set-add! rec-types $v))
-                          (not seen))))
-    rec-types))
+  (define g (deps-graph h))
+  (define rec-types (mutable-set))
+  (define-vertex-property g path)
+  (do-bfs
+    g
+    t
+    #:init (path-set! t null)
+    #:on-enqueue: (path-set! $v (cons $from (path $from)))
+    #:visit?:
+      (begin
+        (define seen (set-member? (path $from) $v))
+        (when seen (set-add! rec-types $v))
+        (not seen)))
+  rec-types)
 
 (module+ test
   (test-case
@@ -603,59 +619,64 @@
   (check-equal? (struct-name '("c" "b" "a")) "a::b::c")
   (check-equal? (struct-name '("c")) "c"))
 
+;; define struct types for nested structs
 (define-pass make-struct-types : (L2 Spec) (ir stx) -> * (sts)
-  ; NOTE stops at type identifiers
-  (Spec : Spec (ir) -> * (sts)
-        (,i (hash))
-        ((string ,c) (hash))
-        ((variable-length-array ,[sts] ,v) sts)
-        ((fixed-length-array ,[sts] ,v) sts)
-        ((enum (,i* ,c*) ...) (hash))
-        ; The following may not be a good idea if we want to trgobble union with tag bool as generic option types.
-        ; The problem is that guile-rpc transforms optionals into normal unions.
-        ; For now we assume that any union with bool tag is in fact an optional.
-        ((union ,p (,i1 ,i2) ,[sts*] ...)
-         (let ([rest (apply hash-union sts*)])
-          (if (equal? i2 "bool")
-           rest
-           (let ([t (make-struct-type stx (struct-name p) '("tag" "value"))])
-             (hash-union (hash (struct-name p) t) rest)))))
-        ((struct ,p ,decl* ...)
-         (let* ([get-decl-pair
-                 (λ (decl)
-                   (nanopass-case (L2 Decl)
-                                  decl
-                                  ((,i ,type-spec) (cons i type-spec))
-                                  (else #f)))]
-                [non-void (filter identity (map get-decl-pair decl*))]
-                [f* (map car non-void)]
-                [s* (map cdr non-void)]
-                [t (make-struct-type stx (struct-name p) f*)]
-                [rec (apply hash-union (map (λ (s) (Spec s)) s*))])
-           (hash-union rec (hash (struct-name p) t)))))
-  (Decl : Decl (ir) -> * (sts)
-        ((,i ,[sts]) sts)
-        (else (hash)))
-  (Union-Case-Spec : Union-Case-Spec (ir) -> * (sts)
-                   ((,v ,[sts]) sts))
-  (Spec ir))
+  (Spec
+    : Spec (ir) -> * (sts)
+    (,i (hash))
+    ((string ,c) (hash))
+    ((variable-length-array ,[sts] ,v) sts)
+    ((fixed-length-array ,[sts] ,v) sts)
+    ((enum (,i* ,c*) ...) (hash))
+    ; The problem is that guile-rpc transforms optionals into normal unions.
+    ; For now we assume that any union with bool tag is in fact an optional.
+    ((union ,p (,i1 ,i2) ,[sts*] ...)
+     (define rest (apply hash-union sts*))
+     (if (equal? i2 "bool") ; assume we are dealing with an optional
+       rest
+       (let ([t (make-struct-type stx (struct-name p) '("tag" "value"))])
+         (hash-union (hash (struct-name p) t) rest))))
+    ((struct ,p ,decl* ...)
+     (define (->pair decl)
+       (nanopass-case
+         (L2 Decl)
+         decl
+         ((,i ,type-spec) (cons i type-spec))
+         (else #f)))
+     (define decl-pairs (filter identity (map ->pair decl*)))
+     (define fields (map car decl-pairs))
+     (define specs (map cdr decl-pairs))
+     (define the-struct (make-struct-type stx (struct-name p) fields))
+     (define rest (apply hash-union (map (λ (s) (Spec s)) specs)))
+     (hash-union rest (hash (struct-name p) the-struct))))
+  (Decl
+    : Decl (ir) -> * (sts)
+    ((,i ,[sts]) sts)
+    (else (hash)))
+  (Union-Case-Spec
+    : Union-Case-Spec (ir) -> * (sts)
+    ((,v ,[sts]) sts))
+  (invariant-assertion
+    (hash/c string? syntax?)
+    (Spec ir)))
 
 (module+ test
   (test-case
     "make struct types"
       (gobble (make-struct-types (hash-ref Stellar-types "ManageOfferSuccessResult") #'()))
+      (gobble (make-struct-types (hash-ref Stellar-types "TransactionEnvelope") #'()))
       (gobble (make-struct-types (hash-ref Stellar-types "LiquidityPoolEntry") #'()))))
 
-(define (make-struct-types/rec stx h ts)
-  ; TODO: fails if a type in ts has no non-base types its depends on (because in this case it's not in the graph)
+(define/contract (make-struct-types/rec stx h ts)
+  (-> syntax? hash? (*list/c string?) (hash/c string? syntax?))
   (define ts-deps
     (apply
       set-union
-      (for/list ([t (in-set ts)])
+      (for/list ([t ts])
         (deps h t))))
   (apply
     hash-union
-    (for/list ([t (in-set (set-union ts ts-deps))])
+    (for/list ([t (in-set (set-union (list->set ts) ts-deps))])
       (make-struct-types (hash-ref h t) stx))))
 
 (module+ test
@@ -675,70 +696,74 @@
    (make-struct-type stx "-optional" '("present" "value"))))
 
 ; Next we generate the valid? function for a given xdr spec
-; TODO we could avoid all those lambdas if we passed a syntax object to Spec
 (define-pass valid?/syntax : L2 (t types ctx) -> * (stx)
-  (Spec : Spec (t) -> * (stx)
-        (,i
-          (cond
-            [(not (base-type? i))
-             (Spec (hash-ref types i))]
-            [(equal? t "opaque")
-             #`(λ (d) ((bitvector 8) d))]
-            [(set-member? '("int", "unsigned int") t)
-             #`(λ (d) ((bitvector 32) d))]
-            [(set-member? '("hyper", "unsigned hyper") t)
-             #`(λ (d) ((bitvector 64) d))]))
-        ((string ,c)
-         #`(λ (d) (and (vector? d) (equal? (vector-length d) #,c))))
-        ((variable-length-array ,[stx] ,v)
-         #`(λ (d)
-              (and
-                (vector? d)
-                (when #,v (equal? (vector-length d) #,v))
-                (for/and ([e d])
-                  #,stx e))))
-        ((fixed-length-array ,[stx] ,v)
-         #`(λ (d)
-              (and
-                (vector? d)
-                (equal? (vector-length d) #,v)
-                (for/and ([e d])
-                  #,stx e))))
-        ((enum (,i* ,c*) ...)
-         #`(λ (d)
-              (and
-                ((bitvector 32) d)
-                (for/or ([v #,c*])
-                  (bveq d v)))))
-        ((struct ,p ,decl* ...)
-         (define struct-type-valid?
-           (format-id ctx "~a?" (struct-name p)))
-         (define (field-valid? decl)
-           (nanopass-case ; TODO Do we need nanopass-case here? Would a simple match not work?
-             (L2 Decl)
-             decl
-             ((,i ,type-spec)
-              (define type-valid? (Spec type-spec))
-              (define accessor
-                (format-id ctx "~a-~a" (struct-name p) i))
-              #`(λ (d) (#,type-valid? (#,accessor d))))
-             (,void (error "void struct member not supported"))))
-         #`(λ (d)
-              (and
-                (#,struct-type-valid? d)
-                #,@(for/list ([fd decl*])
-                     #`(#,(field-valid? fd) d)))))
-        ((union ,p (,i1 ,i2) ,union-case-spec* ...)
-         ;; Here we must check that the tag is valid (i.e. bv 32 and in the range for
-         ;; enums). We must also check that the value is valid.
-         (define tag-getter
-           (format-id ctx "~a-tag" (struct-name p)))
-         (define tag-valid?
-           (valid?/syntax i2 types ctx))
-         #`(λ (d) (#,tag-valid? (#,tag-getter d)))))
-    (begin
-      (define fn-id (format-id ctx "valid?"))
-      #`(define (#,fn-id data) (#,(Spec t) data))))
+  (Spec
+    : Spec (t) -> * (stx)
+    (,i
+      (cond
+        [(not (base-type? i))
+         (Spec (hash-ref types i))]
+        [(equal? t "opaque")
+         #`(λ (d) ((bitvector 8) d))]
+        [(set-member? '("int", "unsigned int") t)
+         #`(λ (d) ((bitvector 32) d))]
+        [(set-member? '("hyper", "unsigned hyper") t)
+         #`(λ (d) ((bitvector 64) d))]))
+    ((string ,c)
+     #`(λ (d) (and (vector? d) (equal? (vector-length d) #,c))))
+    ((variable-length-array ,[stx] ,v)
+     #`(λ (d)
+          (and
+            (vector? d)
+            (when #,v (equal? (vector-length d) #,v))
+            (for/and ([e d])
+              #,stx e))))
+    ((fixed-length-array ,[stx] ,v)
+     #`(λ (d)
+          (and
+            (vector? d)
+            (equal? (vector-length d) #,v)
+            (for/and ([e d])
+              #,stx e))))
+    ((enum (,i* ,c*) ...)
+     #`(λ (d)
+          (and
+            ((bitvector 32) d)
+            (for/or ([v #,c*])
+              (bveq d v)))))
+    ((struct ,p ,decl* ...)
+     (define struct-type-valid?
+       (format-id ctx "~a?" (struct-name p)))
+     (define (field-valid? decl)
+       (nanopass-case ; TODO Do we need nanopass-case here? Would a simple match not work?
+         (L2 Decl)
+         decl
+         ((,i ,type-spec)
+          (define type-valid? (Spec type-spec))
+          (define accessor
+            (format-id ctx "~a-~a" (struct-name p) i))
+          #`(λ (d) (#,type-valid? (#,accessor d))))
+         (,void (error "void struct member not supported"))))
+     #`(λ (d)
+          (and
+            (#,struct-type-valid? d)
+            #,@(for/list ([f decl*])
+                 #`(#,(field-valid? f) d)))))
+    ((union ,p (,i1 ,i2) ,union-case-spec* ...)
+     ;; Here we must check that the tag is valid (i.e. bv 32 and in the range for
+     ;; enums). We must also check that the value is valid.
+     (define tag-getter
+       (format-id ctx "~a-tag" (struct-name p)))
+     (define tag-valid?
+       (if (base-type? i2)
+         (Spec i2)
+         (Spec (hash-ref types i2))))
+     ; TODO check the value
+     #`(λ (d) (#,tag-valid? (#,tag-getter d)))))
+  (begin
+    (define fn-id (format-id ctx "valid?"))
+    (define t-def (if (base-type? t) t (hash-ref types t)))
+    #`(define (#,fn-id data) (#,(Spec t-def) data))))
 
 (module+ test
   (test-case
@@ -748,21 +773,25 @@
       (gobble (valid?/syntax "PublicKey" Stellar-types #'())))))
 
 ; this produces a syntax object
-(define (xdr-types->racket xdr-spec overrides stx)
+(define (xdr-types->racket xdr-spec overrides stx ts)
   (define l0 (throw-if-nested-enum (add-bool (simplify-union (L0-parser xdr-spec)))))
-  (let* (
-         [l1 (normalize-unions l0 (enum-defs l0))]
-         [l2 (add-path (override-lengths l1 overrides))]
-         [types-h (collect-types l2)]
-         [consts-h (make-consts-hashmap l0)]
-         [const-defs (constant-definitions stx consts-h)]
-         [struct-defs (hash-values (make-struct-types/rec stx types-h (hash-keys types-h)))]
-         [valid? (for/list ([t (hash-values types-h)])
-                   (valid?/syntax t types-h stx))])
-    #`(begin
-        #,@const-defs
-        #,@struct-defs
-        #,@(built-in-structs stx))))
+  (define l1 (normalize-unions l0 (enum-defs l0)))
+  (define l2 (add-path (override-lengths l1 overrides)))
+  (define types-h (collect-types l2))
+  (for ([t ts])
+    (define rec-types (recursive-types types-h t))
+    (when (not (set-empty? rec-types))
+      (error (format "recursive types are not supported: ~a" rec-types))))
+  (define consts-h (make-consts-hashmap l0))
+  (define const-defs (constant-definitions stx consts-h))
+  (define struct-defs (hash-values (make-struct-types/rec stx types-h ts)))
+  (define valid?
+    (for/list ([t ts])
+      (valid?/syntax t types-h stx)))
+  #`(begin
+      #,@const-defs
+      #,@struct-defs
+      #,@(built-in-structs stx)))
 
 ; (module+ test)
 
@@ -776,6 +805,6 @@
        "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
   (test-case
     "run xdr-types->racket on Stellar's XDR spec"
-      (gobble (xdr-types->racket Stellar-xdr-types test-overrides #'()))))
+      (gobble (xdr-types->racket Stellar-xdr-types test-overrides #'() '("TransactionEnvelope")))))
 
 ; (define (valid-union? path tag-type cases types ctx)
