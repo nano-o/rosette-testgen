@@ -1,4 +1,4 @@
-#lang errortrace racket
+#lang racket
 
 ; Compiles an XDR specification to:
 ; - A set of Racket definitions (constants and structs)
@@ -44,8 +44,7 @@
   (for-template
     racket/base
     lens
-    (only-in rosette bitvector bveq bv)
-    (only-in racket conjoin))
+    (only-in rosette bitvector bveq bv))
   racket/trace)
 
 (define-language L0
@@ -709,25 +708,39 @@
         [(not (base-type? i))
          (Spec (hash-ref types i))]
         [(equal? i "opaque")
-         #`(bitvector 8)]
+         #`(λ (d)
+              (or
+                ((bitvector 8) d)
+                (raise-user-error (format "invalid opaque: ~a" d))))]
         [(set-member? '("int" "unsigned int") i)
-         #`(bitvector 32)]
+         #`(λ (d)
+              (or
+                ((bitvector 32) d)
+                (raise-user-error (format "invalid integer: ~a" d))))]
         [(set-member? '("hyper" "unsigned hyper") i)
-         #`(bitvector 64)]
+         #`(λ (d)
+              (or
+                ((bitvector 64) d)
+                (raise-user-error (format "invalid hyper: ~a" d))))]
         [else (error (format "this is a bug: case missing for base type ~a" i))]))
     ((string ,c)
-     #`(λ (d) (and (vector? d) (equal? (vector-length d) #,c))))
+     #`(λ (d)
+          (or
+            (and (vector? d) (<= (vector-length d) #,c))
+            (raise-user-error (format "invalid string: ~a" d)))))
     ((variable-length-array ,[stx] ,v)
      (define len
        (if v
          (if (number? v) v (hash-ref consts-h v))
          v))
      #`(λ (d)
-          (and
-            (vector? d)
-            (when #,len (<= (vector-length d) #,len))
-            (for/and ([e (in-vector d)])
-              (#,stx e)))))
+          (or
+            (and
+              (vector? d)
+              (when #,len (<= (vector-length d) #,len))
+              (for/and ([e (in-vector d)])
+                (#,stx e)))
+            (raise-user-error (format "invalid variable-length array: ~a" d)))))
     ((fixed-length-array ,type-spec ,v)
      (define len
        (if (number? v) v (hash-ref consts-h v)))
@@ -740,20 +753,27 @@
        [else
          (define elem-valid? (Spec type-spec))
          #`(λ (d)
-              (and
-                (vector? d)
-                (equal? (vector-length d) #,v)
-                (for/and ([e (in-vector d)])
-                  (#,elem-valid? e))))]))
+              (or
+                (and
+                  (vector? d)
+                  (equal? (vector-length d) #,v)
+                  (for/and ([e (in-vector d)])
+                    (#,elem-valid? e)))
+                (raise-user-error (format "invalid fixed-length array: ~a" d))))]))
     ((enum (,i* ,c*) ...)
-     #`(conjoin
-         (bitvector 32)
-         (λ (d)
-            (for/or ([v (list #,@c*)])
-              (bveq d (bv v 32))))))
+     #`(λ (d)
+          (or
+            (and
+              ((bitvector 32) d)
+              (for/or ([v (list #,@c*)])
+                (bveq d (bv v 32))))
+            (raise-user-error (format "invalid enum: ~a" d)))))
     ((struct ,p ,decl* ...)
      (define struct-type-valid?
-       (format-id ctx "~a?" (struct-name p)))
+       #`(λ (d)
+            (or
+              (#,(format-id ctx "~a?" (struct-name p)) d)
+              (raise-user-error (format "invalid ~a struct type in ~a" #,(struct-name p) d)))))
      (define (field-valid? decl)
        (nanopass-case
          (L2 Decl)
@@ -762,7 +782,8 @@
           (define type-valid? (Spec type-spec))
           (define accessor
             (format-id ctx "~a-~a" (struct-name p) i))
-          #`(λ (d) (#,type-valid? (#,accessor d))))
+          #`(λ (d)
+                 (#,type-valid? (#,accessor d))))
          (,void (error "void struct member not supported"))))
      #`(λ (d)
           (and
@@ -782,10 +803,12 @@
          (format-id ctx "~a-value" (struct-name p))))
      (define tag-valid? #'(bitvector 32))
      #`(λ (d)
-          (and
-            (#,tag-valid? (#,tag-getter d))
-            (for/or ([c (list #,@case-test*)])
-              (c (#,tag-getter d) (#,value-getter d)))))))
+          (or
+            (and
+              (#,tag-valid? (#,tag-getter d))
+              (for/or ([c (list #,@case-test*)])
+                (c (#,tag-getter d) (#,value-getter d))))
+            (raise-user-error (format "invalid union tag in ~a" d))))))
   (Union-Case-Spec
     : Union-Case-Spec (t) -> * (stx)
     ((,v ,decl)
