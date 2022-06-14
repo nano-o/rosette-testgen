@@ -698,8 +698,18 @@
    (make-struct-type stx "-byte-array" '("value"))
    (make-struct-type stx "-optional" '("present" "value"))))
 
-; Next we generate a function that checks the conformance of data to an xdr spec
-; TODO: display helpful error in case of failure; we should probably track the path taken; should we use the maybe monad? or throw an exception?
+;; Next we generate a function that checks the conformance of data to an xdr spec
+
+(define/contract (with-error fn type-name)
+  (-> syntax? string? syntax?)
+  #`(λ (d)
+       (or
+         (#,fn d)
+         (raise-user-error
+           (format
+             (string-append "invalid " #,type-name ": ~a")
+             d)))))
+
 (define-pass valid?/syntax : L2 (t types consts-h ctx) -> * (stx)
   (Spec
     : Spec (t) -> * (stx)
@@ -708,72 +718,60 @@
         [(not (base-type? i))
          (Spec (hash-ref types i))]
         [(equal? i "opaque")
-         #`(λ (d)
-              (or
-                ((bitvector 8) d)
-                (raise-user-error (format "invalid opaque: ~a" d))))]
+         (with-error #`(bitvector 8) "opaque")]
         [(set-member? '("int" "unsigned int") i)
-         #`(λ (d)
-              (or
-                ((bitvector 32) d)
-                (raise-user-error (format "invalid integer: ~a" d))))]
+         (with-error #`(bitvector 32) "int")]
         [(set-member? '("hyper" "unsigned hyper") i)
-         #`(λ (d)
-              (or
-                ((bitvector 64) d)
-                (raise-user-error (format "invalid hyper: ~a" d))))]
+         (with-error #`(bitvector 64) "hyper")]
         [else (error (format "this is a bug: case missing for base type ~a" i))]))
     ((string ,c)
-     #`(λ (d)
-          (or
-            (and (vector? d) (<= (vector-length d) #,c))
-            (raise-user-error (format "invalid string: ~a" d)))))
+     (with-error #`(λ (d) (and (vector? d) (<= (vector-length d) #,c))) "string"))
     ((variable-length-array ,[stx] ,v)
      (define len
        (if v
          (if (number? v) v (hash-ref consts-h v))
          v))
-     #`(λ (d)
-          (or
+     (define the-check
+       #`(λ (d)
             (and
               (vector? d)
               (when #,len (<= (vector-length d) #,len))
               (for/and ([e (in-vector d)])
-                (#,stx e)))
-            (raise-user-error (format "invalid variable-length array: ~a" d)))))
+                (#,stx e)))))
+     (with-error the-check "variable-length array"))
     ((fixed-length-array ,type-spec ,v)
      (define len
        (if (number? v) v (hash-ref consts-h v)))
-     (cond
-       [(equal? type-spec "opaque")
-        #`(λ (d)
-             (and
-               (#,(format-id ctx "-byte-array?") d)
-               ((bitvector (* #,v 8)) (#,(format-id ctx "-byte-array-value") d))))]
-       [else
-         (define elem-valid? (Spec type-spec))
-         #`(λ (d)
-              (or
+     (define the-check
+       (cond
+         [(equal? type-spec "opaque")
+          #`(λ (d)
+               (and
+                 (#,(format-id ctx "-byte-array?") d)
+                 ((bitvector (* #,v 8)) (#,(format-id ctx "-byte-array-value") d))))]
+         [else
+           (define elem-valid? (Spec type-spec))
+           #`(λ (d)
                 (and
                   (vector? d)
                   (equal? (vector-length d) #,v)
                   (for/and ([e (in-vector d)])
-                    (#,elem-valid? e)))
-                (raise-user-error (format "invalid fixed-length array: ~a" d))))]))
+                    (#,elem-valid? e))))]))
+     (with-error the-check "fixed-length array"))
     ((enum (,i* ,c*) ...)
-     #`(λ (d)
-          (or
+     (define the-check
+       #`(λ (d)
             (and
               ((bitvector 32) d)
               (for/or ([v (list #,@c*)])
-                (bveq d (bv v 32))))
-            (raise-user-error (format "invalid enum: ~a" d)))))
+                (bveq d (bv v 32))))))
+     (with-error the-check "enum"))
     ((struct ,p ,decl* ...)
-     (define struct-type-valid?
+     (define type-check
        #`(λ (d)
-            (or
-              (#,(format-id ctx "~a?" (struct-name p)) d)
-              (raise-user-error (format "invalid ~a struct type in ~a" #,(struct-name p) d)))))
+            (#,(format-id ctx "~a?" (struct-name p)) d)))
+     (define struct-type-valid?
+       (with-error type-check (format "struct type ~a" (struct-name p))))
      (define (field-valid? decl)
        (nanopass-case
          (L2 Decl)
@@ -783,7 +781,7 @@
           (define accessor
             (format-id ctx "~a-~a" (struct-name p) i))
           #`(λ (d)
-                 (#,type-valid? (#,accessor d))))
+               (#,type-valid? (#,accessor d))))
          (,void (error "void struct member not supported"))))
      #`(λ (d)
           (and
@@ -791,8 +789,6 @@
             #,@(for/list ([f decl*])
                  #`(#,(field-valid? f) d)))))
     ((union ,p (,i1 ,i2) ,[case-test*] ...)
-     ;; Here we must check that the tag is valid (i.e. bv 32 and in the range for
-     ;; enums). We must also check that the value is valid.
      (define tag-getter
        (if (equal? i2 "bool")
          (format-id ctx "-optional-present")
@@ -801,14 +797,13 @@
        (if (equal? i2 "bool")
          (format-id ctx "-optional-value")
          (format-id ctx "~a-value" (struct-name p))))
-     (define tag-valid? #'(bitvector 32))
+     (define tag-valid?
+       (with-error #'(bitvector 32) "union tag"))
      #`(λ (d)
-          (or
             (and
               (#,tag-valid? (#,tag-getter d))
               (for/or ([c (list #,@case-test*)])
-                (c (#,tag-getter d) (#,value-getter d))))
-            (raise-user-error (format "invalid union tag in ~a" d))))))
+                (c (#,tag-getter d) (#,value-getter d)))))))
   (Union-Case-Spec
     : Union-Case-Spec (t) -> * (stx)
     ((,v ,decl)
