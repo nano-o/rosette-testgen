@@ -37,7 +37,7 @@
   (only-in mischief/for for/dict)
   graph
   racket/generator
-  (only-in bv bitvector->natural)
+  (only-in rosette bitvector->natural)
   (for-template
     racket/base
     lens
@@ -244,10 +244,9 @@
       (make-hash (replace-else tag-decl* enum-type))
       (make-hash '(("A" . "int") ("B" . "hyper") ("C" . "hyper"))))))
 
-; TODO explain why we need to normalize unions
 (define-pass normalize-unions : L0a (ir enum-dict) -> L1 ()
   (Union-Case-Spec
-    : Union-Case-Spec (ir) -> * ()
+    : Union-Case-Spec (ir) -> * (alist)
     (((,v* ...) ,[decl])
      (for/list ([v v*]) `(,v . ,decl)))
     ((else ,[decl]) `((else . ,decl))))
@@ -341,9 +340,11 @@
         (- i)
         (- (union (i1 i2) union-case-spec* ...))
         (- (struct decl* ...))
+        (- (variable-length-array type-spec (maybe v)))
         (+ (p i))
         (+ (union p (i1 i2) union-case-spec* ...))
-        (+ (struct p decl* ...))))
+        (+ (struct p decl* ...))
+        (+ (variable-length-array p type-spec (maybe v)))))
 (define path? list?) ; NOTE: this is part of the defintion of L2
 
 (define-pass add-path : L1 (ir) -> L2 ()
@@ -362,7 +363,7 @@
      `(union ,p (,i1 ,i2) ,union-case-spec1* ...))
     ((string ,c) `(string ,c))
     ((variable-length-array ,[Spec : type-spec0 p -> type-spec1] ,v)
-     `(variable-length-array ,type-spec1 ,v))
+     `(variable-length-array ,p ,type-spec1 ,v))
     ((fixed-length-array ,[Spec : type-spec0 p -> type-spec1] ,v)
      `(fixed-length-array ,type-spec1 ,v))
     ((enum (,i* ,c*) ...) `(enum (,i* ,c*) ...))
@@ -478,7 +479,7 @@
   ; all the types the given type spec depends on
   (Spec : Spec (ir) -> * (d)
         ((,p ,i) (if (base-type? i) (set) (set i)))
-        ((variable-length-array ,[d] ,v) d)
+        ((variable-length-array ,p ,[d] ,v) d)
         ((fixed-length-array ,[d] ,v) d)
         ((struct ,p ,[d*] ...) (apply set-union d*))
         ((union ,p (,i1 ,i2) ,[d*] ...)
@@ -630,7 +631,7 @@
     : Spec (ir) -> * (sts)
     ((,p ,i) (hash))
     ((string ,c) (hash))
-    ((variable-length-array ,[sts] ,v) sts)
+    ((variable-length-array ,p ,[sts] ,v) sts)
     ((fixed-length-array ,[sts] ,v) sts)
     ((enum (,i* ,c*) ...) (hash))
     ; The problem is that guile-rpc transforms optionals into normal unions.
@@ -717,21 +718,21 @@
     : Spec (t) -> * (stx)
 
     ((,p ,i)
-      (cond
-        [(not (base-type? i))
-         (format-id ctx "~a-valid?" i)]
-        [(equal? i "opaque")
-         (with-error #`(bitvector 8) "opaque")]
-        [(set-member? '("int" "unsigned int") i)
-         (with-error #`(bitvector 32) "int")]
-        [(set-member? '("hyper" "unsigned hyper") i)
-         (with-error #`(bitvector 64) "hyper")]
-        [else (error (format "this is a bug: case missing for base type ~a" i))]))
+     (cond
+       [(not (base-type? i))
+        (format-id ctx "~a-valid?" i)]
+       [(equal? i "opaque")
+        (with-error #`(bitvector 8) "opaque")]
+       [(set-member? '("int" "unsigned int") i)
+        (with-error #`(bitvector 32) "int")]
+       [(set-member? '("hyper" "unsigned hyper") i)
+        (with-error #`(bitvector 64) "hyper")]
+       [else (error (format "this is a bug: case missing for base type ~a" i))]))
 
     ((string ,c)
      (with-error #`(λ (d) (and (vector? d) (<= (vector-length d) #,c))) "string"))
 
-    ((variable-length-array ,[stx] ,v)
+    ((variable-length-array ,p ,[stx] ,v)
      (define len
        (if v
          (if (number? v) v (hash-ref consts-h v))
@@ -750,11 +751,15 @@
        (if (number? v) v (hash-ref consts-h v)))
      (define the-check
        (cond
-         [(equal? type-spec "opaque")
+         [(nanopass-case
+            (L2 Spec)
+            type-spec
+            [(,p ,i) (equal? i "opaque")]
+            [else #f])
           #`(λ (d)
                (and
                  (#,(format-id ctx "-byte-array?") d)
-                 ((bitvector (* #,v 8)) (#,(format-id ctx "-byte-array-value") d))))]
+                 ((bitvector #,(* v 8)) (#,(format-id ctx "-byte-array-value") d))))]
          [else
            (define elem-valid? (Spec type-spec))
            #`(λ (d)
@@ -809,10 +814,10 @@
      (define tag-valid?
        (with-error #'(bitvector 32) "union tag"))
      #`(λ (d)
-            (and
-              (#,tag-valid? (#,tag-getter d))
-              (for/or ([c (list #,@case-test*)])
-                (c (#,tag-getter d) (#,value-getter d)))))))
+          (and
+            (#,tag-valid? (#,tag-getter d))
+            (for/or ([c (list #,@case-test*)])
+              (c (#,tag-getter d) (#,value-getter d)))))))
 
   (Union-Case-Spec
     : Union-Case-Spec (t) -> * (stx)
