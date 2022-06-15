@@ -1,51 +1,45 @@
 #lang racket
 
-; Compiles an XDR specification to:
-; - A set of Racket definitions (constants and structs)
-; - Lenses to manipulate the above
-; Reads an input specification in guile-rpc AST format; so, one must first pre-process an XDR specification with the guile-rpc XDR parser
+;; Compiles an XDR specification to:
+;; - A set of Racket definitions (constants and structs)
+;; - TODO Lenses to manipulate the above
+;; - A Rosette grammar
+;; Reads an input specification in guile-rpc AST format; so, one must first pre-process an XDR specification with the guile-rpc XDR parser
 
-; XDR opaque fixed-length arrays become instances of -byte-array containing a bitvector
-; XDR non-opaque fixed-length arrays become Racket lists
-; XDR variable-length arrays become Racket vectors
-; XDR enums become Racket 32-bit bitvectors
-; XDR unions become structs with two members, tag and value, except when the tag is a boolean, in which case the union become an -optional struct
-; XDR constants get an associated symbol
-; Some of those representations were chosen for compatibility with the guile-rpc representation.
-; See the implementation of valid?/syntax
+;; XDR opaque fixed-length arrays become instances of -byte-array containing a bitvector
+;; XDR non-opaque fixed-length arrays become Racket lists
+;; XDR variable-length arrays become Racket vectors
+;; XDR enums become Racket 32-bit bitvectors
+;; XDR unions become structs with two members, tag and value, except when the tag is a boolean, in which case the union become an -optional struct
+;; XDR constants get an associated symbol
+;; Some of those representations were chosen for compatibility with the guile-rpc representation.
+;; See the implementation of valid?/syntax
+;; Only top-level enums are supported
 
-; We use the nanopass compiler framework
+;; We use the nanopass compiler framework
 
-; NOTE: there's some complexity in tracking dependencies between types; we do this in order to later as small a grammar as possible (instead of generating a grammar for all types). This is probably a case of premature optimisation.
+;; NOTE: there's some complexity in tracking dependencies between types; we do this in order to later as small a grammar as possible (instead of generating a grammar for all types). This is probably a case of premature optimisation.
 
-; TODO use lenses to allow writing functional specifications; first try it on the merge demo.
-; TODO there's pretty much no error checking
-; TODO write tests
-; TODO Handle recursive structures
-; TODO a way to check that a Racket structure conforms to an XDR spec
+;; TODO: get rid of overrides here (only use in grammar generation)
 
 (provide
-  ; generates Racket definitions corresponding to an XDR specification (constants and structs) and a
-  ; function `valid?` that can be used to check wether a Racket datum is valid with respect to the XDR
-  ; specification given
-  xdr-types->racket
-  ; computes the maximum depth of an XDR specification (useful to generate grammars; TODO move to the
-  ; grammar-generator module)
-  max-depth)
+  ;; generates Racket definitions corresponding to an XDR specification
+  ;; (constants, structs); a function `valid?-t`, for every type `t`, can be
+  ;; used to check wether a Racket datum is valid with respect to the XDR
+  ;; specification given
+  xdr-types->racket)
 
 (require
   nanopass
   racket/hash
   (only-in list-util zip)
   racket/syntax
-  (only-in mischief/contract dict/c)
   (only-in mischief/for for/dict)
   graph
   (for-template
     racket/base
     lens
-    (only-in rosette bitvector bveq bv))
-  racket/trace)
+    (only-in rosette bitvector bveq bv)))
 
 (define-language L0
   ; This is a subset of the language of guile-rpc ASTs
@@ -192,49 +186,6 @@
         (gobble (throw-if-nested-enum (simplify-union (L0-parser test-xdr-spec-1))))
         (gobble (throw-if-nested-enum (simplify-union (L0-parser test-xdr-spec-3))))
         (gobble (throw-if-nested-enum Stellar-l0a))))))
-
-;; returns a hashmap mapping top-level enum symbols and constants to values
-(define-pass make-consts-hashmap : L0a (ir) -> * (h)
-  (XDR-Spec : XDR-Spec (ir) -> * (h)
-            ((,[h*] ...) (apply hash-union h*)))
-  (Def : Def (ir) -> * (h)
-        ((define-type ,i ,[h]) h)
-        ((define-constant ,i ,c) (hash i c)))
-  (Spec : Spec (ir) -> * (h)
-        ((enum (,i* ,c*) ...)
-         (for/hash ([i i*] [c c*])
-           (values i c)))
-        (else (hash)))
-  (invariant-assertion
-    (hash/c string? number?)
-    (XDR-Spec ir)))
-
-(module+ test
-  (test-case
-    "make-consts-hashmap"
-    (begin
-      (check-equal?
-        (make-consts-hashmap (simplify-union (L0-parser test-xdr-spec-3)))
-        '#hash(("A" . 1)))
-      (check-equal?
-        (make-consts-hashmap (simplify-union (L0-parser test-xdr-spec-4)))
-        '#hash(("A" . 1) ("B" . 2) ("C" . 3)))
-      (gobble (make-consts-hashmap Stellar-l0a)))))
-
-;; Make constant definitions:
-(define/contract
-  (constant-definitions stx h)
-  (-> syntax? (hash/c string? number?) syntax?)
-  (let ([defs
-          (for/list ([(k v) (in-dict h)])
-            #`(define #,(format-id stx k) #,v))])
-    #`(#,@defs)))
-
-(module+ test
-  (test-case
-    "no exn"
-    (gobble (constant-definitions #'() (make-consts-hashmap Stellar-l0a))))
-  (define Stellar-const-defs (constant-definitions #'() (make-consts-hashmap Stellar-l0a))))
 
 ; Here we collect top-level enum definitions in a hashmap
 (define-pass enum-defs : L0a (ir) -> * (l)
@@ -418,18 +369,18 @@
     ((,v ,[Decl : decl0 p -> decl1])
      `(,v ,decl1))))
 
-(define (l0->l2 overrides l0)
+(define (l0->l2 l0)
   (define l0a
     (add-bool (throw-if-nested-enum (simplify-union l0))))
   (define l1
     (normalize-unions l0a (enum-defs l0a)))
-  (add-path (override-lengths l1 overrides)))
+  (add-path l1))
 
 (module+ test
   (test-case
     "l0->l2"
     (check-equal?
-      (l0->l2 '#hash() (L0-parser test-xdr-spec-7))
+      (l0->l2 (L0-parser test-xdr-spec-7))
       (with-output-language (L2 XDR-Spec)
         (let* ([my-union-path '("my-union")]
                [my-struct-path '("j" "my-union")]
@@ -449,6 +400,50 @@
     "run add-path on Stellar spec"
     (gobble (add-path Stellar-l1)))
   (define Stellar-l2 (add-path Stellar-l1)))
+
+;; returns a hashmap mapping top-level enum symbols and constants to values
+(define-pass consts-hashmap : L2 (ir) -> * (h)
+  (XDR-Spec : XDR-Spec (ir) -> * (h)
+            ((,[h*] ...) (apply hash-union h*)))
+  (Def : Def (ir) -> * (h)
+        ((define-type ,i ,[h]) h)
+        ((define-constant ,i ,c) (hash i c)))
+  (Spec : Spec (ir) -> * (h)
+        ((enum (,i* ,c*) ...)
+         (for/hash ([i i*] [c c*])
+           (values i c)))
+        (else (hash)))
+  (invariant-assertion
+    (hash/c string? number?)
+    (XDR-Spec ir)))
+
+(module+ test
+  (test-case
+    "consts-hashmap"
+    (begin
+      (check-equal?
+        (consts-hashmap (l0->l2 (L0-parser test-xdr-spec-3)))
+        '#hash(("A" . 1) ("FALSE" . 0) ("TRUE" . 1)))
+      (check-equal?
+        (consts-hashmap (l0->l2 (L0-parser test-xdr-spec-4)))
+        '#hash(("A" . 1) ("B" . 2) ("C" . 3) ("FALSE" . 0) ("TRUE" . 1)))
+      (gobble (consts-hashmap Stellar-l2)))))
+
+;; Make constant definitions:
+(define/contract
+  (constant-definitions stx h)
+  (-> syntax? (hash/c string? number?) syntax?)
+  (define defs
+    (for/list ([(k v) (in-dict h)])
+      #`(define #,(format-id stx k) #,v)))
+  #`(#,@defs))
+
+(module+ test
+  (test-case
+    "no exn"
+    (gobble (constant-definitions #'() (consts-hashmap Stellar-l2))))
+  (define Stellar-const-defs (constant-definitions #'() (consts-hashmap Stellar-l2))))
+
 
 ; collect all type defs in a hashmap
 (define-pass collect-types : L2 (ir) -> * (h)
@@ -553,7 +548,7 @@
 
 ; max depth without recursing:
 (define (max-depth xdr-types)
-  (let ([h (collect-types (l0->l2 null (L0-parser xdr-types)))])
+  (let ([h (collect-types (l0->l2 (L0-parser xdr-types)))])
     (define g (deps-graph h))
     (define-vertex-property g max-depth)
     (do-dfs
@@ -713,6 +708,7 @@
 (define-pass valid?/syntax : L2 (t types consts-h ctx) -> * (stx)
   (Spec
     : Spec (t) -> * (stx)
+
     (,i
       (cond
         [(not (base-type? i))
@@ -724,8 +720,10 @@
         [(set-member? '("hyper" "unsigned hyper") i)
          (with-error #`(bitvector 64) "hyper")]
         [else (error (format "this is a bug: case missing for base type ~a" i))]))
+
     ((string ,c)
      (with-error #`(λ (d) (and (vector? d) (<= (vector-length d) #,c))) "string"))
+
     ((variable-length-array ,[stx] ,v)
      (define len
        (if v
@@ -739,6 +737,7 @@
               (for/and ([e (in-vector d)])
                 (#,stx e)))))
      (with-error the-check "variable-length array"))
+
     ((fixed-length-array ,type-spec ,v)
      (define len
        (if (number? v) v (hash-ref consts-h v)))
@@ -758,6 +757,7 @@
                   (for/and ([e (in-vector d)])
                     (#,elem-valid? e))))]))
      (with-error the-check "fixed-length array"))
+
     ((enum (,i* ,c*) ...)
      (define the-check
        #`(λ (d)
@@ -766,6 +766,7 @@
               (for/or ([v (list #,@c*)])
                 (bveq d (bv v 32))))))
      (with-error the-check "enum"))
+
     ((struct ,p ,decl* ...)
      (define type-check
        #`(λ (d)
@@ -788,6 +789,7 @@
             (#,struct-type-valid? d)
             #,@(for/list ([f decl*])
                  #`(#,(field-valid? f) d)))))
+
     ((union ,p (,i1 ,i2) ,[case-test*] ...)
      (define tag-getter
        (if (equal? i2 "bool")
@@ -804,6 +806,7 @@
               (#,tag-valid? (#,tag-getter d))
               (for/or ([c (list #,@case-test*)])
                 (c (#,tag-getter d) (#,value-getter d)))))))
+
   (Union-Case-Spec
     : Union-Case-Spec (t) -> * (stx)
     ((,v ,decl)
@@ -820,6 +823,7 @@
           (and
             (bveq tag (bv #,tag 32))
             (#,check-value value)))))
+
   (begin
     (define fn-id (format-id ctx "~a-valid?" t))
     (define type-rep (if (base-type? t) t (hash-ref types t)))
@@ -830,20 +834,18 @@
     "valid?/syntax tests"
     (begin
       (gobble (valid?/syntax "int" (hash) (hash) #'()))
-      (gobble (valid?/syntax "PublicKey" Stellar-types (make-consts-hashmap Stellar-l0a) #'())))))
+      (gobble (valid?/syntax "PublicKey" Stellar-types (consts-hashmap Stellar-l2) #'())))))
 
 ; this produces a syntax object
 (define/contract (xdr-types->racket xdr-spec overrides stx ts)
   (-> list? list? syntax? (*list/c string?) syntax?)
-  (define l0 (throw-if-nested-enum (add-bool (simplify-union (L0-parser xdr-spec)))))
-  (define l1 (normalize-unions l0 (enum-defs l0)))
-  (define l2 (add-path (override-lengths l1 overrides)))
+  (define l2 (l0->l2 (L0-parser xdr-spec)))
   (define types-h (collect-types l2))
   #;(for ([t ts])
     (define rec-types (recursive-types types-h t))
     (when (not (set-empty? rec-types))
       (error (format "recursive types are not supported: ~a" rec-types))))
-  (define consts-h (make-consts-hashmap l0))
+  (define consts-h (consts-hashmap l2))
   (define const-defs (constant-definitions stx consts-h))
   (define struct-defs (hash-values (make-struct-types/rec stx types-h ts)))
   (define all-deps
