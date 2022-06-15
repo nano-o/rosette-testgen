@@ -21,7 +21,7 @@
 ; TODO use lenses to allow writing functional specifications; first try it on the merge demo.
 ; TODO there's pretty much no error checking
 ; TODO write tests
-; TODO a pass to remove recursion or limit its depth (ClaimPredicate)? For now I manually removed the recursion from the XDR spec.
+; TODO Handle recursive structures
 ; TODO a way to check that a Racket structure conforms to an XDR spec
 
 (provide
@@ -716,7 +716,7 @@
     (,i
       (cond
         [(not (base-type? i))
-         (Spec (hash-ref types i))]
+         (format-id ctx "~a-valid?" i)]
         [(equal? i "opaque")
          (with-error #`(bitvector 8) "opaque")]
         [(set-member? '("int" "unsigned int") i)
@@ -822,7 +822,8 @@
             (#,check-value value)))))
   (begin
     (define fn-id (format-id ctx "~a-valid?" t))
-    #`(define (#,fn-id data) (#,(Spec t) data))))
+    (define type-rep (if (base-type? t) t (hash-ref types t)))
+    #`(define (#,fn-id data) (#,(Spec type-rep) data))))
 
 (module+ test
   (test-case
@@ -838,7 +839,7 @@
   (define l1 (normalize-unions l0 (enum-defs l0)))
   (define l2 (add-path (override-lengths l1 overrides)))
   (define types-h (collect-types l2))
-  (for ([t ts])
+  #;(for ([t ts])
     (define rec-types (recursive-types types-h t))
     (when (not (set-empty? rec-types))
       (error (format "recursive types are not supported: ~a" rec-types))))
@@ -850,7 +851,7 @@
               ([t ts])
       (set-union acc (deps types-h t))))
   (define valid?-defs
-    (for/list ([t all-deps]) ; TODO we probably don't need all of them
+    (for/list ([t all-deps])
       (valid?/syntax t types-h consts-h stx)))
   #`(begin
       #,@const-defs
@@ -868,9 +869,5 @@
        "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
   (test-case
     "run xdr-types->racket on Stellar"
-    (gobble (xdr-types->racket Stellar-xdr-types test-overrides #'() '("TransactionEnvelope")))))
-  ; (define test-PublicKey
-    ; (PublicKey
-      ; (bv #x00000000 32)
-      ; (-byte-array
-        ; (bv #x3bf36f0de9880e80bfc23596344a501d0681f830c68054d23fd0bb4493f63fe9 256))))
+    (gobble (xdr-types->racket Stellar-xdr-types test-overrides #'() '("TransactionEnvelope")))
+    (gobble (xdr-types->racket Stellar-xdr-types test-overrides #'() '("SCPQuorumSet")))))
