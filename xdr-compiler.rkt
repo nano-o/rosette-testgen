@@ -1,4 +1,4 @@
-#lang racket
+#lang errortrace racket
 
 ;; Compiles an XDR specification to:
 ;; - A set of Racket definitions (constants and structs)
@@ -357,7 +357,7 @@
      `(,i ,type-spec1)))
   (Spec
     : Spec (ir p) -> Spec ()
-    (,i (p i))
+    (,i `(,p ,i))
     ((union (,i1 ,i2) ,[Union-Case-Spec : union-case-spec0* p -> union-case-spec1*] ...)
      `(union ,p (,i1 ,i2) ,union-case-spec1* ...))
     ((string ,c) `(string ,c))
@@ -388,17 +388,19 @@
       (with-output-language (L2 XDR-Spec)
         (let* ([my-union-path '("my-union")]
                [my-struct-path '("j" "my-union")]
-               [my-struct (with-output-language (L2 Spec) `(struct ,my-struct-path ("field1" "int") ("field2" "hyper")))])
+               [field-1-path '("field1" "j" "my-union")]
+               [field-2-path '("field2" "j" "my-union")]
+               [union-A-path '("i" "my-union")]
+               [my-struct (with-output-language (L2 Spec) `(struct ,my-struct-path ("field1" (,field-1-path "int")) ("field2" (,field-2-path "hyper"))))])
           `((define-type "my-enum" (enum ("A" 0) ("B" 1) ("C" 2)))
             (define-type
               "my-union"
               (union
                 ,my-union-path
                 ("tag" "my-enum")
-                ("A" ("i" "int"))
+                ("A" ("i" (,union-A-path "int")))
                 ("C" ("j" ,my-struct))
-                ("B"
-                 ("j" ,my-struct))))
+                ("B" ("j" ,my-struct))))
             (define-type "bool" (enum ("TRUE" 1) ("FALSE" 0))))))))
   (test-case
     "run add-path on Stellar spec"
@@ -406,6 +408,7 @@
   (define Stellar-l2 (add-path Stellar-l1)))
 
 ;; returns a hashmap mapping top-level enum symbols and constants to values
+;; TODO add path in var-length array
 (define-pass consts-hashmap : L2 (ir) -> * (h)
   (XDR-Spec : XDR-Spec (ir) -> * (h)
             ((,[h*] ...) (apply hash-union h*)))
@@ -837,12 +840,11 @@
   (test-case
     "valid?/syntax tests"
     (begin
-      (gobble (valid?/syntax "int" (hash) (hash) #'()))
       (gobble (valid?/syntax "PublicKey" Stellar-types (consts-hashmap Stellar-l2) #'())))))
 
 ; this produces a syntax object
-(define/contract (xdr-types->racket xdr-spec overrides stx ts)
-  (-> list? list? syntax? (*list/c string?) syntax?)
+(define/contract (xdr-types->racket xdr-spec stx ts)
+  (-> list? syntax? (*list/c string?) syntax?)
   (define l2 (l0->l2 (L0-parser xdr-spec)))
   (define types-h (collect-types l2))
   #;(for ([t ts])
@@ -875,8 +877,8 @@
        "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
   (test-case
     "run xdr-types->racket on Stellar"
-    (gobble (xdr-types->racket Stellar-xdr-types test-overrides #'() '("TransactionEnvelope")))
-    (gobble (xdr-types->racket Stellar-xdr-types test-overrides #'() '("SCPQuorumSet")))))
+    (gobble (xdr-types->racket Stellar-xdr-types #'() '("TransactionEnvelope")))
+    (gobble (xdr-types->racket Stellar-xdr-types #'() '("SCPQuorumSet")))))
 
 ;; Generate grammar rules
 
@@ -932,9 +934,10 @@
 (require
   "strkey-utils.rkt")
 
-(define-pass make-rule : (L2 Spec) (ir stx type-name consts overrides) -> * (rule-thunk)
-  ; TODO: for use as a macro, we need unique source locations for each sub-rule invocation
-  ; This does include rules of the form (?? bitvector 32)
+(define-pass make-grammar : (L2 Spec) (ir stx type-name consts overrides) -> * (rule-thunk)
+  ; For use as a macro, we need unique source locations for each sub-rule invocation
+  ; (this does include rules of the form (?? bitvector 32))
+  ; That's why we produce thunks; new slocs will be generated each time we call a thunk.
   (Spec
     : Spec (ir) -> * (rule-thunk)
 
@@ -946,49 +949,49 @@
           (eq? (car (dict-ref overrides key)) 'key-set))
         (define vals
           (map
-            (λ (s) (bitvector->natural (strkey->bv s)))
+            (compose bitvector->natural strkey->bv)
             (cdr (dict-ref overrides key))))
-        (define vals/syn
+        (define byte-arrays
           (map
-            (λ (v) #`(#,(format-id stx "~a" "-byte-array") (bv #,v 256)))
+            (λ (v) #`(#,(format-id stx "-byte-array") (bv #,v 256)))
             vals))
-        (λ () #`(choose #,@vals/syn))]
+        (thunk #`(choose #,@byte-arrays))]
        [else
          (case i
-           [("opaque") (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 8)))]
-           [("int" "unsigned int") (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 32)))]
-           [("hyper" "unsigned hyper") (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 64)))]
-           [else (λ () (rule-hole i))])])]
+           [("opaque") (thunk #`(#,(format-id/unique-sloc "??" #'()) (bitvector 8)))]
+           [("int" "unsigned int") (thunk #`(#,(format-id/unique-sloc "??" #'()) (bitvector 32)))]
+           [("hyper" "unsigned hyper") (thunk #`(#,(format-id/unique-sloc "??" #'()) (bitvector 64)))]
+           [else (thunk (rule-hole i))])])]
 
     [(struct ,p ,[rule-thunk*] ...)
      (define struct-name
        (format-id/unique-sloc (struct-name p) stx))
-     (λ () #`(#,struct-name #,@(map (λ (f) (f)) rule-thunk*)))]
+     (thunk #`(#,struct-name #,@(map (λ (f) (f)) rule-thunk*)))]
 
     [(string ,c)
-     (λ () (make-vector stx consts (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 8))) c))]
+     (thunk (make-vector stx consts (thunk #`(#,(format-id/unique-sloc "??" #'()) (bitvector 8))) c))]
 
-    [(variable-length-array ,[elem-rule-thunk] ,v)
-     (λ () (make-vector stx consts elem-rule-thunk v))]
+    [(variable-length-array ,[elem-rule-thunk] ,v) ; TODO length override
+     (cond
+       [(dict-has-key? overrides 'todo) 'todo]
+       [else (thunk (make-vector stx consts elem-rule-thunk v))])]
 
     [(fixed-length-array ,type-spec ,v)
      ; special case for opaque fixed-length arrays: we use -byte-array
      (guard
-       (let ([opaque?
-               (nanopass-case
-                 (L2 Spec)
-                 type-spec
-                 [(,p ,i) (equal? i "opaque")]
-                 [else #f])])
-         opaque?))
+       (nanopass-case
+         (L2 Spec)
+         type-spec
+         [(,p ,i) (equal? i "opaque")]
+         [else #f]))
      (define n (size->number consts v))
-     (λ ()
-        #`(
-           #,(format-id stx "~a" "-byte-array")
-           (#,(format-id/unique-sloc "??" #'()) (bitvector #,(* n 8)))))]
+     (thunk
+       #`(
+          #,(format-id stx "-byte-array")
+          (#,(format-id/unique-sloc "??" #'()) (bitvector #,(* n 8)))))]
 
     [(fixed-length-array ,[elem-rule-thunk] ,v)
-     (λ () (make-list stx consts elem-rule-thunk v))]
+     (thunk (make-list stx consts elem-rule-thunk v))]
 
     [(enum (,i* ,c*) ...)
      (define bv* (map (λ (i) #`(bv #,i 32)) i*))
@@ -996,24 +999,32 @@
        #`(choose #,@bv*)
        (car bv*))]
 
-    [(union ,p (,i1 ,i2) ,[rule-thunk*] ...) ; TODO -optional
-     (λ ()
-        (if (> (length rule-thunk*) 1)
-          #`(choose #,@(map (λ (x) (x)) rule-thunk*))
-          ((car rule-thunk*))))])
+    [(union ,p (,i1 ,i2) ,[Union-Case-Spec : union-case-spec -> * thunk-1* thunk-2*] ...)
+     (define the-struct
+       (if (equal? i2 "bool")
+         (format-id stx "-optional")
+         (format-id stx (struct-name p))))
+     (thunk
+       (if (> (length thunk-1*) 1)
+         #`(choose
+             #,@(for/list
+                    ([thunk-1 thunk-1*]
+                     [thunk-2 thunk-2*])
+                  #`(#,the-struct #,(thunk-1) #,(thunk-2))))
+         #`(#,the-struct #,((car thunk-1*) (car thunk-2*)))))])
 
   (Union-Case-Spec
-    : Union-Case-Spec (ir) -> * (rule-thunk)
+    : Union-Case-Spec (ir) -> * (thunk-1 thunk-2)
     [(,v ,[rule-thunk])
-     (λ ()
-        #`(
-           #,(format-id stx "~a" ":union:") ; TODO each union has its own structs now
-           (bv #,(value-rule stx v) 32) #,(rule-thunk)))])
+     (values
+       (thunk
+         #`(bv #,(value-rule stx v) 32))
+       (rule-thunk))])
 
   (Decl
     : Decl (ir) -> * (rule-thunk)
     [(,i ,[rule-thunk]) rule-thunk]
-    [,void (λ () #'null)])
+    [,void (thunk #'null)])
 
   #`(
      #,(format-id/unique-sloc (string-append type-name "-rule"))
