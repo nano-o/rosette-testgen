@@ -36,6 +36,8 @@
   racket/syntax
   (only-in mischief/for for/dict)
   graph
+  racket/generator
+  (only-in bv bitvector->natural)
   (for-template
     racket/base
     lens
@@ -336,8 +338,10 @@
   (terminals
    (+ (path (p))))
   (Spec (type-spec)
+        (- i)
         (- (union (i1 i2) union-case-spec* ...))
         (- (struct decl* ...))
+        (+ (p i))
         (+ (union p (i1 i2) union-case-spec* ...))
         (+ (struct p decl* ...))))
 (define path? list?) ; NOTE: this is part of the defintion of L2
@@ -353,7 +357,7 @@
      `(,i ,type-spec1)))
   (Spec
     : Spec (ir p) -> Spec ()
-    (,i i)
+    (,i (p i))
     ((union (,i1 ,i2) ,[Union-Case-Spec : union-case-spec0* p -> union-case-spec1*] ...)
      `(union ,p (,i1 ,i2) ,union-case-spec1* ...))
     ((string ,c) `(string ,c))
@@ -470,7 +474,7 @@
 (define-pass immediate-deps : (L2 Spec) (ir) -> * (d)
   ; all the types the given type spec depends on
   (Spec : Spec (ir) -> * (d)
-        (,i (if (base-type? i) (set) (set i)))
+        ((,p ,i) (if (base-type? i) (set) (set i)))
         ((variable-length-array ,[d] ,v) d)
         ((fixed-length-array ,[d] ,v) d)
         ((struct ,p ,[d*] ...) (apply set-union d*))
@@ -621,7 +625,7 @@
 (define-pass make-struct-types : (L2 Spec) (ir stx) -> * (sts)
   (Spec
     : Spec (ir) -> * (sts)
-    (,i (hash))
+    ((,p ,i) (hash))
     ((string ,c) (hash))
     ((variable-length-array ,[sts] ,v) sts)
     ((fixed-length-array ,[sts] ,v) sts)
@@ -709,7 +713,7 @@
   (Spec
     : Spec (t) -> * (stx)
 
-    (,i
+    ((,p ,i)
       (cond
         [(not (base-type? i))
          (format-id ctx "~a-valid?" i)]
@@ -873,3 +877,144 @@
     "run xdr-types->racket on Stellar"
     (gobble (xdr-types->racket Stellar-xdr-types test-overrides #'() '("TransactionEnvelope")))
     (gobble (xdr-types->racket Stellar-xdr-types test-overrides #'() '("SCPQuorumSet")))))
+
+;; Generate grammar rules
+
+(define/contract (size->number consts size)
+  (-> (hash/c string? number?) (or/c number? string?) number?)
+  (if (string? size)
+    (hash-ref consts size)
+    size))
+
+(define (make-sequence stx seq-t elem-type-rule-thunk size)
+  ; seq-t is list or vector
+  ; elem-type-rule produces syntax or string
+  ; size is a numeric value
+  #`(#,seq-t
+     #,@(for/list ([i (in-range size)]) (elem-type-rule-thunk))))
+
+(define (make-list stx consts elem-type-rule-thunk size)
+  (let ([n (size->number consts size)])
+    (make-sequence stx #'list elem-type-rule-thunk n)))
+
+(define max-seq-len 3) ; we never make variable-length sequences bigger than that
+;; TODO move to overrides
+
+(define (make-vector stx consts elem-type-rule-thunk size) ; variable-size array
+  (let ([n (size->number consts size)])
+    (let ([m (if (or (not n) (> n max-seq-len)) max-seq-len n)])
+      (make-sequence stx #'vector elem-type-rule-thunk m))))
+
+; generate unique indices (used to generate unique slocs)
+(define get-index!
+  (generator
+    ()
+    (let loop ([index 0])
+      (yield index)
+      (loop (+ index 1)))))
+
+; generate an identifier for a grammar rule:
+(define (format-id/unique-sloc str [stx #f])
+  ; Rosette seems to be relying on source-location information to create symbolic variable names.
+  ; Since we want all grammar holes to be independent, we need to use a unique location each time.
+  ; This is only useful if using the grammar generator in a macro.
+  (format-id stx "~a" str #:source (make-srcloc (format "generated-sloc:~a" (get-index!)) 1 0 1 0)))
+
+; make a hole for a particular type name (provided as a string)
+(define (rule-hole str)
+  #`(#,(format-id/unique-sloc (string-append str "-rule")))) ; TODO: unique-loc not needed anymore since we call instantiate-rule later?
+
+(define (value-rule stx v)
+  (if (string? v)
+    (format-id/unique-sloc v stx) ; TODO unique-loc needed?
+    v))
+
+(require
+  "strkey-utils.rkt")
+
+(define-pass make-rule : (L2 Spec) (ir stx type-name consts overrides) -> * (rule-thunk)
+  ; TODO: for use as a macro, we need unique source locations for each sub-rule invocation
+  ; This does include rules of the form (?? bitvector 32)
+  (Spec
+    : Spec (ir) -> * (rule-thunk)
+
+    [(,p ,i)
+     (define key (reverse p))
+     (cond
+       [(and
+          (dict-has-key? overrides key)
+          (eq? (car (dict-ref overrides key)) 'key-set))
+        (define vals
+          (map
+            (λ (s) (bitvector->natural (strkey->bv s)))
+            (cdr (dict-ref overrides key))))
+        (define vals/syn
+          (map
+            (λ (v) #`(#,(format-id stx "~a" "-byte-array") (bv #,v 256)))
+            vals))
+        (λ () #`(choose #,@vals/syn))]
+       [else
+         (case i
+           [("opaque") (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 8)))]
+           [("int" "unsigned int") (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 32)))]
+           [("hyper" "unsigned hyper") (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 64)))]
+           [else (λ () (rule-hole i))])])]
+
+    [(struct ,p ,[rule-thunk*] ...)
+     (define struct-name
+       (format-id/unique-sloc (struct-name p) stx))
+     (λ () #`(#,struct-name #,@(map (λ (f) (f)) rule-thunk*)))]
+
+    [(string ,c)
+     (λ () (make-vector stx consts (λ () #`(#,(format-id/unique-sloc "??" #'()) (bitvector 8))) c))]
+
+    [(variable-length-array ,[elem-rule-thunk] ,v)
+     (λ () (make-vector stx consts elem-rule-thunk v))]
+
+    [(fixed-length-array ,type-spec ,v)
+     ; special case for opaque fixed-length arrays: we use -byte-array
+     (guard
+       (let ([opaque?
+               (nanopass-case
+                 (L2 Spec)
+                 type-spec
+                 [(,p ,i) (equal? i "opaque")]
+                 [else #f])])
+         opaque?))
+     (define n (size->number consts v))
+     (λ ()
+        #`(
+           #,(format-id stx "~a" "-byte-array")
+           (#,(format-id/unique-sloc "??" #'()) (bitvector #,(* n 8)))))]
+
+    [(fixed-length-array ,[elem-rule-thunk] ,v)
+     (λ () (make-list stx consts elem-rule-thunk v))]
+
+    [(enum (,i* ,c*) ...)
+     (define bv* (map (λ (i) #`(bv #,i 32)) i*))
+     (if (> (length bv*) 1)
+       #`(choose #,@bv*)
+       (car bv*))]
+
+    [(union ,p (,i1 ,i2) ,[rule-thunk*] ...) ; TODO -optional
+     (λ ()
+        (if (> (length rule-thunk*) 1)
+          #`(choose #,@(map (λ (x) (x)) rule-thunk*))
+          ((car rule-thunk*))))])
+
+  (Union-Case-Spec
+    : Union-Case-Spec (ir) -> * (rule-thunk)
+    [(,v ,[rule-thunk])
+     (λ ()
+        #`(
+           #,(format-id stx "~a" ":union:") ; TODO each union has its own structs now
+           (bv #,(value-rule stx v) 32) #,(rule-thunk)))])
+
+  (Decl
+    : Decl (ir) -> * (rule-thunk)
+    [(,i ,[rule-thunk]) rule-thunk]
+    [,void (λ () #'null)])
+
+  #`(
+     #,(format-id/unique-sloc (string-append type-name "-rule"))
+     #,((Spec ir))))
