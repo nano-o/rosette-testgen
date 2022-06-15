@@ -1,25 +1,30 @@
-#lang racket
+#lang errortrace racket
 
 (require
   (for-syntax
     ; (only-in racket pretty-print)
     ; racket/set
-    (only-in "xdr-compiler.rkt" xdr-types->racket)
+    "xdr-compiler.rkt"
     (only-in "Stellar-overrides.rkt" overrides)
+    (only-in racket/match match-define)
     "read-datums.rkt")
   (only-in rosette bv)
   rackunit)
 
-(define-for-syntax
-  Stellar-xdr-types
-  (read-datums "./Stellar.xdr-types"))
+(begin-for-syntax
+  (define
+    Stellar-xdr-types
+    (read-datums "./Stellar.xdr-types"))
+  (match-define
+    `((types . ,types) (consts . ,consts))
+    (preprocess-ir Stellar-xdr-types)))
 
 (define-syntax (compile-xdr stx)
   (define the-syntax
     (xdr-types->racket
-      Stellar-xdr-types
-      overrides
       stx
+      consts
+      types
       ; (list "TransactionEnvelope" "TestLedger" "TestCaseResult")))
       (list "AccountEntry")))
   the-syntax)

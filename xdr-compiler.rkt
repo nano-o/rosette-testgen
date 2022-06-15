@@ -27,7 +27,9 @@
   ;; (constants, structs); a function `valid?-t`, for every type `t`, can be
   ;; used to check wether a Racket datum is valid with respect to the XDR
   ;; specification given
-  xdr-types->racket)
+  xdr-types->racket
+  xdr-types->grammar
+  preprocess-ir)
 
 (require
   nanopass
@@ -847,25 +849,25 @@
     (begin
       (gobble (valid?/syntax "PublicKey" Stellar-types (consts-hashmap Stellar-l2) #'())))))
 
-; this produces a syntax object
-(define/contract (xdr-types->racket xdr-spec stx ts)
-  (-> list? syntax? (*list/c string?) syntax?)
+(define (preprocess-ir xdr-spec)
   (define l2 (l0->l2 (L0-parser xdr-spec)))
   (define types-h (collect-types l2))
-  #;(for ([t ts])
-    (define rec-types (recursive-types types-h t))
-    (when (not (set-empty? rec-types))
-      (error (format "recursive types are not supported: ~a" rec-types))))
   (define consts-h (consts-hashmap l2))
-  (define const-defs (constant-definitions stx consts-h))
-  (define struct-defs (hash-values (make-struct-types/rec stx types-h ts)))
+  `((types . ,types-h)
+    (consts . ,consts-h)))
+
+; this produces a syntax object
+(define/contract (xdr-types->racket stx consts types ts)
+  (-> syntax? hash? hash? (*list/c string?) syntax?)
+  (define const-defs (constant-definitions stx consts))
+  (define struct-defs (hash-values (make-struct-types/rec stx types ts)))
   (define all-deps
     (for/fold ([acc (set)] #:result acc)
               ([t ts])
-      (set-union acc (deps types-h t))))
+      (set-union acc (deps types t))))
   (define valid?-defs
     (for/list ([t all-deps])
-      (valid?/syntax t types-h consts-h stx)))
+      (valid?/syntax t types consts stx)))
   #`(begin
       #,@const-defs
       #,@struct-defs
@@ -873,22 +875,18 @@
       #,@valid?-defs))
 
 (module+ test
-  (define test-overrides
-    '((("Transaction" "operations") len . 1)
-      (("TestLedger" "ledgerEntries") len . 2)
-      (("MuxedAccount" "ed25519")
-       key-set
-       "GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3"
-       "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
+  (match-define
+    `((types . ,types) (consts . ,consts))
+    (preprocess-ir Stellar-xdr-types))
   (test-case
     "run xdr-types->racket on Stellar"
-    (gobble (xdr-types->racket Stellar-xdr-types #'() '("TransactionEnvelope")))
-    (gobble (xdr-types->racket Stellar-xdr-types #'() '("SCPQuorumSet")))))
+    (gobble (xdr-types->racket #'() consts types '("TransactionEnvelope")))
+    (gobble (xdr-types->racket #'() consts types '("SCPQuorumSet")))))
 
 ;; Generate grammar rules
 
 (define/contract (size->number consts size)
-  (-> (hash/c string? number?) (or/c number? string?) number?)
+  (-> (hash/c string? number?) (or/c number? string? boolean?) (or/c boolean? number?))
   (if (string? size)
     (hash-ref consts size)
     size))
@@ -939,7 +937,7 @@
 (require
   "strkey-utils.rkt")
 
-(define-pass make-grammar : (L2 Spec) (ir stx type-name consts overrides) -> * (rule-thunk)
+(define-pass make-rule : (L2 Spec) (ir stx type-name consts overrides) -> * (grammar)
   ; For use as a macro, we need unique source locations for each sub-rule invocation
   ; (this does include rules of the form (?? bitvector 32))
   ; That's why we produce thunks; new slocs will be generated each time we call a thunk.
@@ -969,17 +967,23 @@
            [else (thunk (rule-hole i))])])]
 
     [(struct ,p ,[rule-thunk*] ...)
-     (define struct-name
+     (define name
        (format-id/unique-sloc (struct-name p) stx))
-     (thunk #`(#,struct-name #,@(map (λ (f) (f)) rule-thunk*)))]
+     (thunk #`(#,name #,@(map (λ (f) (f)) rule-thunk*)))]
 
     [(string ,c)
      (thunk (make-vector stx consts (thunk #`(#,(format-id/unique-sloc "??" #'()) (bitvector 8))) c))]
 
-    [(variable-length-array ,[elem-rule-thunk] ,v) ; TODO length override
-     (cond
-       [(dict-has-key? overrides 'todo) 'todo]
-       [else (thunk (make-vector stx consts elem-rule-thunk v))])]
+    [(variable-length-array ,p ,[elem-rule-thunk] ,v)
+     (define key (reverse p))
+     (define len
+       (cond
+         [(and
+            (dict-has-key? overrides key)
+            (eq? (car (dict-ref overrides key)) 'len))
+          (cdr (dict-ref overrides key))]
+         [else v]))
+     (thunk (make-vector stx consts elem-rule-thunk len))]
 
     [(fixed-length-array ,type-spec ,v)
      ; special case for opaque fixed-length arrays: we use -byte-array
@@ -999,12 +1003,12 @@
      (thunk (make-list stx consts elem-rule-thunk v))]
 
     [(enum (,i* ,c*) ...)
-     (define bv* (map (λ (i) #`(bv #,i 32)) i*))
+     (define bv* (map (λ (i) (value-rule stx i)) i*))
      (if (> (length bv*) 1)
-       #`(choose #,@bv*)
-       (car bv*))]
+       (thunk #`(choose #,@bv*))
+       (thunk (car bv*)))]
 
-    [(union ,p (,i1 ,i2) ,[Union-Case-Spec : union-case-spec -> * thunk-1* thunk-2*] ...)
+    [(union ,p (,i1 ,i2) ,[Union-Case-Spec : union-case-spec -> thunk-1* thunk-2*] ...)
      (define the-struct
        (if (equal? i2 "bool")
          (format-id stx "-optional")
@@ -1013,10 +1017,10 @@
        (if (> (length thunk-1*) 1)
          #`(choose
              #,@(for/list
-                    ([thunk-1 thunk-1*]
-                     [thunk-2 thunk-2*])
+                  ([thunk-1 thunk-1*]
+                   [thunk-2 thunk-2*])
                   #`(#,the-struct #,(thunk-1) #,(thunk-2))))
-         #`(#,the-struct #,((car thunk-1*) (car thunk-2*)))))])
+         #`(#,the-struct #,((car thunk-1*)) #,((car thunk-2*)))))])
 
   (Union-Case-Spec
     : Union-Case-Spec (ir) -> * (thunk-1 thunk-2)
@@ -1024,7 +1028,7 @@
      (values
        (thunk
          #`(bv #,(value-rule stx v) 32))
-       (rule-thunk))])
+       rule-thunk)])
 
   (Decl
     : Decl (ir) -> * (rule-thunk)
@@ -1034,3 +1038,45 @@
   #`(
      #,(format-id/unique-sloc (string-append type-name "-rule"))
      #,((Spec ir))))
+
+(module+ test
+  (define test-overrides
+    '((("Transaction" "operations") len . 1)
+      (("TestLedger" "ledgerEntries") len . 2)
+      (("MuxedAccount" "ed25519")
+       key-set
+       "GAD2EJUGXNW7YHD7QBL5RLHNFHL35JD4GXLRBZVWPSDACIMMLVC7DOY3"
+       "GBASB5IEQQHYEVWJXTG6HVQR62FNASTOXMEGL4UOUQVNKDLR3BN2HIJL")))
+  (define ts '("TransactionEnvelope" "SCPQuorumSet"))
+  (test-case
+    "run make-rule on Stellar"
+    (begin
+      (define all-deps
+        (for/fold ([acc (set)] #:result acc)
+          ([t ts])
+          (set-union acc (deps Stellar-types t))))
+      (for ([t all-deps])
+        (gobble (make-rule (hash-ref Stellar-types t) #'() t (consts-hashmap Stellar-l2) test-overrides))))))
+
+(define/contract (xdr-types->grammar stx consts types ts overrides)
+  (-> syntax? hash? hash? (*list/c string?) list? syntax?)
+  (for ([t ts])
+    (define rec-types (recursive-types types t))
+    (when (not (set-empty? rec-types))
+      (for ([t rec-types])
+        (displayln (format "WARNING: recursive type detected: ~a" t)))))
+  (define all-deps
+    (for/fold ([acc (set)] #:result acc)
+      ([t ts])
+      (set-union acc (deps types t))))
+  (define rules
+    (for/list ([t all-deps])
+      (make-rule (hash-ref types t) stx t consts overrides)))
+  #`(begin
+      (define-grammar
+        (#,(format-id stx "~a" "the-grammar")) #,@rules)))
+
+(module+ test
+  (test-case
+    "run xdr-types->grammar on Stellar"
+    (gobble (xdr-types->grammar #'() consts types '("TransactionEnvelope") test-overrides))))
