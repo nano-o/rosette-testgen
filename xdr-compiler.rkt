@@ -10,17 +10,13 @@
 ;; XDR non-opaque fixed-length arrays become Racket lists
 ;; XDR variable-length arrays become Racket vectors
 ;; XDR enums become Racket 32-bit bitvectors
-;; XDR unions become structs with two members, tag and value, except when the tag is a boolean, in which case the union become an -optional struct
+;; XDR unions become structs whose name is the name of the union prefixed by '+', with two members, tag and value, except when the tag is a boolean, in which case the union become an -optional struct
 ;; XDR constants get an associated symbol
 ;; Some of those representations were chosen for compatibility with the guile-rpc representation.
 ;; See the implementation of valid?/syntax
 ;; Only top-level enums are supported
 
 ;; We use the nanopass compiler framework
-
-;; NOTE: there's some complexity in tracking dependencies between types; we do this in order to later as small a grammar as possible (instead of generating a grammar for all types). This is probably a case of premature optimisation.
-
-;; TODO: get rid of overrides here (only use in grammar generation)
 
 (provide
   ;; generates Racket definitions corresponding to an XDR specification
@@ -29,7 +25,8 @@
   ;; specification given
   xdr-types->racket
   xdr-types->grammar
-  preprocess-ir)
+  preprocess-ir
+  max-depth)
 
 (require
   nanopass
@@ -623,6 +620,10 @@
   (-> (and/c (listof string?) (not/c null?)) string?)
   (string-join (reverse path) "::"))
 
+(define/contract (union-struct-name path)
+  (-> (and/c (listof string?) (not/c null?)) string?)
+  (string-append "+" (string-join (reverse path) "::")))
+
 (module+ test
   (check-equal? (struct-name '("c" "b" "a")) "a::b::c")
   (check-equal? (struct-name '("c")) "c"))
@@ -640,10 +641,11 @@
     ; For now we assume that any union with bool tag is in fact an optional.
     ((union ,p (,i1 ,i2) ,[sts*] ...)
      (define rest (apply hash-union sts*))
-     (if (equal? i2 "bool") ; assume we are dealing with an optional
-       rest
-       (let ([t (make-struct-type stx (struct-name p) '("tag" "value"))])
-         (hash-union (hash (struct-name p) t) rest))))
+     (cond
+       [(equal? i2 "bool") rest]
+       [else
+         (define t (make-struct-type stx (union-struct-name p) '("tag" "value")))
+         (hash-union (hash (struct-name p) t) rest)]))
     ((struct ,p ,decl* ...)
      (define (->pair decl)
        (nanopass-case
@@ -808,11 +810,11 @@
      (define tag-getter
        (if (equal? i2 "bool")
          (format-id ctx "-optional-present")
-         (format-id ctx "~a-tag" (struct-name p))))
+         (format-id ctx "~a-tag" (union-struct-name p))))
      (define value-getter
        (if (equal? i2 "bool")
          (format-id ctx "-optional-value")
-         (format-id ctx "~a-value" (struct-name p))))
+         (format-id ctx "~a-value" (union-struct-name p))))
      (define tag-valid?
        (with-error #'(bitvector 32) "union tag"))
      #`(λ (d)
@@ -1012,7 +1014,7 @@
      (define the-struct
        (if (equal? i2 "bool")
          (format-id stx "-optional")
-         (format-id stx (struct-name p))))
+         (format-id stx (union-struct-name p))))
      (thunk
        (if (> (length thunk-1*) 1)
          #`(choose
