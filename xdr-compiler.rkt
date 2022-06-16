@@ -25,7 +25,8 @@
   ;; used to check wether a Racket datum is valid with respect to the XDR
   ;; specification given
   guile-xdr->racket
-  xdr-types->grammar
+  guile-xdr->grammar
+  guile-xdr->racket+grammar
   preprocess-ir
   max-depth)
 
@@ -1072,7 +1073,7 @@
       (for ([t all-deps])
         (gobble (make-rule (hash-ref Stellar-types t) #'() t (consts-hashmap Stellar-l2) test-overrides))))))
 
-(define/contract (xdr-types->grammar stx consts types ts overrides)
+(define/contract (make-grammar stx consts types ts overrides)
   (-> syntax? hash? hash? (*list/c string?) list? syntax?)
   (for ([t ts])
     (define rec-types (recursive-types types t))
@@ -1086,11 +1087,30 @@
   (define rules
     (for/list ([t all-deps])
       (make-rule (hash-ref types t) stx t consts overrides)))
-  #`(begin
-      (define-grammar
-        (#,(format-id stx "~a" "the-grammar")) #,@rules)))
+  #`(define-grammar
+        (#,(format-id stx "~a" "the-grammar")) #,@rules))
 
 (module+ test
   (test-case
     "run xdr-types->grammar on Stellar"
-    (gobble (xdr-types->grammar #'() consts types '("TransactionEnvelope") test-overrides))))
+    (gobble (make-grammar #'() consts types '("TransactionEnvelope") test-overrides))))
+
+(define (guile-xdr->grammar stx xdr-file ts overrides)
+  (define
+    xdr-spec
+    (read-datums xdr-file))
+  (match-define
+    `((types . ,types) (consts . ,consts))
+    (preprocess-ir xdr-spec))
+  (make-grammar stx consts types ts overrides))
+
+(define (guile-xdr->racket+grammar stx xdr-file ts overrides)
+  (define
+    xdr-spec
+    (read-datums xdr-file))
+  (match-define
+    `((types . ,types) (consts . ,consts))
+    (preprocess-ir xdr-spec))
+  #`(begin
+      #,(make-racket-defs stx consts types ts)
+      #,(make-grammar stx consts types ts overrides)))

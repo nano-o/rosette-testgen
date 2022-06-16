@@ -1,33 +1,25 @@
 #lang racket
 
-;; just for debugging for now
-;; TODO generate functional code (it's missing the defs for now)
-
 (require
   racket/pretty
   "xdr-compiler.rkt"
-  "read-datums.rkt"
-  (only-in racket/match match-define)
   "Stellar-overrides.rkt")
 
-(define Stellar-xdr-types
-  (read-datums "./Stellar.xdr-types"))
+(define output-file "/tmp/grammar.rkt")
 
-  (match-define
-    `((types . ,types) (consts . ,consts))
-    (preprocess-ir Stellar-xdr-types))
-
-(define grammar
-  (xdr-types->grammar #'() consts types '("TransactionEnvelope" "TestLedger" "TestCaseResult") overrides))
-
-(define o (open-output-string))
-(fprintf o "#lang rosette\n")
-(pretty-write '(require rosette/lib/synthax) o)
-(pretty-write '(provide (all-defined-out)) o)
-(pretty-write (syntax->datum grammar) o)
+(define defs+grammar
+  (guile-xdr->racket+grammar
+    #'()
+    "./Stellar.xdr-types"
+    '("TransactionEnvelope" "TestLedger" "TestCaseResult")
+    overrides))
 
 ; write to file
-(with-output-to-file "/tmp/grammar.rkt"
+(with-output-to-file output-file
   #:exists 'replace
-  (λ ()
-    (printf (get-output-string o))))
+  (thunk
+    (begin
+      (printf "#lang rosette\n")
+      (pretty-write '(provide (all-defined-out)))
+      (pretty-write '(require rosette/lib/synthax lens))
+      (pretty-write (syntax->datum defs+grammar)))))
