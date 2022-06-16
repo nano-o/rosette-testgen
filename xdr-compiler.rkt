@@ -10,6 +10,7 @@
 ;; XDR non-opaque fixed-length arrays become Racket lists
 ;; XDR variable-length arrays become Racket vectors
 ;; XDR enums become Racket 32-bit bitvectors
+;; XDR struct become struct with the same name except for the addition of the $ prefix
 ;; XDR unions become structs whose name is the name of the union prefixed by '+', with two members, tag and value, except when the tag is a boolean, in which case the union become an -optional struct
 ;; XDR constants get an associated symbol
 ;; Some of those representations were chosen for compatibility with the guile-rpc representation.
@@ -618,15 +619,15 @@
 
 (define/contract (struct-name path)
   (-> (and/c (listof string?) (not/c null?)) string?)
-  (string-join (reverse path) "::"))
+  (string-append "$" (string-join (reverse path) "::")))
 
 (define/contract (union-struct-name path)
   (-> (and/c (listof string?) (not/c null?)) string?)
   (string-append "+" (string-join (reverse path) "::")))
 
 (module+ test
-  (check-equal? (struct-name '("c" "b" "a")) "a::b::c")
-  (check-equal? (struct-name '("c")) "c"))
+  (check-equal? (struct-name '("c" "b" "a")) "$a::b::c")
+  (check-equal? (struct-name '("c")) "$c"))
 
 ;; define struct types for nested structs
 (define-pass make-struct-types : (L2 Spec) (ir stx) -> * (sts)
