@@ -1,13 +1,17 @@
 #lang racket
 
-; TODO rename this file
+;; Provides serialization of ledgers and transactions
+
+(provide
+  serialize-tx
+  serialize-ledger
+  pretty-print-test)
 
 (require
   shell/pipeline
   "to-guile-rpc.rkt"
   "Stellar-overrides.rkt"
   "strkey-utils.rkt")
-(provide serialize-tx serialize-ledger pretty-print-test)
 
 (define docker-image "testgen-utils:latest")
 
@@ -25,16 +29,18 @@
 
 ; Sign a transaction using stc in a ephemeral docker container
 (define (sign base64-tx private-key)
-  (let ([output
-          (run-subprocess-pipeline/out
-           `(,(λ () (printf "~a" base64-tx)))
-           `(,@docker-run-prefix sign.sh ,private-key))])
-    (string-trim output "\n")))
+  (define
+    output
+    (run-subprocess-pipeline/out
+      `(,(λ () (printf "~a" base64-tx)))
+      `(,@docker-run-prefix sign.sh ,private-key)))
+  (string-trim output "\n"))
 
 (define (defn->base64 defn type)
-  (let ([guile-rep
-         (defn->guile-rpc/xdr defn)])
-    (xdr/guile-rpc->base64 guile-rep type)))
+  (define
+    guile-rep
+    (defn->guile-rpc/xdr defn))
+  (xdr/guile-rpc->base64 guile-rep type))
 
 (define (sign-all tx/base64 signers/bv keys)
   (for/fold ([acc tx/base64])
@@ -42,8 +48,9 @@
     (sign acc (get-private-key keys k/bv))))
 
 (define (serialize-tx tx-defn signers)
-  (let ([tx/base64 (defn->base64 tx-defn "TransactionEnvelope")])
-    (sign-all tx/base64 signers pub-priv-dict)))
+  (define
+    tx/base64 (defn->base64 tx-defn "TransactionEnvelope"))
+  (sign-all tx/base64 signers pub-priv-dict))
 
 (define (serialize-ledger ledger-defn)
   (defn->base64 ledger-defn "TestLedger"))
