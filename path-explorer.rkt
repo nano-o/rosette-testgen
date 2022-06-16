@@ -19,6 +19,7 @@
 ; TODO it might be better to explicitly mark the control-flow nodes that are subject to exhaustive exploration
 ; e.g. we could have if/e, and/e, or/e etc. or wrap stuff in (explore ...)
 ; TODO this whole thing only works if we have no symbolic unions (e.g. if a list can have different length we're in trouble). This is because Rosette will execute the same code multiple times for each union member.
+; TODO prune unsat paths; how? maybe just throw an exception and rosette will catch it and then do what? check what happens with `solve` when there is an exception.
 
 (begin-for-syntax
   (define debug? #f)

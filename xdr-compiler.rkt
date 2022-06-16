@@ -24,7 +24,7 @@
   ;; (constants, structs); a function `valid?-t`, for every type `t`, can be
   ;; used to check wether a Racket datum is valid with respect to the XDR
   ;; specification given
-  xdr-types->racket
+  guile-xdr->racket
   xdr-types->grammar
   preprocess-ir
   max-depth)
@@ -37,6 +37,8 @@
   (only-in mischief/for for/dict)
   graph
   racket/generator
+  "read-datums.rkt"
+  (only-in racket/match match-define)
   (only-in rosette bitvector->natural)
   (for-template
     racket/base
@@ -860,7 +862,7 @@
     (consts . ,consts-h)))
 
 ; this produces a syntax object
-(define/contract (xdr-types->racket stx consts types ts)
+(define/contract (make-racket-defs stx consts types ts)
   (-> syntax? hash? hash? (*list/c string?) syntax?)
   (define const-defs (constant-definitions stx consts))
   (define struct-defs (hash-values (make-struct-types/rec stx types ts)))
@@ -882,9 +884,18 @@
     `((types . ,types) (consts . ,consts))
     (preprocess-ir Stellar-xdr-types))
   (test-case
-    "run xdr-types->racket on Stellar"
-    (gobble (xdr-types->racket #'() consts types '("TransactionEnvelope")))
-    (gobble (xdr-types->racket #'() consts types '("SCPQuorumSet")))))
+    "run make-racket-defs on Stellar"
+    (gobble (make-racket-defs #'() consts types '("TransactionEnvelope")))
+    (gobble (make-racket-defs #'() consts types '("SCPQuorumSet")))))
+
+(define (guile-xdr->racket stx xdr-file ts)
+  (define
+    xdr-spec
+    (read-datums xdr-file))
+  (match-define
+    `((types . ,types) (consts . ,consts))
+    (preprocess-ir xdr-spec))
+  (make-racket-defs stx consts types ts))
 
 ;; Generate grammar rules
 

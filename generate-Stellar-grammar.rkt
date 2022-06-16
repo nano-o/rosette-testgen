@@ -1,5 +1,8 @@
 #lang racket
 
+;; just for debugging for now
+;; TODO generate functional code (it's missing the defs for now)
+
 (require
   racket/pretty
   "xdr-compiler.rkt"
@@ -15,7 +18,7 @@
     (preprocess-ir Stellar-xdr-types))
 
 (define grammar
-  (xdr-types->grammar #'() consts types '("SCPQuorumSet" "TransactionEnvelope" "TestLedger" "TestCaseResult") overrides))
+  (xdr-types->grammar #'() consts types '("TransactionEnvelope" "TestLedger" "TestCaseResult") overrides))
 
 (define o (open-output-string))
 (fprintf o "#lang rosette\n")
