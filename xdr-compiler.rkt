@@ -44,7 +44,8 @@
   (for-template
     racket/base
     lens
-    (only-in rosette bitvector bveq bv)))
+    (only-in rosette bitvector bveq bv)
+    (only-in rosette/lib/synthax define-grammar ??)))
 
 (define-language L0
   ; This is a subset of the language of guile-rpc ASTs

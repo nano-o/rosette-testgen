@@ -1,11 +1,11 @@
-#lang errortrace racket
+#lang racket
 
 (require
-  "xdr-compiler-macros.rkt"
+  "Stellar-compiler-macros.rkt"
   (only-in rosette bv)
   rackunit)
 
-(compile-xdr "./Stellar.xdr-types" ("AccountEntry" "TransactionEnvelope"))
+(compile-xdr+grammar "TestLedger" "TransactionEnvelope")
 
 (module+ test
   (define x/256 (-byte-array (bv 0 256)))
