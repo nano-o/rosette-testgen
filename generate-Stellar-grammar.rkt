@@ -11,7 +11,7 @@
   (guile-xdr->racket+grammar
     #'()
     "./Stellar.xdr-types"
-    '("TransactionEnvelope" "TestLedger" "TestCaseResult")
+    '("TransactionEnvelope" "FeeBumpTransactionEnvelope" "TestLedger" "TransactionResult")
     overrides))
 
 ; write to file
