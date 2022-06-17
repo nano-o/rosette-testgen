@@ -2,7 +2,7 @@
 
 ;; Compiles an XDR specification to:
 ;; - A set of Racket definitions (constants and structs)
-;; - TODO Lenses to manipulate the above. NOTE that Rosette doesn't like struct/lens; try define-struct-lens
+;; - Lenses to manipulate the above.
 ;; - A Rosette grammar
 ;; Reads an input specification in guile-rpc AST format; so, one must first pre-process an XDR specification with the guile-rpc XDR parser
 
@@ -21,6 +21,9 @@
 
 ;; NOTE: seems unreliable to use as macros (Rosette grammars rely on syntax attributes populated by the reader, and which are therefore absent when generating syntax in macros)
 ;; Some complexity could go away if we didn't have to generate syntax.
+
+;; TODO assume we won't be using guile-xdr->grammar as a macro and simplify it accordingly.
+;; TODO we could use struct-type properties to tag XDR structs and XDR unions
 
 (provide
   ;; generates Racket definitions corresponding to an XDR specification
@@ -41,14 +44,12 @@
   graph
   racket/generator
   "read-datums.rkt"
-  (only-in racket/match match-define)
   (only-in rosette bitvector->natural)
   (for-template
     rosette
     lens
-    rosette/lib/synthax
-    #;(only-in rosette bitvector bveq bv)
-    #;(only-in rosette/lib/synthax define-grammar ?? choose)))
+    lens/data/struct
+    rosette/lib/synthax))
 
 (define-language L0
   ; This is a subset of the language of guile-rpc ASTs
@@ -90,7 +91,11 @@
 (define-parser L0-parser L0)
 
 (module+ test
-  (require rackunit "read-datums.rkt")
+  (require
+    rackunit
+    "read-datums.rkt"
+    (only-in racket/match match-define))
+
   (define (gobble x) ; to have rackunit evaluate something without printing it
     (void))
   ;; we now define a few XDR specifications for use in tests
@@ -614,12 +619,19 @@
       (recursive-types Stellar-types "TransactionEnvelope")
       (mutable-set))))
 
-; Next we define needed Racket struct types
+; Next we define needed Racket struct types and lenses
 
-(define (make-struct-type ctx name fields) ; name and fields as strings
-  (let ([field-names (for/list ([f fields])
-                       (format-id ctx "~a" f))])
-        #`(struct #,(format-id ctx "~a" name) #,field-names #:transparent)))
+(define/contract (make-struct-type ctx name fields)
+  ;; NOTE: Rosette does not like struct/lens, so we use define-struct-lenses
+  (-> syntax? string? (*list/c string?) (list/c syntax? syntax?))
+  (define
+    field-names (for/list ([f fields])
+                  (format-id ctx "~a" f)))
+  (define struct-id
+    (format-id ctx name))
+  (list
+    #`(struct #,struct-id #,field-names #:transparent)
+    #`(define-struct-lenses #,struct-id)))
 
 (module+ test
   (test-case
@@ -663,11 +675,16 @@
          decl
          ((,i ,type-spec) (cons i type-spec))
          (else #f)))
-     (define decl-pairs (filter identity (map ->pair decl*)))
-     (define fields (map car decl-pairs))
-     (define specs (map cdr decl-pairs))
-     (define the-struct (make-struct-type stx (struct-name p) fields))
-     (define rest (apply hash-union (map (λ (s) (Spec s)) specs)))
+     (define decl-pairs
+       (filter identity (map ->pair decl*)))
+     (define fields
+       (map car decl-pairs))
+     (define specs
+       (map cdr decl-pairs))
+     (define the-struct
+       (make-struct-type stx (struct-name p) fields))
+     (define rest
+       (apply hash-union (map Spec specs)))
      (hash-union rest (hash (struct-name p) the-struct))))
   (Decl
     : Decl (ir) -> * (sts)
@@ -677,7 +694,7 @@
     : Union-Case-Spec (ir) -> * (sts)
     ((,v ,[sts]) sts))
   (invariant-assertion
-    (hash/c string? syntax?)
+    (hash/c string? (list/c syntax? syntax?))
     (Spec ir)))
 
 (module+ test
@@ -688,7 +705,7 @@
       (gobble (make-struct-types (hash-ref Stellar-types "LiquidityPoolEntry") #'()))))
 
 (define/contract (make-struct-types/rec stx h ts)
-  (-> syntax? hash? (*list/c string?) (hash/c string? syntax?))
+  (-> syntax? hash? (*list/c string?) (hash/c string? (list/c syntax? syntax?)))
   (define ts-deps
     (apply
       set-union
@@ -711,9 +728,10 @@
 (define (built-in-structs stx)
   ; we can use union as it cannot be used as an identifier as per RFC4506
   ; we can also use a prefix like _ or -, which again cannot be used at the beginning of an identifier as per RFC4506
-  (list
-   (make-struct-type stx "-byte-array" '("value"))
-   (make-struct-type stx "-optional" '("present" "value"))))
+  (flatten
+    (list
+      (make-struct-type stx "-byte-array" '("value"))
+      (make-struct-type stx "-optional" '("present" "value")))))
 
 ;; Next we generate a function that checks the conformance of data to an xdr spec
 
@@ -871,8 +889,10 @@
 ; this produces a syntax object
 (define/contract (make-racket-defs stx consts types ts)
   (-> syntax? hash? hash? (*list/c string?) syntax?)
-  (define const-defs (constant-definitions stx consts))
-  (define struct-defs (hash-values (make-struct-types/rec stx types ts)))
+  (define const-defs
+    (constant-definitions stx consts))
+  (define struct-defs
+    (flatten (hash-values (make-struct-types/rec stx types ts))))
   (define all-deps
     (for/fold ([acc (set)] #:result acc)
               ([t ts])
@@ -905,6 +925,8 @@
   (make-racket-defs stx consts types ts))
 
 ;; Generate grammar rules
+
+;; TODO we could use a few parameters (with parameterize) to simplify things (e.g. to hold the types map, consts map, etc.)
 
 (define/contract (size->number consts size)
   (-> (hash/c string? number?) (or/c number? string? boolean?) (or/c boolean? number?))
@@ -959,9 +981,11 @@
   "strkey-utils.rkt")
 
 (define-pass make-rule : (L2 Spec) (ir stx type-name consts overrides) -> * (grammar)
-  ; For use as a macro, we need unique source locations for each sub-rule invocation
-  ; (this does include rules of the form (?? bitvector 32))
-  ; That's why we produce thunks; new slocs will be generated each time we call a thunk.
+  ;; For use as a macro, we need unique source locations for each sub-rule invocation
+  ;; (this does include rules of the form (?? bitvector 32))
+  ;; That's why we produce thunks; new slocs will be generated each time we call a thunk.
+  ;; NOTE it's probably not a good idea to use this as a macro because Rosette using syntax properties that are set by the Racket reader (and thus are missing when producing syntax with a macro).
+  ;; TODO simplify, if not using as macro (no need for the thunks or format-id etc.)
   (Spec
     : Spec (ir) -> * (rule-thunk)
 

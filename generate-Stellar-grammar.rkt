@@ -5,7 +5,7 @@
   "xdr-compiler.rkt"
   "Stellar-overrides.rkt")
 
-(define output-file "/tmp/grammar.rkt")
+(define output-file "./Stellar.rkt")
 
 (define defs+grammar
   (guile-xdr->racket+grammar
@@ -21,5 +21,5 @@
     (begin
       (printf "#lang rosette\n")
       (pretty-write '(provide (all-defined-out)))
-      (pretty-write '(require rosette/lib/synthax lens))
+      (pretty-write '(require rosette/lib/synthax lens lens/data/struct))
       (pretty-write (syntax->datum defs+grammar)))))
