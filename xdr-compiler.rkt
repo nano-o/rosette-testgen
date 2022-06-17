@@ -1,8 +1,8 @@
-#lang errortrace racket
+#lang racket
 
 ;; Compiles an XDR specification to:
 ;; - A set of Racket definitions (constants and structs)
-;; - TODO Lenses to manipulate the above
+;; - TODO Lenses to manipulate the above. NOTE that Rosette doesn't like struct/lens; try define-struct-lens
 ;; - A Rosette grammar
 ;; Reads an input specification in guile-rpc AST format; so, one must first pre-process an XDR specification with the guile-rpc XDR parser
 
@@ -19,6 +19,9 @@
 
 ;; We use the nanopass compiler framework
 
+;; NOTE: seems unreliable to use as macros (Rosette grammars rely on syntax attributes populated by the reader, and which are therefore absent when generating syntax in macros)
+;; Some complexity could go away if we didn't have to generate syntax.
+
 (provide
   ;; generates Racket definitions corresponding to an XDR specification
   ;; (constants, structs); a function `valid?-t`, for every type `t`, can be
@@ -27,11 +30,10 @@
   guile-xdr->racket
   guile-xdr->grammar
   guile-xdr->racket+grammar
-  preprocess-ir
-  max-depth)
+  preprocess-ir)
 
 (require
-  nanopass
+  (rename-in nanopass [extends extends-language])
   racket/hash
   (only-in list-util zip)
   racket/syntax
@@ -42,10 +44,11 @@
   (only-in racket/match match-define)
   (only-in rosette bitvector->natural)
   (for-template
-    racket/base
+    rosette
     lens
-    (only-in rosette bitvector bveq bv)
-    (only-in rosette/lib/synthax define-grammar ??)))
+    rosette/lib/synthax
+    #;(only-in rosette bitvector bveq bv)
+    #;(only-in rosette/lib/synthax define-grammar ?? choose)))
 
 (define-language L0
   ; This is a subset of the language of guile-rpc ASTs
@@ -133,7 +136,7 @@
 
 ;; L0a simplifies L0 a bit by removing the superfluous Union-Spec production
 (define-language L0a
-  (extends L0)
+  (extends-language L0)
   (Union-Spec (union-spec)
               (- (case (i1 i2) union-case-spec* ...)))
   (Spec (type-spec)
@@ -221,7 +224,7 @@
 ; cases.
 
 (define-language L1
-  (extends L0a)
+  (extends-language L0a)
   (Union-Case-Spec (union-case-spec)
                    (- ((v* ...) decl)
                       (else decl))
@@ -337,7 +340,7 @@
 
 (define-language L2
   ; add path field to struct and union types
-  (extends L1)
+  (extends-language L1)
   (terminals
    (+ (path (p))))
   (Spec (type-spec)
@@ -541,15 +544,17 @@
       (set "PoolID" "PublicKeyType" "AssetType" "AccountID" "PublicKey" "TrustLineAsset" "AssetCode12" "AlphaNum12" "AlphaNum4" "uint256" "Hash" "AssetCode4"))))
 
 (define (min-depth h t)
-  ; the minimum depth to cover the graph
-  (let-values ([(a _) (bfs (deps-graph h) t)])
-    (define reachable
-      (for/fold ([acc null])
-        ([(k v) (in-hash a)])
-        (if (equal? v +inf.0)
-          acc
-          (cons (cons k v) acc))))
-    (cdr (argmax (λ (p) (cdr p)) reachable))))
+  ; max distance from t to any other type
+  (define-values (distances _)
+    (bfs (deps-graph h) t))
+  (define (not-inf x)
+    (not (equal? (cdr x) +inf.0)))
+  (cdr
+    (argmax
+      cdr
+      (filter
+        not-inf
+        (hash->list distances)))))
 
 (module+ test
   (test-case
@@ -558,7 +563,7 @@
       (min-depth Stellar-types "TransactionEnvelope")
       7)))
 
-; max depth without recursing:
+; max distance reachable from every type
 (define (max-depth xdr-types)
   (let ([h (collect-types (l0->l2 (L0-parser xdr-types)))])
     (define g (deps-graph h))
@@ -614,7 +619,7 @@
 (define (make-struct-type ctx name fields) ; name and fields as strings
   (let ([field-names (for/list ([f fields])
                        (format-id ctx "~a" f))])
-        #`(struct/lens #,(format-id ctx "~a" name) #,field-names #:transparent)))
+        #`(struct #,(format-id ctx "~a" name) #,field-names #:transparent)))
 
 (module+ test
   (test-case
@@ -773,9 +778,9 @@
            (define elem-valid? (Spec type-spec))
            #`(λ (d)
                 (and
-                  (vector? d)
-                  (equal? (vector-length d) #,v)
-                  (for/and ([e (in-vector d)])
+                  (list? d)
+                  (equal? (length d) #,v)
+                  (for/and ([e d])
                     (#,elem-valid? e))))]))
      (with-error the-check "fixed-length array"))
 

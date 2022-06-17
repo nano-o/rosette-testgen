@@ -2,10 +2,10 @@
 
 (require
   "Stellar-compiler-macros.rkt"
-  (only-in rosette bv)
+  (only-in rosette bv symbolics solve)
   rackunit)
 
-(compile-xdr+grammar "TestLedger" "TransactionEnvelope")
+(compile-xdr "TestLedger" "TransactionEnvelope")
 
 (module+ test
   (define x/256 (-byte-array (bv 0 256)))
