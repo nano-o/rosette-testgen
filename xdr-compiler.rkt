@@ -24,6 +24,9 @@
 
 ;; TODO assume we won't be using guile-xdr->grammar as a macro and simplify it accordingly.
 ;; TODO we could use struct-type properties to tag XDR structs and XDR unions
+;; TODO are the + and $ prefixes really needed? Could avoid name clashes with predefined racket things; maybe we could use u: and s: (for union and struct); we could also remove the `-` prefix in -optional and -byte-array
+;; TODO consider building structs with keyword arguments? (see https://www.greghendershott.com/2015/07/keyword-structs-revisited.html)
+;; TODO type predicates for all types would be useful; or even create structs for everything
 
 (provide
   ;; generates Racket definitions corresponding to an XDR specification
@@ -640,11 +643,11 @@
 
 (define/contract (struct-name path)
   (-> (and/c (listof string?) (not/c null?)) string?)
-  (string-append "$" (string-join (reverse path) "::")))
+  (string-join (reverse path) "::"))
 
 (define/contract (union-struct-name path)
   (-> (and/c (listof string?) (not/c null?)) string?)
-  (string-append "+" (string-join (reverse path) "::")))
+  (string-join (reverse path) "::"))
 
 (module+ test
   (check-equal? (struct-name '("c" "b" "a")) "$a::b::c")
