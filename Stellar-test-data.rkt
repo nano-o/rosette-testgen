@@ -87,6 +87,10 @@
 
 (check-true (LedgerEntry-valid? my-account))
 
+(define my-ledger
+  (Ledger my-ledger-header (vector my-account)))
+(check-true (Ledger-valid? my-ledger))
+
 (define my-tx-envelope
   (TransactionEnvelope
     (bv ENVELOPE_TYPE_TX 32)
@@ -97,7 +101,7 @@
           (MuxedAccount::med25519
             (bv #x0000000000000000 64)
             (-byte-array (bv 0 256))))
-        (bv 0 32)
+        (bv 100 32)
         (bv #x0000000000000001 64)
         (-optional (bv FALSE 32) null)
         (Memo

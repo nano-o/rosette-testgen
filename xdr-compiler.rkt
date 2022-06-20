@@ -24,9 +24,11 @@
 
 ;; TODO assume we won't be using guile-xdr->grammar as a macro and simplify it accordingly.
 ;; TODO we could use struct-type properties to tag XDR structs and XDR unions
-;; TODO are the + and $ prefixes really needed? Could avoid name clashes with predefined racket things; maybe we could use u: and s: (for union and struct); we could also remove the `-` prefix in -optional and -byte-array
 ;; TODO consider building structs with keyword arguments? (see https://www.greghendershott.com/2015/07/keyword-structs-revisited.html)
 ;; TODO type predicates for all types would be useful; or even create structs for everything
+;; TODO why use vectors for variable-length arrays? Lists would be simpler.
+;; TODO Why have a special case for byte arrays?
+;; TODO special accessor for union values with associated contract? (that checks the discriminent)
 
 (provide
   ;; generates Racket definitions corresponding to an XDR specification

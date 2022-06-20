@@ -2443,10 +2443,10 @@ case 0:
     LedgerCloseMetaV0 v0;
 };
 
-struct TestLedger
+struct Ledger
 {
-    LedgerHeader ledgerHeader;
-    LedgerEntry ledgerEntries<>;
+    LedgerHeader header;
+    LedgerEntry entries<>;
 };
 
 struct TestCaseResult

@@ -435,8 +435,6 @@
     (define-struct-lenses LedgerEntry)
     (struct PaymentOp (destination asset amount) #:transparent)
     (define-struct-lenses PaymentOp)
-    (struct TestLedger (ledgerHeader ledgerEntries) #:transparent)
-    (define-struct-lenses TestLedger)
     (struct CreateAccountResult (tag value) #:transparent)
     (define-struct-lenses CreateAccountResult)
     (struct
@@ -557,6 +555,8 @@
     (define-struct-lenses LiquidityPoolConstantProductParameters)
     (struct ClawbackResult (tag value) #:transparent)
     (define-struct-lenses ClawbackResult)
+    (struct Ledger (header entries) #:transparent)
+    (define-struct-lenses Ledger)
     (struct ClawbackOp (asset from amount) #:transparent)
     (define-struct-lenses ClawbackOp)
     (struct LedgerEntryExtensionV1 (sponsoringID ext) #:transparent)
@@ -1685,38 +1685,6 @@
               d)
              (raise-user-error
               (format (string-append "invalid " "enum" ": ~a") d))))
-       data))
-    (define (TestLedger-valid? data)
-      ((λ (d)
-         (and ((λ (d)
-                 (or ((λ (d) (TestLedger? d)) d)
-                     (raise-user-error
-                      (format
-                       (string-append
-                        "invalid "
-                        "struct type TestLedger"
-                        ": ~a")
-                       d))))
-               d)
-              ((λ (d) (LedgerHeader-valid? (TestLedger-ledgerHeader d))) d)
-              ((λ (d)
-                 ((λ (d)
-                    (or ((λ (d)
-                           (and (vector? d)
-                                (when #f (<= (vector-length d) #f))
-                                (for/and
-                                 ((e (in-vector d)))
-                                 (LedgerEntry-valid? e))))
-                         d)
-                        (raise-user-error
-                         (format
-                          (string-append
-                           "invalid "
-                           "variable-length array"
-                           ": ~a")
-                          d))))
-                  (TestLedger-ledgerEntries d)))
-               d)))
        data))
     (define (Transaction-valid? data)
       ((λ (d)
@@ -3386,6 +3354,35 @@
                   (λ (tag value) (and (bveq tag (bv -2 32)) (null? value)))
                   (λ (tag value) (and (bveq tag (bv -1 32)) (null? value))))))
                (c (ClawbackResult-tag d) (ClawbackResult-value d)))))
+       data))
+    (define (Ledger-valid? data)
+      ((λ (d)
+         (and ((λ (d)
+                 (or ((λ (d) (Ledger? d)) d)
+                     (raise-user-error
+                      (format
+                       (string-append "invalid " "struct type Ledger" ": ~a")
+                       d))))
+               d)
+              ((λ (d) (LedgerHeader-valid? (Ledger-header d))) d)
+              ((λ (d)
+                 ((λ (d)
+                    (or ((λ (d)
+                           (and (vector? d)
+                                (when #f (<= (vector-length d) #f))
+                                (for/and
+                                 ((e (in-vector d)))
+                                 (LedgerEntry-valid? e))))
+                         d)
+                        (raise-user-error
+                         (format
+                          (string-append
+                           "invalid "
+                           "variable-length array"
+                           ": ~a")
+                          d))))
+                  (Ledger-entries d)))
+               d)))
        data))
     (define (ClawbackOp-valid? data)
       ((λ (d)
@@ -5302,10 +5299,6 @@
      PAYMENT_NOT_AUTHORIZED
      PAYMENT_LINE_FULL
      PAYMENT_NO_ISSUER))
-   (TestLedger-rule
-    (TestLedger
-     (LedgerHeader-rule)
-     (vector (LedgerEntry-rule) (LedgerEntry-rule) (LedgerEntry-rule))))
    (Transaction-rule
     (Transaction
      (MuxedAccount-rule)
@@ -5793,6 +5786,10 @@
      (ClawbackResult (bv CLAWBACK_NO_TRUST 32) null)
      (ClawbackResult (bv CLAWBACK_NOT_CLAWBACK_ENABLED 32) null)
      (ClawbackResult (bv CLAWBACK_MALFORMED 32) null)))
+   (Ledger-rule
+    (Ledger
+     (LedgerHeader-rule)
+     (vector (LedgerEntry-rule) (LedgerEntry-rule) (LedgerEntry-rule))))
    (ClawbackOp-rule (ClawbackOp (Asset-rule) (MuxedAccount-rule) (int64-rule)))
    (ClaimPredicate-rule
     (choose

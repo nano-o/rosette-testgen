@@ -1623,10 +1623,10 @@
   (union (case ("v" "int")
            ((0) ("v0" "LedgerCloseMetaV0")))))
 (define-type
-  "TestLedger"
+  "Ledger"
   (struct
-    ("ledgerHeader" "LedgerHeader")
-    ("ledgerEntries"
+    ("header" "LedgerHeader")
+    ("entries"
      (variable-length-array "LedgerEntry" #f))))
 (define-type
   "TestCaseResult"
