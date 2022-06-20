@@ -3,11 +3,52 @@
 (provide (all-defined-out))
 (require
   (only-in rosette bv)
-  "Stellar.rkt")
+  "Stellar.rkt"
+  rackunit)
+
+(define my-ledger-header
+ (LedgerHeader
+     (bv #x0000000e 32)
+     (-byte-array
+      (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
+     (StellarValue
+      (-byte-array
+       (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
+      (bv #x0000000000000000 64)
+      (vector)
+      (StellarValue::ext
+       (bv #x00000000 32)
+       null))
+     (-byte-array
+      (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
+     (-byte-array
+      (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
+     (bv #x00000001 32)
+     (bv #x0000000000000000 64)
+     (bv #x0000000000000000 64)
+     (bv #x00000000 32)
+     (bv #x0000000000000000 64)
+     (bv #x00000064 32)
+     (bv #x004c4b40 32)
+     (bv #x00000000 32)
+     (list
+      (-byte-array
+       (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
+      (-byte-array
+       (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
+      (-byte-array
+       (bv #x0000000000000000000000000000000000000000000000000000000000000000 256))
+      (-byte-array
+       (bv #x0000000000000000000000000000000000000000000000000000000000000000 256)))
+     (LedgerHeader::ext
+      (bv #x00000000 32)
+      null)))
+
+(check-true (LedgerHeader-valid? my-ledger-header))
 
 (define my-account
   (LedgerEntry
-    (-byte-array (bv 0 32))
+    (bv 0 32)
     (LedgerEntry::data
       (bv ACCOUNT 32)
       (AccountEntry
@@ -44,6 +85,8 @@
                 (AccountEntryExtensionV2::ext (bv #x00000000 32) '())))))))
     (LedgerEntry::ext (bv 0 32) null)))
 
+(check-true (LedgerEntry-valid? my-account))
+
 (define my-tx-envelope
   (TransactionEnvelope
     (bv ENVELOPE_TYPE_TX 32)
@@ -75,3 +118,5 @@
                 (bv #x0000000000000000 64)))))
         (Transaction::ext (bv 0 32) null))
       (vector))))
+
+(check-true (TransactionEnvelope-valid? my-tx-envelope))
