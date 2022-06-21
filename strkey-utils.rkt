@@ -1,9 +1,14 @@
 #lang racket
 
+(provide
+  strkey->bv
+  strkey->byte-list
+  get-private-key)
+
 (require
-  (only-in rosette bv integer->bitvector bitvector extract concat bveq)
-  (only-in list-util zip))
-(provide strkey->bv get-private-key)
+  (only-in rosette bv bitvector->natural integer->bitvector bitvector extract concat bveq)
+  (only-in list-util zip)
+  binaryio/integer)
 
 ;; NOTE
 ;; don't use the bv package, it's buggy:
@@ -44,6 +49,22 @@
     (apply concat (map char->bv (string->list k))))
   (extract (- 280 9) 16 all-bits))
 
+(define/contract (natural->bytelist val nbytes)
+  (-> natural? natural? (listof byte?))
+  (bytes->list (integer->bytes val nbytes #f #t)))
+
+(define/contract (strkey->byte-list k)
+  ;; big-endian byte list (most significant byte at head of list)
+  (->
+    strkey?
+    (and/c
+      (listof byte?)
+      (λ (l) (equal? (length l) 32))))
+  (natural->bytelist
+    (bitvector->natural
+      (strkey->bv k))
+    32))
+
 (define/contract (get-private-key d pub/bv)
   (-> dict? (bitvector 256) strkey?)
   ; given a dict mapping public strkeys to private strkeys
@@ -60,15 +81,20 @@
 
 (module+ test
   (require rackunit)
+  ;; example from https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0023.md"
+  (define test-strkey "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ")
   (test-case
-    "example from https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0023.md"
-    (begin
-      (define test-strkey "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ")
-      (check-equal?
+    "strkey->bv"
+    (check-equal?
         (bveq
           (strkey->bv test-strkey)
           (bv #x3f0c34bf93ad0d9971d04ccc90f705511c838aad9734a4a2fb0d7a03fc7fe89a 256))
-        #t)))
+        #t))
+  (test-case
+    "strkey->byte-list"
+    (check-equal?
+      (strkey->byte-list test-strkey)
+      '(63 12 52 191 147 173 13 153 113 208 76 204 144 247 5 81 28 131 138 173 151 52 164 162 251 13 122 3 252 127 232 154)))
   (test-case
     "get private-key"
     (define pub-priv-dict
