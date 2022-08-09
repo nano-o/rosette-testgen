@@ -627,20 +627,28 @@
 ; TODO add a keyword constructor here?
 (define/contract (make-struct-type ctx name fields)
   ;; NOTE: Rosette does not like struct/lens, so we use define-struct-lenses
-  (-> syntax? string? (*list/c string?) (list/c syntax? syntax?))
-  (define
-    field-names (for/list ([f fields])
-                  (format-id ctx "~a" f)))
+  (-> syntax? string? (*list/c string?) (list/c syntax? syntax? syntax?))
+  (define field-names
+    (for/list ([f fields])
+      (format-id ctx f))) ; TODO do we need ctx here? probably not...
   (define struct-id
     (format-id ctx name))
+  (define kw-ctor
+    (format-id ctx "~a/kw" name))
+  (define ctor-args
+    (flatten
+      (for/list ([f fields])
+        (list #`#,(string->keyword f) (format-id #'() f)))))
   (list
     #`(struct #,struct-id #,field-names #:transparent)
-    #`(define-struct-lenses #,struct-id)))
+    #`(define-struct-lenses #,struct-id)
+    #`(define (#,kw-ctor #,@ctor-args)
+        (#,struct-id #,field-names))))
 
 (module+ test
   (test-case
     "make struct type"
-         (gobble (make-struct-type #'() "my-struct" '("field1" "field2")))))
+    (gobble (make-struct-type #'() "my-struct" '("field1" "field2")))))
 
 (define/contract (struct-name path)
   (-> (and/c (listof string?) (not/c null?)) string?)
@@ -693,7 +701,7 @@
     : Union-Case-Spec (ir) -> * (sts)
     ((,v ,[sts]) sts))
   (invariant-assertion
-    (hash/c string? (list/c syntax? syntax?))
+    (hash/c string? (list/c syntax? syntax? syntax?))
     (Spec ir)))
 
 (module+ test
@@ -704,7 +712,7 @@
       (gobble (make-struct-types (hash-ref Stellar-types "LiquidityPoolEntry") #'()))))
 
 (define/contract (make-struct-types/rec stx h ts)
-  (-> syntax? hash? (*list/c string?) (hash/c string? (list/c syntax? syntax?)))
+  (-> syntax? hash? (*list/c string?) (hash/c string? (list/c syntax? syntax? syntax?)))
   (define ts-deps
     (apply
       set-union
