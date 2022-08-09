@@ -6,7 +6,6 @@
 ;; - A Rosette grammar
 ;; Reads an input specification in guile-rpc AST format; so, one must first pre-process an XDR specification with the guile-rpc XDR parser
 
-;; XDR opaque fixed-length arrays become instances of -byte-array containing a bitvector
 ;; XDR non-opaque fixed-length arrays become Racket lists
 ;; XDR variable-length arrays become Racket vectors
 ;; XDR enums become Racket 32-bit bitvectors
@@ -27,7 +26,6 @@
 ;; TODO consider building structs with keyword arguments? (see https://www.greghendershott.com/2015/07/keyword-structs-revisited.html)
 ;; TODO type predicates for all types would be useful; or even create structs for everything
 ;; TODO why use vectors for variable-length arrays? Lists would be simpler.
-;; TODO Why have a special case for byte arrays?
 ;; TODO special accessor for union values with associated contract? (that checks the discriminent)
 
 (provide
@@ -49,10 +47,10 @@
   graph
   racket/generator
   "read-datums.rkt"
-  (only-in rosette bitvector->natural)
+  ;(only-in rosette bitvector->natural)
   (for-template
     rosette
-    lens
+    ;lens
     lens/data/struct
     rosette/lib/synthax))
 
@@ -626,6 +624,7 @@
 
 ; Next we define needed Racket struct types and lenses
 
+; TODO add a keyword constructor here?
 (define/contract (make-struct-type ctx name fields)
   ;; NOTE: Rosette does not like struct/lens, so we use define-struct-lenses
   (-> syntax? string? (*list/c string?) (list/c syntax? syntax?))
@@ -645,17 +644,12 @@
 
 (define/contract (struct-name path)
   (-> (and/c (listof string?) (not/c null?)) string?)
-  (string-join (reverse path) "::"))
-
-(define/contract (union-struct-name path)
-  (-> (and/c (listof string?) (not/c null?)) string?)
-  (string-join (reverse path) "::"))
+  (string-join (reverse path) ":"))
 
 (module+ test
-  (check-equal? (struct-name '("c" "b" "a")) "$a::b::c")
-  (check-equal? (struct-name '("c")) "$c"))
+  (check-equal? (struct-name '("c" "b" "a")) "a:b:c")
+  (check-equal? (struct-name '("c")) "c"))
 
-;; define struct types for nested structs
 (define-pass make-struct-types : (L2 Spec) (ir stx) -> * (sts)
   (Spec
     : Spec (ir) -> * (sts)
@@ -671,7 +665,7 @@
      (cond
        [(equal? i2 "bool") rest]
        [else
-         (define t (make-struct-type stx (union-struct-name p) '("tag" "value")))
+         (define t (make-struct-type stx (struct-name p) '("tag" "value")))
          (hash-union (hash (struct-name p) t) rest)]))
     ((struct ,p ,decl* ...)
      (define (->pair decl)
@@ -735,7 +729,6 @@
   ; we can also use a prefix like _ or -, which again cannot be used at the beginning of an identifier as per RFC4506
   (flatten
     (list
-      (make-struct-type stx "-byte-array" '("value"))
       (make-struct-type stx "-optional" '("present" "value")))))
 
 ;; Next we generate a function that checks the conformance of data to an xdr spec
@@ -770,91 +763,80 @@
      (with-error #`(λ (d) (and (vector? d) (<= (vector-length d) #,c))) "string"))
 
     ((variable-length-array ,p ,[stx] ,v)
-     (define len
-       (if v
-         (if (number? v) v (hash-ref consts-h v))
-         v))
-     (define the-check
-       #`(λ (d)
-            (and
-              (vector? d)
-              (when #,len (<= (vector-length d) #,len))
-              (for/and ([e (in-vector d)])
-                (#,stx e)))))
-     (with-error the-check "variable-length array"))
-
-    ((fixed-length-array ,type-spec ,v)
-     (define len
-       (if (number? v) v (hash-ref consts-h v)))
-     (define the-check
+     (define max-len
        (cond
-         [(nanopass-case
-            (L2 Spec)
-            type-spec
-            [(,p ,i) (equal? i "opaque")]
-            [else #f])
-          #`(λ (d)
-               (and
-                 (#,(format-id ctx "-byte-array?") d)
-                 ((bitvector #,(* v 8)) (#,(format-id ctx "-byte-array-value") d))))]
-         [else
-           (define elem-valid? (Spec type-spec))
-           #`(λ (d)
-                (and
-                  (list? d)
-                  (equal? (length d) #,v)
-                  (for/and ([e d])
-                    (#,elem-valid? e))))]))
-     (with-error the-check "fixed-length array"))
-
-    ((enum (,i* ,c*) ...)
+         [(not v) (- (expt 2 32) 1)]
+         [(number? v) v]
+         [(hash-ref consts-h v)]))
      (define the-check
        #`(λ (d)
             (and
-              ((bitvector 32) d)
-              (for/or ([v (list #,@c*)])
-                (bveq d (bv v 32))))))
-     (with-error the-check "enum"))
+              (list? d)
+              (<= (length d) #,max-len))
+            (for/and ([e d])
+              (#,stx e))))
+    (with-error the-check "variable-length array"))
 
-    ((struct ,p ,decl* ...)
-     (define type-check
-       #`(λ (d)
-            (#,(format-id ctx "~a?" (struct-name p)) d)))
-     (define struct-type-valid?
-       (with-error type-check (format "struct type ~a" (struct-name p))))
-     (define (field-valid? decl)
-       (nanopass-case
-         (L2 Decl)
-         decl
-         ((,i ,type-spec)
-          (define type-valid? (Spec type-spec))
-          (define accessor
-            (format-id ctx "~a-~a" (struct-name p) i))
-          #`(λ (d)
-               (#,type-valid? (#,accessor d))))
-         (,void (error "void struct member not supported"))))
+  ((fixed-length-array ,type-spec ,v)
+   (define len
+     (if (number? v) v (hash-ref consts-h v)))
+   (define the-check
      #`(λ (d)
           (and
-            (#,struct-type-valid? d)
-            #,@(for/list ([f decl*])
-                 #`(#,(field-valid? f) d)))))
+            (list? d)
+            (equal? (length d) #,v)
+            (for/and ([e d])
+              (#,(Spec type-spec) e)))))
+   (with-error the-check "fixed-length array"))
 
-    ((union ,p (,i1 ,i2) ,[case-test*] ...)
-     (define tag-getter
-       (if (equal? i2 "bool")
-         (format-id ctx "-optional-present")
-         (format-id ctx "~a-tag" (union-struct-name p))))
-     (define value-getter
-       (if (equal? i2 "bool")
-         (format-id ctx "-optional-value")
-         (format-id ctx "~a-value" (union-struct-name p))))
-     (define tag-valid?
-       (with-error #'(bitvector 32) "union tag"))
+  ((enum (,i* ,c*) ...)
+   (define the-check
      #`(λ (d)
           (and
-            (#,tag-valid? (#,tag-getter d))
-            (for/or ([c (list #,@case-test*)])
-              (c (#,tag-getter d) (#,value-getter d)))))))
+            ((bitvector 32) d)
+            (for/or ([v (list #,@c*)])
+              (bveq d (bv v 32))))))
+   (with-error the-check "enum"))
+
+  ((struct ,p ,decl* ...)
+   (define type-check
+     #`(λ (d)
+          (#,(format-id ctx "~a?" (struct-name p)) d)))
+   (define struct-type-valid?
+     (with-error type-check (format "struct type ~a" (struct-name p))))
+   (define (field-valid? decl)
+     (nanopass-case
+       (L2 Decl)
+       decl
+       ((,i ,type-spec)
+        (define type-valid? (Spec type-spec))
+        (define accessor
+          (format-id ctx "~a-~a" (struct-name p) i))
+        #`(λ (d)
+             (#,type-valid? (#,accessor d))))
+       (,void (error "void struct member not supported"))))
+   #`(λ (d)
+        (and
+          (#,struct-type-valid? d)
+          #,@(for/list ([f decl*])
+               #`(#,(field-valid? f) d)))))
+
+  ((union ,p (,i1 ,i2) ,[case-test*] ...)
+   (define tag-getter
+     (if (equal? i2 "bool")
+       (format-id ctx "-optional-present")
+       (format-id ctx "~a-tag" (struct-name p))))
+   (define value-getter
+     (if (equal? i2 "bool")
+       (format-id ctx "-optional-value")
+       (format-id ctx "~a-value" (struct-name p))))
+   (define tag-valid?
+     (with-error #'(bitvector 32) "union tag"))
+   #`(λ (d)
+        (and
+          (#,tag-valid? (#,tag-getter d))
+          (for/or ([c (list #,@case-test*)])
+            (c (#,tag-getter d) (#,value-getter d)))))))
 
   (Union-Case-Spec
     : Union-Case-Spec (t) -> * (stx)
@@ -891,7 +873,6 @@
   `((types . ,types-h)
     (consts . ,consts-h)))
 
-; this produces a syntax object
 (define/contract (make-racket-defs stx consts types ts)
   (-> syntax? hash? hash? (*list/c string?) syntax?)
   (define const-defs
@@ -995,20 +976,15 @@
     : Spec (ir) -> * (rule-thunk)
 
     [(,p ,i)
-     (define key (reverse p))
+     (define override-key (reverse p))
      (cond
        [(and
-          (dict-has-key? overrides key)
-          (eq? (car (dict-ref overrides key)) 'key-set))
-        (define vals
-          (map
-            (compose bitvector->natural strkey->bv)
-            (cdr (dict-ref overrides key))))
-        (define byte-arrays
-          (map
-            (λ (v) #`(#,(format-id stx "-byte-array") (bv #,v 256)))
-            vals))
-        (thunk #`(choose #,@byte-arrays))]
+          (dict-has-key? overrides override-key)
+          (eq? (car (dict-ref overrides override-key)) 'key-set))
+        (define pub-keys
+          (for/list ([k (cdr (dict-ref overrides override-key))])
+            #`(list #,@(strkey->byte-list k))))
+        (thunk #`(choose #,@pub-keys))]
        [else
          (case i
            [("opaque") (thunk #`(#,(format-id/unique-sloc "??" #'()) (bitvector 8)))]
@@ -1035,20 +1011,6 @@
          [else v]))
      (thunk (make-vector stx consts elem-rule-thunk len))]
 
-    [(fixed-length-array ,type-spec ,v)
-     ; special case for opaque fixed-length arrays: we use -byte-array
-     (guard
-       (nanopass-case
-         (L2 Spec)
-         type-spec
-         [(,p ,i) (equal? i "opaque")]
-         [else #f]))
-     (define n (size->number consts v))
-     (thunk
-       #`(
-          #,(format-id stx "-byte-array")
-          (#,(format-id/unique-sloc "??" #'()) (bitvector #,(* n 8)))))]
-
     [(fixed-length-array ,[elem-rule-thunk] ,v)
      (thunk (make-list stx consts elem-rule-thunk v))]
 
@@ -1062,7 +1024,7 @@
      (define the-struct
        (if (equal? i2 "bool")
          (format-id stx "-optional")
-         (format-id stx (union-struct-name p))))
+         (format-id stx (struct-name p))))
      (thunk
        (if (> (length thunk-1*) 1)
          #`(choose
